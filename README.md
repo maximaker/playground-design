@@ -173,16 +173,31 @@ HTML is the format models are most fluent in, so one tool covers what would othe
 to suspend it. Option-hover measures the distance from the selection to whatever is under the
 cursor. Right-click menu, and shortcuts that follow Figma (press `?` for the sheet).
 
-**Alignment.** A 3×3 pad aligns a container's contents, because the intent is spatial and the CSS is
-not: "top-left" means `justify-content` in a row and `align-items` in a column, and both invert under
-`row-reverse`. Getting that backwards is the classic flexbox papercut, so the panel maps it and the
-`stretch` default lights up the whole row it spans rather than showing nothing selected.
+**Alignment.** An align row sits at the top of the properties panel for every selection, grouped
+three horizontal and three vertical with distribute set apart. It is permanent on purpose: a control
+that appears only for a multi-selection cannot be reached for, because you have to find it first.
 
-Aligning a *selection* is two different operations wearing one word. Artboards and absolutely
-positioned layers move. Children in flex or grid flow cannot — the engine owns their position — so
-the honest reading of "align these left" is "make their container align its contents left", and that
-is what the bar does, saying which container it changed. Only a block parent has no answer; there the
-buttons are disabled and say why.
+Aligning is two different operations wearing one word. Artboards and absolutely positioned layers
+move — one on its own aligns inside its container, which is what "align this left" means when there
+is only one thing. Children in flex or grid flow cannot move: the engine owns their position, so the
+honest reading is "make their container align its contents left", and that is what the bar does,
+saying which container it changed. Only a block parent has no answer; there the buttons are disabled
+and say why.
+
+**Layout.** How a container lays out is four pictures — loose, stack, row, grid — not a `display`
+dropdown beside a `flex-direction` dropdown. That split is most of what makes flexbox feel like a
+puzzle rather than a choice, and one control settles it.
+
+Alongside it, a 3×3 pad for the contents, because the intent is spatial and the CSS is not:
+"top-left" means `justify-content` in a row and `align-items` in a column, and both invert under
+`row-reverse`. Each cell previews the result with three bars laid out the way the container actually
+lays out, so you can pick one without reading. `stretch` is the CSS default and has no cell, so a
+stretched axis lights up the whole row or column it spans rather than leaving nothing selected.
+
+The raw `display`, `flex-direction`, `align-items` and `justify-content` are still there, folded
+under a **CSS** disclosure — the premise of the tool is that you are editing CSS and should be able
+to see which declaration a control produced, but two controls for one property at equal weight is how
+a panel stops being readable.
 
 **Numeric fields.** Three ways to change a value, because different edits want different gestures:
 type it, hold ↑/↓ to walk it, or drag the handle to scrub. Shift steps by ten and Alt by a tenth

@@ -23,7 +23,6 @@ import {
   type Align, type StyleMap,
   DISTRIBUTIONS, alignmentStyles, contentAlignment, layoutMode,
 } from '@playground/shared';
-import { Icon } from './Icon.tsx';
 
 const CELLS: { horizontal: Align; vertical: Align }[] = [
   { horizontal: 'start', vertical: 'start' },
@@ -42,6 +41,14 @@ const NAMES: Record<Align, string> = {
 };
 const VERTICAL_NAMES: Record<Align, string> = {
   start: 'top', center: 'middle', end: 'bottom', stretch: 'stretch',
+};
+
+/** Cell previews use real flex values, so what you see is what gets written. */
+const JUSTIFY: Record<Align, string> = {
+  start: 'flex-start', center: 'center', end: 'flex-end', stretch: 'flex-start',
+};
+const ALIGN_ITEMS: Record<Align, string> = {
+  start: 'flex-start', center: 'center', end: 'flex-end', stretch: 'stretch',
 };
 
 const SPREAD: { value: string; label: string; title: string }[] = [
@@ -69,8 +76,7 @@ export function AlignPad({ styles, onChange }: {
   const spread = DISTRIBUTIONS.includes(justify) ? justify : null;
 
   return (
-    <div className="align-pad-wrap">
-      <div className="align-pad" role="group" aria-label="Align contents">
+    <div className="align-pad" role="group" aria-label="Align contents">
         {CELLS.map((cell) => {
           // A stretched axis matches every cell along it.
           const matches = (axis: Align, cellAxis: Align) => axis === 'stretch' || axis === cellAxis;
@@ -87,12 +93,50 @@ export function AlignPad({ styles, onChange }: {
               aria-pressed={active}
               onClick={() => onChange(alignmentStyles(styles, cell))}
             >
-              <span className="align-dot" />
+              {/*
+                * Three bars laid out the way the container actually lays out —
+                * vertical bars in a row, horizontal bars in a column — so the
+                * cell previews the result instead of representing it
+                * abstractly. A dot in a grid tells you where something goes; it
+                * does not tell you which way the content will run.
+                */}
+              <span
+                className="align-preview"
+                data-flow={mode === 'column' ? 'column' : 'row'}
+                style={{
+                  flexDirection: mode === 'column' ? 'column' : 'row',
+                  justifyContent: JUSTIFY[mode === 'column' ? cell.vertical : cell.horizontal],
+                  alignItems: ALIGN_ITEMS[mode === 'column' ? cell.horizontal : cell.vertical],
+                }}
+              >
+                <i /><i /><i />
+              </span>
             </button>
           );
         })}
-      </div>
+    </div>
+  );
+}
 
+/**
+ * Fill and Spread, which belong with the pad but not inside it.
+ *
+ * They are full-width rows beneath the pad rather than squeezed into its
+ * column: three labelled options do not fit in the width a square pad wants,
+ * and the result was "Between Around" clipped mid-word.
+ */
+export function AlignExtras({ styles, onChange }: {
+  styles: StyleMap;
+  onChange: (styles: StyleMap) => void;
+}) {
+  if (layoutMode(styles) === 'none') return null;
+
+  const current = contentAlignment(styles);
+  const justify = styles['justify-content'] ?? '';
+  const spread = DISTRIBUTIONS.includes(justify) ? justify : null;
+
+  return (
+    <div className="align-extras">
       <div className="align-spread">
         <span className="field-label">Fill</span>
         <div className="segmented">
@@ -135,21 +179,6 @@ export function AlignPad({ styles, onChange }: {
           ))}
         </div>
       </div>
-
-      {mode !== 'grid' && (
-        <button
-          className="button subtle full"
-          title="Swap the direction the contents flow in"
-          onClick={() => onChange({
-            'flex-direction': mode === 'row'
-              ? (styles['flex-direction'] ?? '').endsWith('-reverse') ? 'column-reverse' : 'column'
-              : (styles['flex-direction'] ?? '').endsWith('-reverse') ? 'row-reverse' : 'row',
-          })}
-        >
-          <Icon name={mode === 'row' ? 'arrowDown' : 'arrowRight'} size={12} />
-          Flow {mode === 'row' ? 'vertically' : 'horizontally'}
-        </button>
-      )}
     </div>
   );
 }

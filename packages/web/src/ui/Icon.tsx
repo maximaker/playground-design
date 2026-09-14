@@ -34,6 +34,14 @@ const PATHS = {
   // Angle brackets around a diamond: a component that is source code.
   codeComponent: 'M5.2 3.8 2.2 8l3 4.2M10.8 3.8 13.8 8l-3 4.2M8 5.9 9.8 8 8 10.1 6.2 8z',
 
+  // --- Layout modes ------------------------------------------------------
+  // Little diagrams of the resulting layout, not abstract marks: loose boxes,
+  // a stack, a row, a grid. You should be able to pick one without reading.
+  layoutNone: 'M3.4 3.4h4v3.4h-4zM9.4 6.2h3.2v3.2H9.4zM4.6 9.6h3.6v3H4.6z',
+  layoutColumn: 'M3.2 3h9.6v3.1H3.2zM3.2 7.6h9.6v3.1H3.2z',
+  layoutRow: 'M3 3.2v9.6h3.1V3.2zM7.6 3.2v9.6h3.1V3.2z',
+  layoutGrid: 'M3.2 3.2h4.2v4.2H3.2zM8.6 3.2h4.2v4.2H8.6zM3.2 8.6h4.2v4.2H3.2zM8.6 8.6h4.2v4.2H8.6z',
+
   // --- Panel controls ----------------------------------------------------
   chevronRight: 'm6.2 3.6 4.4 4.4-4.4 4.4',
   chevronDown: 'm3.6 6.2 4.4 4.4 4.4-4.4',

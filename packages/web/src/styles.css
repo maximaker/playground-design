@@ -622,18 +622,59 @@ code { font-family: var(--mono); font-size: 0.92em; }
 
 /* --- Align & distribute --------------------------------------------------- */
 
+/*
+ * The alignment row is permanent, so it is built to be scanned rather than
+ * hunted for: one flush segmented block at the top of the panel, sized to the
+ * same tap target as everything else, with the distribute pair set apart.
+ */
+.arrange-block {
+  padding: var(--s3) var(--s4);
+  border-bottom: 1px solid var(--border);
+}
+
+.arrange-label {
+  display: block;
+  margin-bottom: var(--s2);
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+  color: var(--fg-faint);
+}
+
 .arrange-bar {
-  display: flex; gap: 0.15rem; flex-wrap: wrap;
-  padding: var(--s3) var(--s4); border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 1px;
 }
 .arrange-bar button {
-  width: 2rem; height: 1.9rem; background: var(--bg-input); border: 1px solid var(--border);
-  border-radius: var(--radius-sm); color: var(--fg-muted); padding: 0;
-  display: grid; place-items: center;
+  flex: 1 1 0;
+  min-width: 0;
+  height: 2rem;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  color: var(--fg-muted);
+  padding: 0;
+  display: grid;
+  place-items: center;
+  transition: color var(--transition), background var(--transition);
 }
-.arrange-bar button:hover:not(:disabled) { color: var(--fg); border-color: var(--border-strong); }
-.arrange-bar button:disabled { opacity: .35; }
-.arrange-spacer { width: var(--s4); }
+/* One block, not eight buttons: only the ends of each group are rounded. */
+.arrange-bar button:first-child { border-radius: var(--radius-sm) 0 0 var(--radius-sm); }
+.arrange-bar button:last-child { border-radius: 0 var(--radius-sm) var(--radius-sm) 0; }
+.arrange-bar button + button { border-left-color: transparent; }
+
+/* The vertical trio and the distribute pair each start a fresh block. */
+.arrange-bar button.starts-group,
+.arrange-bar .arrange-spacer + button { border-radius: var(--radius-sm) 0 0 var(--radius-sm); border-left-color: var(--border); }
+.arrange-bar button:has(+ .starts-group),
+.arrange-bar button:has(+ .arrange-spacer) { border-radius: 0 var(--radius-sm) var(--radius-sm) 0; }
+
+.arrange-bar button:hover:not(:disabled) {
+  color: var(--fg); background: var(--bg-active); border-color: var(--border-strong);
+}
+.arrange-bar button:disabled { opacity: .3; }
+.arrange-spacer { width: var(--s3); flex: 0 0 auto; }
 
 /* --- Tokens, components, history ----------------------------------------- */
 
@@ -1332,8 +1373,6 @@ code { font-family: var(--mono); font-size: 0.92em; }
 
 /* Align pad ------------------------------------------------------------ */
 
-.align-pad-wrap { display: flex; flex-direction: column; gap: var(--s3); width: 100%; }
-
 .align-pad {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -1344,7 +1383,7 @@ code { font-family: var(--mono); font-size: 0.92em; }
   border-radius: var(--radius-sm);
   /* Square cells at any panel width, so the pad reads as a space, not a row. */
   aspect-ratio: 1;
-  max-width: 7.5rem;
+  max-width: 100%;
 }
 
 .align-pad button {
@@ -1361,16 +1400,88 @@ code { font-family: var(--mono); font-size: 0.92em; }
 .align-pad button:hover { background: var(--bg-hover); }
 .align-pad button.is-active { background: var(--accent); }
 
-.align-dot {
-  width: 0.45rem;
-  height: 0.45rem;
-  border-radius: 1px;
-  background: var(--fg-faint);
-  transition: background var(--transition), transform var(--transition);
+.align-preview {
+  display: flex;
+  gap: 1.5px;
+  width: 100%;
+  height: 100%;
+  padding: 3px;
 }
 
-.align-pad button:hover .align-dot { background: var(--fg-muted); }
-.align-pad button.is-active .align-dot { background: #fff; transform: scale(1.25); }
+/*
+ * Each bar is a stand-in for a child. They are short on the cross axis so that
+ * `stretch` is visibly different from the three positions rather than looking
+ * like another one of them.
+ */
+.align-preview i {
+  display: block;
+  border-radius: 1px;
+  background: var(--fg-faint);
+  transition: background var(--transition);
+}
 
-.align-spread { display: flex; flex-direction: column; gap: var(--s1); }
-.align-spread .segmented { width: 100%; }
+.align-pad button:hover .align-preview i { background: var(--fg-muted); }
+.align-pad button.is-active .align-preview i { background: #fff; }
+
+/* Row flow: upright bars of differing heights, as items in a row read. */
+.align-preview[data-flow="row"] i { width: 2px; height: 45%; }
+.align-preview[data-flow="row"] i:nth-child(2) { height: 70%; }
+.align-preview[data-flow="row"] i:nth-child(3) { height: 55%; }
+
+/* Column flow: lying-down bars. */
+.align-preview[data-flow="column"] i { height: 2px; width: 45%; }
+.align-preview[data-flow="column"] i:nth-child(2) { width: 70%; }
+.align-preview[data-flow="column"] i:nth-child(3) { width: 55%; }
+
+/*
+ * Each cell previews a *position*, so its bars are always short on the cross
+ * axis. Sizing them from the container's current cross alignment instead —
+ * which is what a first pass did — collapsed them to nothing, because a cell
+ * showing "top" aligns to flex-start and `height: auto` on an empty element is
+ * zero. `stretch` has no cell; the row highlight and the Fill toggle say it.
+ */
+
+.align-spread { display: flex; align-items: center; gap: var(--s3); }
+.align-spread .field-label { flex: 0 0 3.2rem; }
+.align-spread .segmented { flex: 1 1 auto; min-width: 0; }
+.align-spread .segmented button { flex: 1 1 0; min-width: 0; }
+
+/* Layout block: the pad beside its spacing, the way auto-layout reads ----- */
+
+.layout-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 6.5rem) minmax(0, 1fr);
+  gap: var(--s3) var(--s4);
+  align-items: start;
+  margin-bottom: var(--s3);
+}
+
+/* Fill and Spread need the full width; three labels do not fit a pad column. */
+.layout-grid .align-extras { grid-column: 1 / -1; display: flex; flex-direction: column; gap: var(--s3); }
+
+.layout-spacing { display: flex; flex-direction: column; gap: var(--s3); }
+.layout-spacing .field { margin: 0; }
+
+/* Below ~260px of panel the two columns stop being two columns. */
+@media (max-width: 22rem) {
+  .layout-grid { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* Folded-away raw CSS, under a control that says what it writes ---------- */
+
+.prop-advanced { margin-top: var(--s3); }
+
+.prop-advanced > summary {
+  cursor: pointer;
+  list-style: none;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+  color: var(--fg-faint);
+  padding: var(--s1) 0;
+}
+.prop-advanced > summary::-webkit-details-marker { display: none; }
+.prop-advanced > summary::before { content: '▸ '; }
+.prop-advanced[open] > summary::before { content: '▾ '; }
+.prop-advanced > summary:hover { color: var(--fg-muted); }

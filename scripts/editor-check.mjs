@@ -286,6 +286,60 @@ const artboardSpot = (fx, fy) => () => page.evaluate(([ax, ay]) => {
         JSON.stringify(styles));
     }
 
+    // The layout picker is one control for what CSS splits across display and
+    // flex-direction — the split that makes flexbox feel like a puzzle.
+    const layoutButtons = await page.$$('.prop-section .segmented button');
+    if (layoutButtons.length >= 4) {
+      await layoutButtons[2].click(); // Row
+      await page.waitForTimeout(400);
+      const asRow = await page.evaluate((id) => {
+        const n = window.__playground.store.getState().doc.nodes[id];
+        return { display: n.styles.display, direction: n.styles['flex-direction'] };
+      }, ids.frame);
+      check('one picker sets display and direction together',
+        asRow.display === 'flex' && asRow.direction === 'row', JSON.stringify(asRow));
+
+      // The pad's previews follow the flow, so a cell shows the result rather
+      // than an abstract position.
+      const flow = await page.evaluate(() =>
+        document.querySelector('.align-preview')?.dataset.flow);
+      check('the pad previews follow the flow direction', flow === 'row', String(flow));
+
+      const bar = await page.evaluate(() => {
+        const i = document.querySelector('.align-preview i');
+        const r = i?.getBoundingClientRect();
+        return r ? { w: Math.round(r.width), h: Math.round(r.height) } : null;
+      });
+      check('preview bars have a visible size', !!bar && bar.h > 2 && bar.w > 0, JSON.stringify(bar));
+
+      await layoutButtons[1].click(); // back to Stack
+      await page.waitForTimeout(400);
+    } else {
+      check('the layout picker is shown', false, `${layoutButtons.length} buttons`);
+    }
+
+    // A single layer aligns inside its container, so the row is useful with
+    // one thing selected rather than only with two.
+    await page.evaluate((child) => {
+      const s = window.__playground.store.getState();
+      s.setNodeStyles([child], { position: 'absolute', left: '40px', top: '20px' });
+      s.select([child]);
+    }, ids.children[0]);
+    await page.waitForTimeout(500);
+    const soloButtons = await page.$$('.arrange-bar button');
+    const soloEnabled = soloButtons.length ? await soloButtons[0].evaluate((b) => !b.disabled) : false;
+    check('one selected layer can still be aligned', soloEnabled);
+    if (soloEnabled) {
+      await soloButtons[0].click(); // align left, inside its container
+      await page.waitForTimeout(400);
+      const left = await page.evaluate((child) =>
+        window.__playground.store.getState().doc.nodes[child].styles.left, ids.children[0]);
+      check('it aligns to the container edge', left === '0px', `left: ${left}`);
+      await page.evaluate((child) => window.__playground.store.getState()
+        .setNodeStyles([child], { position: 'static', left: '', top: '' }), ids.children[0]);
+      await page.waitForTimeout(300);
+    }
+
     // Aligning a flow-laid-out selection targets the container that positions
     // them, rather than being disabled or silently doing nothing. Pin the
     // children into flow first: an absolutely positioned pair takes the other

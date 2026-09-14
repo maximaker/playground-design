@@ -39,7 +39,10 @@ export function ArrangeBar({ ids }: { ids: NodeId[] }) {
     const node = doc?.nodes[id];
     return node && (node.parent === null || node.styles.position === 'absolute' || node.styles.position === 'fixed');
   });
-  const canAlign = positionable.length >= 2;
+  // One positionable layer aligns inside its container; two or more align to
+  // each other. An artboard alone has no container, so it has nothing to do.
+  const single = positionable.length === 1 && doc?.nodes[positionable[0]!]?.parent != null;
+  const canAlign = positionable.length >= 2 || single;
   const canDistribute = positionable.length >= 3;
 
   // When everything selected shares one laid-out parent, aligning means
@@ -74,6 +77,10 @@ export function ArrangeBar({ ids }: { ids: NodeId[] }) {
     toast(`Aligned inside "${sharedParent.name}" — its layout positions these layers.`, 'info');
   };
 
+  const scope = canAlign && !viaContainer
+    ? (single ? 'inside its container' : 'to each other')
+    : viaContainer ? `inside "${sharedParent!.name}"` : '';
+
   const reason = canAlign || viaContainer
     ? undefined
     : sharedParent
@@ -82,11 +89,16 @@ export function ArrangeBar({ ids }: { ids: NodeId[] }) {
       : 'Alignment applies to artboards, absolutely-positioned layers, or siblings sharing one container.';
 
   return (
-    <div className="arrange-bar">
+    <div className="arrange-block">
+      <span className="arrange-label">Align</span>
+      <div className="arrange-bar">
       {ALIGNMENTS.map((a) => (
         <button
           key={a.kind}
-          title={reason ?? (viaContainer ? `${a.title} inside "${sharedParent!.name}"` : a.title)}
+          // Horizontal three, then vertical three: the two axes are separate
+          // decisions, so the row is grouped rather than a run of six.
+          className={a.kind === 'top' ? 'starts-group' : undefined}
+          title={reason ?? `${a.title} ${scope}`.trim()}
           disabled={!canAlign && !viaContainer}
           aria-label={a.title}
           onClick={() => {
@@ -118,6 +130,7 @@ export function ArrangeBar({ ids }: { ids: NodeId[] }) {
           }}
         ><Icon name={d.icon} size={14} /></button>
       ))}
+      </div>
     </div>
   );
 }

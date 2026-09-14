@@ -18,7 +18,7 @@ import { Field, NumberInput, Row, Section, SegmentedControl, Select, TextInput, 
 import { ArrangeBar } from '../ui/ArrangeBar.tsx';
 import { GradientEditor } from '../ui/GradientEditor.tsx';
 import { Icon } from '../ui/Icon.tsx';
-import { AlignPad } from '../ui/AlignPad.tsx';
+import { AlignExtras, AlignPad } from '../ui/AlignPad.tsx';
 
 const MIXED = '—'; // em dash: "these nodes disagree"
 
@@ -102,6 +102,20 @@ export function Properties() {
   const parent = first.parent ? doc?.nodes[first.parent] : undefined;
   const parentIsFlex = (parent?.styles.display ?? '').includes('flex');
 
+  // Base merged with the variant being edited: a variant that only overrides
+  // alignment still needs the base's direction to know which CSS property that
+  // alignment lands on.
+  const alignStyles = {
+    ...first.styles,
+    ...(activeVariant ? first.variants.find((v) => v.selector === activeVariant)?.styles ?? {} : {}),
+  };
+
+  // Which of the four layout pictures is currently true. `row` is flexbox's
+  // default direction, so a flex container with none set is still a row.
+  const layoutChoice = display === 'grid' ? 'grid'
+    : isFlex ? (isRow ? 'row' : 'column')
+    : 'none';
+
   const knownVariants = [...new Set(nodes.flatMap((n) => n.variants.map((v) => v.selector)))];
   const breakpoints = doc ? breakpointsOf(doc) : [];
 
@@ -129,11 +143,18 @@ export function Properties() {
         </div>
       )}
 
+      {/*
+        * Always present, not only for a multi-selection. Alignment is one of
+        * the two things people reach for constantly, and a control that
+        * appears and disappears cannot be reached for — you have to find it
+        * first. With one layer selected it aligns inside its container, which
+        * is what "align this left" means when there is only one thing.
+        */}
+      <ArrangeBar ids={nodes.map((n) => n.id)} />
+
       {nodes.length === 1 && first.type === 'code' && <CodeProps node={first} />}
 
       {instanceNode && instanceDef && <InstanceProps instanceId={resolved[0]!.targetId} def={instanceDef} node={instanceNode} />}
-
-      {nodes.length > 1 && <ArrangeBar ids={nodes.map((n) => n.id)} />}
 
       <div className="variant-bar" title="Which state or breakpoint you are editing">
         <button className={!activeVariant ? 'is-active' : ''} onClick={() => setActiveVariant(null)}>Base</button>
@@ -285,38 +306,75 @@ export function Properties() {
 
       {anyContainer && (
         <Section title="Layout">
+          {/*
+            * How the container lays out, as four pictures rather than a list of
+            * CSS keywords. "Stack" and "Row" are one property in CSS — display
+            * plus flex-direction — and splitting them across two dropdowns is
+            * the thing that makes flexbox feel like a puzzle rather than a
+            * choice. The dropdown is still here for the rarer values.
+            */}
           <Row>
-            <Field label="Display" prop="display">
-              <Select
-                value={display || 'block'}
-                options={['block', 'flex', 'inline-flex', 'grid', 'inline-block', 'none'].map((v) => ({ value: v, label: v }))}
-                onCommit={set('display')}
+            <Field label="Layout" prop="display / flex-direction" wide>
+              <SegmentedControl
+                value={layoutChoice}
+                options={[
+                  { value: 'none', label: <Icon name="layoutNone" size={15} />, title: 'No layout — children position themselves (display: block)' },
+                  { value: 'column', label: <Icon name="layoutColumn" size={15} />, title: 'Stack — children flow downwards' },
+                  { value: 'row', label: <Icon name="layoutRow" size={15} />, title: 'Row — children flow across' },
+                  { value: 'grid', label: <Icon name="layoutGrid" size={15} />, title: 'Grid' },
+                ]}
+                onCommit={(v) => write(
+                  v === 'none' ? { display: 'block', 'flex-direction': '' }
+                    : v === 'grid' ? { display: 'grid', 'flex-direction': '' }
+                    : { display: 'flex', 'flex-direction': v },
+                )}
               />
             </Field>
           </Row>
-
           {(isFlex || display === 'grid') && nodes.length === 1 && (
-            <Row>
+            <div className="layout-grid">
               <Field label="Align contents" prop="justify-content / align-items" wide>
-                <AlignPad
-                  // Base merged with the variant being edited: a variant that
-                  // only overrides alignment still needs the base's direction
-                  // to know which CSS property that alignment lands on.
-                  styles={{
-                    ...first.styles,
-                    ...(activeVariant
-                      ? first.variants.find((v) => v.selector === activeVariant)?.styles ?? {}
-                      : {}),
-                  }}
-                  onChange={(styles) => write(styles)}
-                />
+                <AlignPad styles={alignStyles} onChange={(styles) => write(styles)} />
               </Field>
-            </Row>
+              <div className="layout-spacing">
+                <Field label="Gap" prop="gap" wide>
+                  <NumberInput value={read('gap')} onCommit={set('gap')} min={0} />
+                </Field>
+                <Field label="Padding" prop="padding" wide>
+                  <TextInput value={read('padding')} placeholder="16px or 8px 16px" onCommit={set('padding')} mono />
+                </Field>
+                {isFlex && (
+                  <Field label="Wrap" prop="flex-wrap" wide>
+                    <SegmentedControl
+                      value={read('flex-wrap') || 'nowrap'}
+                      options={[{ value: 'nowrap', label: 'No wrap' }, { value: 'wrap', label: 'Wrap' }]}
+                      onCommit={set('flex-wrap')}
+                    />
+                  </Field>
+                )}
+              </div>
+              <AlignExtras styles={alignStyles} onChange={(styles) => write(styles)} />
+            </div>
           )}
 
-          {isFlex && (
-            <>
-              <Row>
+          {/*
+            * The controls above write these. They stay reachable because the
+            * premise of the tool is that you are editing CSS and should be able
+            * to see which declaration a control produced — but folded away,
+            * because two controls for one property at equal weight is how a
+            * panel stops being readable.
+            */}
+          <details className="prop-advanced">
+            <summary>CSS</summary>
+            <Row>
+              <Field label="Display" prop="display">
+                <Select
+                  value={display || 'block'}
+                  options={['block', 'flex', 'inline-flex', 'grid', 'inline-block', 'none'].map((v) => ({ value: v, label: v }))}
+                  onCommit={set('display')}
+                />
+              </Field>
+              {isFlex && (
                 <Field label="Direction" prop="flex-direction">
                   <SegmentedControl
                     value={read('flex-direction') || 'row'}
@@ -329,7 +387,9 @@ export function Properties() {
                     onCommit={set('flex-direction')}
                   />
                 </Field>
-              </Row>
+              )}
+            </Row>
+            {isFlex && (
               <Row>
                 <Field label={isRow ? 'Vertical' : 'Horizontal'} prop="align-items">
                   <Select
@@ -346,20 +406,8 @@ export function Properties() {
                   />
                 </Field>
               </Row>
-              <Row>
-                <Field label="Gap" prop="gap">
-                  <NumberInput value={read('gap')} onCommit={set('gap')} min={0} />
-                </Field>
-                <Field label="Wrap" prop="flex-wrap">
-                  <SegmentedControl
-                    value={read('flex-wrap') || 'nowrap'}
-                    options={[{ value: 'nowrap', label: 'No' }, { value: 'wrap', label: 'Wrap' }]}
-                    onCommit={set('flex-wrap')}
-                  />
-                </Field>
-              </Row>
-            </>
-          )}
+            )}
+          </details>
 
           {display === 'grid' && (
             <Row>
@@ -369,11 +417,15 @@ export function Properties() {
             </Row>
           )}
 
-          <Row>
-            <Field label="Padding" prop="padding" wide>
-              <TextInput value={read('padding')} placeholder="16px or 8px 16px" onCommit={set('padding')} mono />
-            </Field>
-          </Row>
+          {/* Padding sits beside the pad for a flex or grid container; for
+              anything else this is the only place it appears. */}
+          {!((isFlex || display === 'grid') && nodes.length === 1) && (
+            <Row>
+              <Field label="Padding" prop="padding" wide>
+                <TextInput value={read('padding')} placeholder="16px or 8px 16px" onCommit={set('padding')} mono />
+              </Field>
+            </Row>
+          )}
         </Section>
       )}
 

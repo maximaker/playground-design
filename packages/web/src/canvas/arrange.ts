@@ -12,7 +12,7 @@ import {
   type CanvasDocument, type NodeId, type Op,
   getArtboardPosition, getArtboardSize,
 } from '@playground/shared';
-import { nodeInnerRect, nodeRect } from './registry.ts';
+import { nodeInnerRect } from './registry.ts';
 import { parsePx } from './styles.ts';
 
 export type AlignKind = 'left' | 'center-x' | 'right' | 'top' | 'center-y' | 'bottom';
@@ -88,12 +88,19 @@ function toOps(items: Positionable[], next: Map<NodeId, { left: number; top: num
 
 export function align(doc: CanvasDocument, ids: NodeId[], kind: AlignKind): ArrangeResult {
   const { items, skipped } = positionables(doc, ids);
-  if (items.length < 2) return { ops: [], skipped };
+  if (items.length === 0) return { ops: [], skipped };
 
-  const minLeft = Math.min(...items.map((i) => i.left));
-  const maxRight = Math.max(...items.map((i) => i.left + i.width));
-  const minTop = Math.min(...items.map((i) => i.top));
-  const maxBottom = Math.max(...items.map((i) => i.top + i.height));
+  // One item has no bounding box of its own to align against, so it aligns
+  // inside its container — which is what "align this left" means when there is
+  // only one thing selected, and what every other design tool does.
+  const bounds = items.length === 1 ? containerBounds(doc, items[0]!) : null;
+
+  const minLeft = bounds ? bounds.left : Math.min(...items.map((i) => i.left));
+  const maxRight = bounds ? bounds.left + bounds.width : Math.max(...items.map((i) => i.left + i.width));
+  const minTop = bounds ? bounds.top : Math.min(...items.map((i) => i.top));
+  const maxBottom = bounds ? bounds.top + bounds.height : Math.max(...items.map((i) => i.top + i.height));
+
+  if (items.length === 1 && !bounds) return { ops: [], skipped };
   const midX = (minLeft + maxRight) / 2;
   const midY = (minTop + maxBottom) / 2;
 
@@ -112,6 +119,26 @@ export function align(doc: CanvasDocument, ids: NodeId[], kind: AlignKind): Arra
   }
 
   return { ops: toOps(items, next), skipped };
+}
+
+/**
+ * The box a single item aligns inside.
+ *
+ * For an absolutely positioned child that is its parent's padding box, in the
+ * parent's own coordinates — which is exactly what `left` and `top` are
+ * relative to, so no conversion is needed. An artboard has no container, so it
+ * has nothing to align against and says so by returning null.
+ */
+function containerBounds(doc: CanvasDocument, item: Positionable): { left: number; top: number; width: number; height: number } | null {
+  if (item.kind === 'artboard') return null;
+  const node = doc.nodes[item.id];
+  const parentId = node?.parent;
+  if (!parentId) return null;
+  // `nodeInnerRect`, not `nodeRect`: `left`/`top` are CSS pixels inside the
+  // artboard, and the screen-space rect is scaled by the canvas zoom.
+  const rect = nodeInnerRect(parentId);
+  if (!rect) return null;
+  return { left: 0, top: 0, width: rect.width, height: rect.height };
 }
 
 export function distribute(doc: CanvasDocument, ids: NodeId[], kind: DistributeKind): ArrangeResult {
