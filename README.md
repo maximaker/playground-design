@@ -2,6 +2,8 @@
 
 A design tool whose documents are real HTML and CSS — and that coding agents can edit alongside you.
 
+**Live:** <https://playground-design-theta.vercel.app> · **Source:** <https://github.com/maximaker/playground-design>
+
 Draw on an infinite canvas with direct manipulation. Every element is a real DOM node with real
 computed styles, real flexbox, real font rendering. There is no export step that translates a
 proprietary scene graph into code: the design already *is* the code.
@@ -41,6 +43,9 @@ Open a document, click **Connect agent**, generate a code, and run the line it g
 ```bash
 claude mcp add playground --transport http http://localhost:4000/mcp/YOUR-CODE-HERE
 ```
+
+The hosted version works the same way — its codes point at
+`https://playground-design-theta.vercel.app/mcp/…`.
 
 Then ask your agent to *"describe what's on the Canvas artboard"* — or just *"build me a pricing
 page"*. Setup snippets for Claude Desktop, Cursor and VS Code are in the same panel.
