@@ -24,6 +24,25 @@ export interface PeerInfo {
   cursor?: { x: number; y: number }; pageId?: string;
 }
 
+/** The half of a peer that changes constantly. */
+export interface PeerCursor {
+  clientId: string; name: string; color: string;
+  kind: 'human' | 'agent';
+  cursor?: { x: number; y: number };
+  pageId?: string;
+}
+
+/** Everything about a peer except where their pointer is this instant. */
+function sameIdentity(a: PeerInfo[], b: PeerInfo[]): boolean {
+  if (a.length !== b.length) return false;
+  return a.every((p, i) => {
+    const q = b[i]!;
+    return p.clientId === q.clientId && p.name === q.name && p.color === q.color
+      && p.pageId === q.pageId && p.selection.length === q.selection.length
+      && p.selection.every((id, j) => id === q.selection[j]);
+  });
+}
+
 export interface AgentActivity {
   active: boolean;
   agent: string;
@@ -60,6 +79,10 @@ interface CanvasState {
    * to be taken back.
    */
   readOnly: boolean;
+  /** This tab's pointer in world coordinates, broadcast to peers. */
+  pointer: { x: number; y: number } | null;
+  /** Peers again, but the fast-moving half — see `setPeers`. */
+  peerCursors: PeerCursor[];
   doc: CanvasDocument | null;
   version: number;
   /**
@@ -124,6 +147,7 @@ interface CanvasActions {
   setFatalError(message: string | null): void;
   setReadOnly(readOnly: boolean): void;
   setPeers(p: PeerInfo[]): void;
+  setPointer(pointer: { x: number; y: number } | null): void;
   setSend(fn: CanvasState['send']): void;
 
   /** Applies ops locally, pushes undo, and sends them to the server. */
@@ -244,6 +268,8 @@ function pushEntry(stack: UndoEntry[], entry: UndoEntry): UndoEntry[] {
 export const useCanvas = create<CanvasState & CanvasActions>((set, get) => ({
   docId: null,
   readOnly: false,
+  pointer: null,
+  peerCursors: [],
   doc: null,
   version: 0,
   nodeVersions: {},
@@ -286,7 +312,39 @@ export const useCanvas = create<CanvasState & CanvasActions>((set, get) => ({
   setTransport(transport) { set({ transport }); },
   setFatalError(fatalError) { set({ fatalError }); },
   setReadOnly(readOnly) { set({ readOnly }); },
-  setPeers(peers) { set({ peers: peers.filter((p) => p.clientId !== get().clientId) }); },
+  /**
+   * Peers arrive as one list, but it is split into two slices deliberately.
+   *
+   * A cursor moves twenty times a second; a selection changes on a click. The
+   * overlay measures a rect per selected node, and measuring inside an artboard
+   * iframe forces that document to lay out — so letting cursor churn invalidate
+   * the selection slice would put the editor into permanent layout thrash the
+   * moment a second person joined. `peers` is replaced only when the parts that
+   * cost something to render actually change.
+   */
+  setPeers(incoming) {
+    const peers = incoming.filter((p) => p.clientId !== get().clientId);
+    set({ peerCursors: peers.map((p) => ({
+      clientId: p.clientId, name: p.name, color: p.color, kind: p.kind,
+      cursor: p.cursor, pageId: p.pageId,
+    })) });
+    if (!sameIdentity(get().peers, peers)) set({ peers });
+  },
+
+  /**
+   * This tab's pointer, in canvas world coordinates rather than screen ones.
+   *
+   * Everyone is at a different zoom and scroll position, so a screen point is
+   * meaningless to a peer — sending it would put their cursor somewhere else on
+   * the design. World coordinates are the only shared frame of reference.
+   */
+  setPointer(pointer) {
+    // Kept out of `set` when unchanged: pointermove fires constantly and every
+    // set here would re-render every subscriber.
+    const prev = get().pointer;
+    if (prev?.x === pointer?.x && prev?.y === pointer?.y) return;
+    set({ pointer });
+  },
   setSend(send) { set({ send }); },
 
   dispatch(ops, opts) {

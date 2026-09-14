@@ -92,7 +92,10 @@ export function attachRealtime(server: Server): WebSocketServer {
         case 'presence': {
           if (!session) return;
           if (Array.isArray(msg.selection)) session.peer.selection = msg.selection as string[];
-          if (msg.cursor) session.peer.cursor = msg.cursor as { x: number; y: number };
+          // Assigned unconditionally: leaving the canvas sends no cursor, and
+          // only overwriting on a truthy value would leave the last position
+          // parked on everyone else's screen forever.
+          session.peer.cursor = (msg.cursor as { x: number; y: number } | undefined) ?? undefined;
           if (typeof msg.pageId === 'string') session.peer.pageId = msg.pageId;
           broadcastPeers(session.docId);
           break;

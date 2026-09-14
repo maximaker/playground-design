@@ -14,6 +14,7 @@ import { artboardOf } from '@playground/shared';
 import { Artboard } from './Artboard.tsx';
 import { NoteCard } from './NoteCard.tsx';
 import { Overlay } from './Overlay.tsx';
+import { PeerCursors } from './PeerCursors.tsx';
 import { hitTest, nodeRect } from './registry.ts';
 import {
   type DropTarget, type Handle, type ResizeStart,
@@ -51,6 +52,7 @@ export function Canvas({ onContextMenu }: CanvasProps) {
   const select = useCanvas((s) => s.select);
   const setHovered = useCanvas((s) => s.setHovered);
   const setMeasureTo = useCanvas((s) => s.setMeasureTo);
+  const setPointer = useCanvas((s) => s.setPointer);
   const setEditingText = useCanvas((s) => s.setEditingText);
   const dispatch = useCanvas((s) => s.dispatch);
 
@@ -357,6 +359,15 @@ export function Canvas({ onContextMenu }: CanvasProps) {
     if (!doc) return;
     const d = drag.current;
     const vp = useCanvas.getState().viewport;
+
+    // Broadcast position in world coordinates, so a peer at a different zoom
+    // sees the cursor over the same part of the design rather than the same
+    // part of their screen. Rounded because sub-pixel precision is invisible
+    // and would make every frame a change worth sending.
+    setPointer({
+      x: Math.round((e.clientX - vp.x) / vp.zoom),
+      y: Math.round((e.clientY - vp.y) / vp.zoom),
+    });
 
     if (d.kind === 'none') {
       const { clientX, clientY, altKey } = e;
@@ -704,7 +715,7 @@ export function Canvas({ onContextMenu }: CanvasProps) {
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
-      onPointerLeave={() => { setHovered(null); setMeasureTo(null); }}
+      onPointerLeave={() => { setHovered(null); setMeasureTo(null); setPointer(null); }}
       onContextMenu={(e) => {
         e.preventDefault();
         const hit = hitTest(e.clientX, e.clientY);
@@ -733,6 +744,8 @@ export function Canvas({ onContextMenu }: CanvasProps) {
       </div>
 
       <Overlay version={structureVersion} dropTarget={dropTarget} guides={guides} live={dragging} />
+
+      <div className="peer-cursors"><PeerCursors /></div>
 
       {marquee && <div className="marquee" style={marquee} />}
       {drawPreview && <div className="draw-preview" style={drawPreview} />}

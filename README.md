@@ -205,6 +205,16 @@ throughout. Typing `+8`, `-4`, `*2` or `/2` applies to what the field already ho
 preserved — stepping `2rem` gives `3rem`, not `3px`. A whole gesture folds into one undo step, so a
 two-second scrub does not bury everything before it under ninety entries.
 
+**Live cursors.** Other people's pointers, labelled and in their colour. Positions travel in *world*
+coordinates rather than screen ones, because everyone is at a different zoom and scroll position —
+send a screen point and the cursor still appears, just over the wrong part of the design, which is
+the version that looks like it works. Movement between updates is CSS, not JavaScript interpolation.
+
+Peers arrive as one list and are split into two store slices on purpose: a cursor moves twenty times
+a second, a selection changes on a click, and the overlay measures a rect per selected node — which
+forces an artboard iframe to lay out. Letting cursor churn invalidate the selection slice would put
+the editor into permanent layout thrash the moment a second person joined.
+
 **Prompt cards.** Sticky notes that live next to the thing they are about. Write what you want
 changed, attach the layers it concerns, and hand it to an agent: it claims the card, does the work,
 and the answer comes back on the card. This is pen.dev's framing — an agent workspace rather than a

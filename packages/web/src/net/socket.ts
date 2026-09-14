@@ -237,10 +237,33 @@ export function connectDocument(source: Source): Connection {
     if (state.selection === prev.selection && state.pageId === prev.pageId) return;
     clearTimeout(presenceTimer);
     presenceTimer = window.setTimeout(
-      () => send({ type: 'presence', selection: state.selection, pageId: state.pageId }),
+      () => send({
+        type: 'presence',
+        selection: state.selection,
+        pageId: state.pageId,
+        cursor: state.pointer ?? undefined,
+      }),
       80,
     );
   });
+
+  /**
+   * The pointer is broadcast on its own clock.
+   *
+   * It moves orders of magnitude more often than a selection changes, and a
+   * debounce would either make the cursor lag behind the hand or flood the
+   * socket. A fixed interval that only sends when the position actually changed
+   * gives a steady, small stream — 20/s is past the point where a remote cursor
+   * reads as smooth, and CSS interpolates the gaps at the other end.
+   */
+  let lastSent: { x: number; y: number } | null = null;
+  const cursorTimer = window.setInterval(() => {
+    const state = store.getState();
+    const p = state.pointer;
+    if (p?.x === lastSent?.x && p?.y === lastSent?.y) return;
+    lastSent = p;
+    send({ type: 'presence', selection: state.selection, pageId: state.pageId, cursor: p ?? undefined });
+  }, 50);
 
   open();
   // If the socket has not opened by now, this host probably cannot hold one.
@@ -252,6 +275,7 @@ export function connectDocument(source: Source): Connection {
     close() {
       closed = true;
       unsubscribe();
+      clearInterval(cursorTimer);
       clearTimeout(presenceTimer);
       clearTimeout(pollTimer);
       clearTimeout(graceTimer);
