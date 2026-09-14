@@ -981,8 +981,146 @@ code { font-family: var(--mono); font-size: 0.92em; }
 .settings-scale input[type='range'] { flex: 1; accent-color: var(--accent); min-width: 0; }
 .settings-scale output { font-size: 0.8rem; color: var(--fg-muted); width: 3rem; text-align: right; font-variant-numeric: tabular-nums; }
 
-@media (max-width: 1100px) {
-  :root { --rail: 16rem; --rail-right: 18rem; }
+/* --- Responsive ----------------------------------------------------------
+ *
+ * Three columns rarely fit. Above `compact` the panels are docked; below it
+ * they become overlay drawers so the canvas keeps the full width, and below
+ * `narrow` the chrome condenses to icons. Breakpoints match useLayout.ts.
+ */
+
+.rail-scrim {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.35);
+  z-index: 24;
+  animation: fade-in 120ms ease;
+}
+@keyframes fade-in { from { opacity: 0; } }
+
+.panel-toggle.is-active { color: var(--accent); background: var(--accent-soft); }
+
+.overflow-anchor { position: relative; display: inline-flex; }
+.overflow-menu {
+  position: absolute; top: calc(100% + 0.3rem); right: 0; z-index: 95;
+  min-width: 13rem; padding: 0.25rem;
+  background: var(--bg-raised); border: 1px solid var(--border-strong);
+  border-radius: var(--radius); box-shadow: var(--shadow-lg);
+}
+.overflow-menu .context-item span { display: inline-flex; align-items: center; gap: var(--s3); }
+.button-label { display: inline; }
+
+@media (max-width: 1200px) {
+  :root { --rail: 17rem; --rail-right: 19rem; }
+}
+
+@media (max-width: 1024px) {
+  .workspace { position: relative; }
+
+  /* Drawers: laid over the canvas, not squeezed beside it. */
+  .rail {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    z-index: 25;
+    box-shadow: var(--shadow-lg);
+    transition: transform var(--transition);
+    width: min(20rem, 82vw);
+  }
+  .rail-left { left: 0; transform: translateX(-102%); }
+  .rail-right { right: 0; transform: translateX(102%); }
+  .rail.is-open { transform: translateX(0); }
+
+  /* A closed drawer must not be reachable by keyboard or pointer. */
+  .rail:not(.is-open) { pointer-events: none; }
+
+  /* The toolbar floats over the canvas, so it has to sit under an open drawer
+     rather than on top of it. */
+  .toolbar { z-index: 20; }
+}
+
+@media (max-width: 700px) {
+  :root {
+    --topbar: 3rem;
+    --s5: 1rem;
+    --s6: 1.4rem;
+  }
+
+  /* Labels go; every top-bar control keeps its tooltip and aria-label. */
+  .button-label { display: none; }
+  .button { padding: 0.35rem var(--s3); }
+  .doc-name { min-width: 0; flex: 1 1 4rem; max-width: none; }
+  .topbar { gap: 0.15rem; padding: 0 var(--s2); }
+  .topbar-divider { display: none; }
+  .conn-status { font-size: 0; padding: 0.3rem; gap: 0; }
+  .conn-status::before { width: 0.5rem; height: 0.5rem; }
+  .peers { display: none; }
+
+  .rail { width: min(22rem, 92vw); }
+
+  /* Eight tools plus the zoom readout have to fit 360px without clipping. */
+  .toolbar {
+    bottom: var(--s3);
+    max-width: calc(100vw - 2 * var(--s3));
+    overflow-x: auto;
+    scrollbar-width: none;
+    justify-content: flex-start;
+    padding: 0.2rem;
+  }
+  .toolbar::-webkit-scrollbar { display: none; }
+  .toolbar button { width: 2.4rem; height: 2.4rem; }
+  .zoom-pill {
+    position: absolute; right: var(--s3); bottom: calc(var(--s3) + 3.6rem);
+    z-index: 20; min-width: 40px; min-height: 32px; padding: 0 var(--s3);
+    background: var(--bg-raised); border: 1px solid var(--border);
+    border-radius: 99px; box-shadow: var(--shadow); color: var(--fg-muted);
+    font-size: 0.8rem; font-variant-numeric: tabular-nums;
+  }
+
+  /* Modals become sheets: a centred 40rem dialog does not exist here. */
+  .modal-backdrop { padding: 0; align-items: flex-end; }
+  .modal, .modal.is-wide {
+    width: 100%;
+    max-width: 100%;
+    max-height: 92vh;
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    border-bottom: 0;
+  }
+  .modal-body { padding: var(--s4); }
+  .modal-header { padding: var(--s4); }
+  .shortcut-grid { grid-template-columns: 1fr; }
+
+  .settings-popover { width: min(20rem, calc(100vw - 2 * var(--s3))); }
+  .context-menu { min-width: 13rem; }
+
+  .home { padding: var(--s5) var(--s4) var(--s6); }
+  .starter-grid, .home-grid { grid-template-columns: repeat(auto-fill, minmax(12rem, 1fr)); }
+  .home-card .button { opacity: 1; }
+  .toasts { left: var(--s3); right: var(--s3); bottom: 5rem; }
+  .toast { max-width: none; }
+}
+
+/* Coarse pointers need larger targets than a mouse does.
+ *
+ * The floors are in px rather than rem on purpose: a finger does not get
+ * smaller when someone picks a denser interface scale. */
+@media (pointer: coarse) {
+  .layer-row { height: 2.6rem; }
+  .layer-toggle { opacity: .7; padding: 0.4rem; }
+  .segmented button { min-height: 2.2rem; }
+  .overlay-handle { width: 0.95rem; height: 0.95rem; margin: -0.475rem 0 0 -0.475rem; }
+  .context-item { padding: 0.5rem var(--s3); }
+
+  .icon-button,
+  .topbar .button,
+  .topbar .logo,
+  .toolbar button {
+    min-width: 40px;
+    min-height: 40px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .topbar { gap: 0.1rem; }
 }
 
 @media (prefers-reduced-motion: reduce) {

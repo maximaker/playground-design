@@ -14,14 +14,18 @@ const TOOLS: { tool: Tool; icon: IconName; key: string; title: string }[] = [
   { tool: 'note', icon: 'note', key: 'N', title: 'Prompt card — leave a note or ask an agent' },
 ];
 
-export function Toolbar() {
+export function Toolbar({ compact }: { compact?: boolean }) {
   const tool = useCanvas((s) => s.tool);
   const setTool = useCanvas((s) => s.setTool);
   const zoom = useCanvas((s) => s.viewport.zoom);
   const setViewport = useCanvas((s) => s.setViewport);
 
+  // On a phone, eight 40px tap targets plus a zoom control do not fit the
+  // width. The tools keep their size — shrinking them below a fingertip would
+  // be the wrong trade — and zoom moves to its own pill.
   return (
-    <div className="toolbar">
+    <>
+    <div className={`toolbar${compact ? ' is-compact' : ''}`}>
       {TOOLS.map((t) => (
         <button
           key={t.tool}
@@ -34,16 +38,32 @@ export function Toolbar() {
           <Icon name={t.icon} size={16} />
         </button>
       ))}
-      <span className="toolbar-divider" />
+      {!compact && <span className="toolbar-divider" />}
+      {!compact && (
       <button title="Zoom out" aria-label="Zoom out" onClick={() => setViewport({ zoom: Math.max(0.02, zoom / 1.25) })}>
         <Icon name="minus" size={16} />
       </button>
-      <button className="zoom-readout" title="Reset zoom" onClick={() => setViewport({ zoom: 1 })}>
-        {Math.round(zoom * 100)}%
-      </button>
+      )}
+      {!compact && (
+        <button className="zoom-readout" title="Reset zoom" onClick={() => setViewport({ zoom: 1 })}>
+          {Math.round(zoom * 100)}%
+        </button>
+      )}
+      {!compact && (
       <button title="Zoom in" aria-label="Zoom in" onClick={() => setViewport({ zoom: Math.min(8, zoom * 1.25) })}>
         <Icon name="plus" size={16} />
       </button>
+      )}
     </div>
+
+    {compact && (
+      <button
+        className="zoom-pill"
+        title="Reset zoom to 100%"
+        aria-label={`Zoom ${Math.round(zoom * 100)} percent. Tap to reset.`}
+        onClick={() => setViewport({ zoom: 1 })}
+      >{Math.round(zoom * 100)}%</button>
+    )}
+    </>
   );
 }

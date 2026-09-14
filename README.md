@@ -160,6 +160,12 @@ content. Detach bakes everything in and drops the link.
 control from browser zoom, because browser zoom scales the canvas too — and the canvas has to stay at
 its true size while you design.
 
+**Responsive.** Three columns rarely fit. Above 1024px the panels are docked; below it they become
+overlay drawers so the canvas keeps the full width; below 700px the chrome condenses to icons and
+secondary actions move into a menu. On touch, tap targets get a 40px floor in pixels rather than rem —
+a finger does not get smaller when you pick a denser interface scale — and the canvas supports pinch
+to zoom and two-finger pan.
+
 **Import from a URL.** Fetches a page and its stylesheets and parses them into layers. This is the
 thing an HTML-native model can do that a vector tool cannot — it is not a conversion, it is the same
 kind of document. SSRF-guarded: private and loopback addresses are refused, redirects bounded,
@@ -264,6 +270,16 @@ It drives a real Chromium and prints an idle baseline next to each gesture, so
 the numbers validate themselves: if idle is not ~16.7ms, the run was throttled
 and the rest should be ignored. On a 998-node document with three live
 artboards, idle, dragging and panning all sit at 60fps.
+
+Layout across viewports has its own check too:
+
+```bash
+node scripts/responsive-check.mjs
+```
+
+It loads the editor at seven widths from 1680px down to 360px and fails on
+horizontal overflow, controls pushed off-screen, drawers that will not open, and
+tap targets below 32px on a coarse pointer.
 
 - `packages/shared` — model, ops and their inverses, CSS/HTML parsing, JSX and Tailwind emission,
   snapping geometry, gradient parsing, component expansion

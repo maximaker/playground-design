@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useCanvas } from './state/store.ts';
 import { connectDocument } from './net/socket.ts';
 import { useKeyboard } from './hooks/useKeyboard.ts';
+import { useLayoutMode, panelsOverlay } from './hooks/useLayout.ts';
 import { useClipboard } from './hooks/useClipboard.ts';
 import { Canvas } from './canvas/Canvas.tsx';
 import { Layers } from './panels/Layers.tsx';
@@ -20,6 +21,7 @@ import { Shortcuts } from './ui/Shortcuts.tsx';
 import { Icon, type IconName } from './ui/Icon.tsx';
 import { Logo } from './ui/Logo.tsx';
 import { Settings } from './ui/Settings.tsx';
+import { OverflowMenu } from './ui/OverflowMenu.tsx';
 import { ScrollArea } from './ui/ScrollArea.tsx';
 import {
   type Appearance, applyAppearance, loadAppearance, saveAppearance, watchSystemTheme,
@@ -76,6 +78,14 @@ export function App() {
   );
 }
 
+/**
+ * Keeps a closed drawer out of the tab order and away from screen readers.
+ * `inert` is not in React 18's prop types yet, hence the cast.
+ */
+function hiddenWhenClosed(open: boolean): Record<string, unknown> {
+  return open ? {} : { inert: '', 'aria-hidden': true };
+}
+
 function docIdFromLocation(): string | null {
   const m = /^\/d\/([\w-]+)/.exec(location.pathname);
   return m ? m[1]! : null;
@@ -102,6 +112,20 @@ function Editor({ docId, onHome, appearance, onAppearance }: {
   const [modal, setModal] = useState<'connect' | 'export' | 'import' | 'shortcuts' | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [showSettings, setShowSettings] = useState(false);
+  const [showOverflow, setShowOverflow] = useState(false);
+
+  const mode = useLayoutMode();
+  const overlay = panelsOverlay(mode);
+  // Docked panels are always open; overlay panels start closed so the canvas
+  // gets the whole screen, which is the point of the narrow layouts.
+  const [openPanel, setOpenPanel] = useState<'left' | 'right' | null>(null);
+  const leftOpen = !overlay || openPanel === 'left';
+  const rightOpen = !overlay || openPanel === 'right';
+
+  // Selecting something on the canvas is a request to see the canvas.
+  useEffect(() => {
+    if (overlay) setOpenPanel(null);
+  }, [overlay]);
 
   useKeyboard(() => setModal('export'), () => setModal('shortcuts'));
   useClipboard();
@@ -130,14 +154,25 @@ function Editor({ docId, onHome, appearance, onAppearance }: {
   }
 
   return (
-    <div className="app">
+    <div className={`app is-${mode}`}>
       <header className="topbar">
-        <button className="logo" onClick={onHome} title="All documents">
-          <Logo size={17} />
+        <button className="logo" onClick={onHome} title="All documents" aria-label="All documents">
+          <Logo size={17} variant={mode === 'narrow' ? 'mark' : 'full'} />
         </button>
+
+        {overlay && (
+          <button
+            className={`icon-button panel-toggle${openPanel === 'left' ? ' is-active' : ''}`}
+            title="Layers, components and tokens"
+            aria-label="Toggle the left panel"
+            aria-expanded={openPanel === 'left'}
+            onClick={() => setOpenPanel((p) => (p === 'left' ? null : 'left'))}
+          ><Icon name="layers" size={16} /></button>
+        )}
 
         <input
           className="doc-name"
+          aria-label="Document name"
           key={`${doc.id}-${version}`}
           defaultValue={doc.name}
           onBlur={(e) => {
@@ -159,43 +194,72 @@ function Editor({ docId, onHome, appearance, onAppearance }: {
           </div>
         )}
 
-        <button
-          className="icon-button"
-          title="Keyboard shortcuts (?)"
-          aria-label="Keyboard shortcuts"
-          onClick={() => setModal('shortcuts')}
-        ><Icon name="keyboard" size={15} /></button>
+        {mode === 'narrow' ? (
+          <span className="overflow-anchor">
+            <button
+              className="icon-button"
+              title="More actions"
+              aria-label="More actions"
+              aria-expanded={showOverflow}
+              onClick={() => setShowOverflow((v) => !v)}
+            ><Icon name="chevronDown" size={15} /></button>
+            {showOverflow && (
+              <OverflowMenu
+                onClose={() => setShowOverflow(false)}
+                items={[
+                  { label: 'Import a webpage', icon: 'download', run: () => setModal('import') },
+                  { label: 'Export', icon: 'upload', run: () => setModal('export') },
+                  { label: 'Keyboard shortcuts', icon: 'keyboard', run: () => setModal('shortcuts') },
+                  { label: 'Appearance', icon: 'settings', run: () => setShowSettings(true) },
+                ]}
+              />
+            )}
+          </span>
+        ) : (
+          <>
+            <button
+              className="icon-button"
+              title="Keyboard shortcuts (?)"
+              aria-label="Keyboard shortcuts"
+              onClick={() => setModal('shortcuts')}
+            ><Icon name="keyboard" size={15} /></button>
 
-        <button
-          className="icon-button"
-          title="Appearance"
-          aria-label="Appearance"
-          aria-expanded={showSettings}
-          onClick={() => setShowSettings((v) => !v)}
-        ><Icon name="settings" size={15} /></button>
+            <button
+              className="icon-button"
+              title="Appearance"
+              aria-label="Appearance"
+              aria-expanded={showSettings}
+              onClick={() => setShowSettings((v) => !v)}
+            ><Icon name="settings" size={15} /></button>
 
-        <span
-          className={`conn-status is-${connection}`}
-          title={
-            transport === 'polling'
-              ? 'Syncing over HTTP polling — this host does not support WebSockets, so presence and agent screenshots are unavailable.'
-              : `Connection: ${connection}`
-          }
-        >
-          {connection === 'open' ? (transport === 'polling' ? 'Synced' : 'Live') : connection === 'connecting' ? 'Connecting' : 'Offline'}
-        </span>
+            <span className="topbar-divider" />
 
-        <span className="topbar-divider" />
+            <button className="button" onClick={() => setModal('import')} title="Bring a live webpage onto the canvas">
+              <Icon name="download" size={14} />
+              <span className="button-label">Import</span>
+            </button>
+            <button className="button" onClick={() => setModal('export')} title="Export this design (\u2318\u21e7E)">
+              <Icon name="upload" size={14} />
+              <span className="button-label">Export</span>
+            </button>
+          </>
+        )}
 
-        <button className="button" onClick={() => setModal('import')} title="Bring a live webpage onto the canvas">
-          <Icon name="download" size={14} /> Import
+        <button className="button primary" onClick={() => setModal('connect')} title="Connect an agent">
+          <Icon name="sparkle" size={14} />
+          <span className="button-label">Connect agent</span>
         </button>
-        <button className="button" onClick={() => setModal('export')} title="Export this design (⌘⇧E)">
-          <Icon name="upload" size={14} /> Export
-        </button>
-        <button className="button primary" onClick={() => setModal('connect')}>
-          <Icon name="sparkle" size={14} /> Connect agent
-        </button>
+
+
+        {overlay && (
+          <button
+            className={`icon-button panel-toggle${openPanel === 'right' ? ' is-active' : ''}`}
+            title="Properties"
+            aria-label="Toggle the properties panel"
+            aria-expanded={openPanel === 'right'}
+            onClick={() => setOpenPanel((p) => (p === 'right' ? null : 'right'))}
+          ><Icon name="settings" size={16} /></button>
+        )}
       </header>
 
       {showSettings && (
@@ -211,7 +275,11 @@ function Editor({ docId, onHome, appearance, onAppearance }: {
       )}
 
       <div className="workspace">
-        <aside className="rail rail-left">
+        {overlay && openPanel && (
+          <div className="rail-scrim" onPointerDown={() => setOpenPanel(null)} aria-hidden />
+        )}
+
+        <aside className={`rail rail-left${leftOpen ? ' is-open' : ''}`} {...hiddenWhenClosed(leftOpen)}>
           <nav className="rail-tabs" aria-label="Panels">
             {LEFT_TABS.map((t) => (
               <button
@@ -264,10 +332,10 @@ function Editor({ docId, onHome, appearance, onAppearance }: {
 
         <main className="stage">
           <Canvas onContextMenu={setContextMenu} />
-          <Toolbar />
+          <Toolbar compact={mode === 'narrow'} />
         </main>
 
-        <aside className="rail rail-right">
+        <aside className={`rail rail-right${rightOpen ? ' is-open' : ''}`} {...hiddenWhenClosed(rightOpen)}>
           <ScrollArea className="rail-body">
             <Properties />
           </ScrollArea>

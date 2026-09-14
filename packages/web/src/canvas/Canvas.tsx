@@ -127,6 +127,78 @@ export function Canvas({ onContextMenu }: CanvasProps) {
     return () => { ro.disconnect(); window.removeEventListener('resize', measure); };
   }, []);
 
+  // --- Touch: pinch to zoom, two fingers to pan ---------------------------
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+
+    // Tracked here rather than in the pointer handlers because a pinch must not
+    // be mistaken for a drag: the first finger would otherwise start moving a
+    // layer before the second one lands.
+    const active = new Map<number, { x: number; y: number }>();
+    let gesture: { distance: number; centreX: number; centreY: number; zoom: number } | null = null;
+
+    const centreOf = () => {
+      const points = [...active.values()];
+      const x = points.reduce((sum, p) => sum + p.x, 0) / points.length;
+      const y = points.reduce((sum, p) => sum + p.y, 0) / points.length;
+      const [a, b] = points;
+      return { x, y, distance: a && b ? Math.hypot(a.x - b.x, a.y - b.y) : 0 };
+    };
+
+    const onDown = (e: PointerEvent) => {
+      if (e.pointerType !== 'touch') return;
+      active.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (active.size === 2) {
+        const c = centreOf();
+        const vp = useCanvas.getState().viewport;
+        gesture = { distance: c.distance, centreX: c.x, centreY: c.y, zoom: vp.zoom };
+        // Cancel whatever the first finger started.
+        drag.current = { kind: 'none' };
+        setGuides(null);
+        setDropTarget(null);
+      }
+    };
+
+    const onMove = (e: PointerEvent) => {
+      if (e.pointerType !== 'touch' || !active.has(e.pointerId)) return;
+      active.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (active.size !== 2 || !gesture) return;
+      e.preventDefault();
+
+      const c = centreOf();
+      const vp = useCanvas.getState().viewport;
+      const scale = gesture.distance > 0 ? c.distance / gesture.distance : 1;
+      const zoom = Math.min(8, Math.max(0.02, gesture.zoom * scale));
+      const k = zoom / vp.zoom;
+
+      setViewport({
+        zoom,
+        // Zoom about the pinch centre, and pan by however far it moved.
+        x: c.x - (gesture.centreX - vp.x) * k + (c.x - gesture.centreX),
+        y: c.y - (gesture.centreY - vp.y) * k + (c.y - gesture.centreY),
+      });
+      gesture = { distance: c.distance, centreX: c.x, centreY: c.y, zoom };
+    };
+
+    const onUp = (e: PointerEvent) => {
+      active.delete(e.pointerId);
+      if (active.size < 2) gesture = null;
+    };
+
+    el.addEventListener('pointerdown', onDown);
+    el.addEventListener('pointermove', onMove, { passive: false });
+    el.addEventListener('pointerup', onUp);
+    el.addEventListener('pointercancel', onUp);
+    return () => {
+      el.removeEventListener('pointerdown', onDown);
+      el.removeEventListener('pointermove', onMove);
+      el.removeEventListener('pointerup', onUp);
+      el.removeEventListener('pointercancel', onUp);
+    };
+  }, [setViewport]);
+
   // --- Zoom and pan ------------------------------------------------------
 
   useEffect(() => {
@@ -154,7 +226,14 @@ export function Canvas({ onContextMenu }: CanvasProps) {
   const onPointerDown = useCallback((e: React.PointerEvent) => {
     const doc = getDoc();
     if (!doc || !page) return;
-    (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
+    // A second finger turns this into a pinch, handled by the gesture effect.
+    if (e.pointerType === 'touch' && !e.isPrimary) { drag.current = { kind: 'none' }; return; }
+    try {
+      // Throws if the pointer has already been released, which happens with
+      // fast taps and with synthetic events; it is an optimisation, not a
+      // requirement, so losing it must not abort the gesture.
+      (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
+    } catch { /* capture is best-effort */ }
 
     // A pointerdown inside a note is the note's own business, except for drags.
     const noteEl = (e.target as HTMLElement).closest<HTMLElement>('[data-note-id]');
