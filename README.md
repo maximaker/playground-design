@@ -222,7 +222,12 @@ are outlined where they are, a bar walks you through them one at a time, and the
 in one action, because the alternative is pressing undo an unknown number of times and hoping.
 
 The inverses are collected as the ops arrive, since that is the only moment they exist: recomputing
-them later would mean reconstructing a document state that has already moved on. Calls within a run
+them later would mean reconstructing a document state that has already moved on.
+
+One limitation, on serverless only: the op log lives in memory, and consecutive requests there reach
+different instances, so a poll sometimes comes back as a whole-document resync instead of an op list.
+A resync carries no origins — the change is applied correctly but cannot be credited to anyone, so no
+review bar appears for it. The self-hosted server keeps one process and does not have this problem. Calls within a run
 accumulate rather than replacing each other — an agent makes twenty calls to do one thing, and twenty
 notifications in a row is something you learn to dismiss without reading. The reverting is itself an
 ordinary local edit, so it can be undone too.
@@ -328,9 +333,10 @@ The app runs in two shapes from one codebase:
 |---|---|---|
 | Storage | SQLite | Vercel Blob |
 | Sync | WebSocket, instant | HTTP polling, ~1.5s |
-| Presence | Yes | No |
+| Presence and live cursors | Yes | No |
 | Agent screenshots | Yes (Playwright) | No |
 | Live computed styles | Yes | Authored styles only |
+| Agent change review | Yes | Best-effort (see below) |
 
 Vercel's serverless runtime has no persistent filesystem and cannot hold a WebSocket open, so the
 client detects the missing socket and falls back to polling, and persistence goes to Blob. Everything
@@ -339,6 +345,11 @@ browser the server can drive, so they are a self-hosted capability.
 
 Blob has no transactions, so two people editing the same document on the hosted version can clobber
 one another. Self-host for real collaborative work.
+
+The op log is in memory, and consecutive serverless requests reach different instances, so a poll
+there sometimes returns a whole-document resync rather than a list of ops. The change is applied
+correctly either way, but a resync carries no origins — so that batch cannot be attributed and gets
+no review bar. Share links, comments and everything else are unaffected.
 
 ## Deviations from the PRD
 
