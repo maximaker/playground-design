@@ -10,7 +10,7 @@
  * SVG export needs neither, since vector nodes already hold SVG source.
  */
 
-import { emitStandalone, getNode, getArtboardSize, type CanvasDocument, type NodeId } from '@canvas/shared';
+import { emitStandalone, getNode, getArtboardSize, type CanvasDocument, type NodeId } from '@playground/shared';
 import { callTab, NoTabError } from './realtime.ts';
 
 export type RenderFormat = 'png' | 'jpg' | 'webp' | 'svg' | 'html';

@@ -7,7 +7,7 @@
  * set plus a foundations artboard showing what those tokens look like applied.
  */
 
-import { type Token, type StyleMap } from '@canvas/shared';
+import { type Token, type StyleMap } from '@playground/shared';
 
 export interface Template {
   id: string;

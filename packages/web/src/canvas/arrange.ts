@@ -11,7 +11,7 @@
 import {
   type CanvasDocument, type NodeId, type Op,
   getArtboardPosition, getArtboardSize,
-} from '@canvas/shared';
+} from '@playground/shared';
 import { nodeInnerRect, nodeRect } from './registry.ts';
 import { parsePx } from './styles.ts';
 

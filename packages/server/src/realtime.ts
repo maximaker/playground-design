@@ -11,8 +11,8 @@
 
 import { WebSocketServer, WebSocket } from 'ws';
 import type { Server } from 'node:http';
-import type { OpEnvelope } from '@canvas/shared';
-import { applyOps, getDocument, subscribe, StoreError, autoSnapshotIfStale } from './store.ts';
+import type { OpEnvelope } from '@playground/shared';
+import { applyOps, ensureLoaded, getDocument, subscribe, StoreError, autoSnapshotIfStale } from './store.ts';
 
 export interface Peer {
   clientId: string;
@@ -55,7 +55,10 @@ export function attachRealtime(server: Server): WebSocketServer {
       switch (msg.type) {
         case 'join': {
           if (session) teardown(session);
-          session = handleJoin(ws, msg);
+          // The document may not be in the cache yet on a cold start.
+          void ensureLoaded(String(msg.docId ?? '')).then(() => {
+            if (!session) session = handleJoin(ws, msg);
+          });
           break;
         }
         case 'ops': {
@@ -136,7 +139,7 @@ function handleJoin(ws: WebSocket, msg: Record<string, unknown>): Session | null
 
   send(ws, { type: 'joined', clientId, peer, doc, rev: doc.rev });
   broadcastPeers(docId);
-  autoSnapshotIfStale(docId);
+  void autoSnapshotIfStale(docId).catch(() => {});
   return session;
 }
 

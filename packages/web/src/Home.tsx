@@ -1,11 +1,20 @@
 /** Document list and creation. No accounts in v1: documents are URL-addressed. */
 
 import { useCallback, useEffect, useState } from 'react';
+import { Logo } from './ui/Logo.tsx';
+import { Icon } from './ui/Icon.tsx';
+import { Settings } from './ui/Settings.tsx';
+import type { Appearance } from './state/appearance.ts';
 
 interface DocSummary { id: string; name: string; rev: number; updated_at: number; nodeCount: number }
 interface TemplateSummary { id: string; name: string; description: string; tokenCount: number }
 
-export function Home({ onOpen }: { onOpen: (id: string) => void }) {
+export function Home({ onOpen, appearance, onAppearance }: {
+  onOpen: (id: string) => void;
+  appearance: Appearance;
+  onAppearance: (next: Appearance) => void;
+}) {
+  const [showSettings, setShowSettings] = useState(false);
   const [docs, setDocs] = useState<DocSummary[]>([]);
   const [templates, setTemplates] = useState<TemplateSummary[]>([]);
   const [creating, setCreating] = useState(false);
@@ -58,11 +67,22 @@ export function Home({ onOpen }: { onOpen: (id: string) => void }) {
   return (
     <div className="home">
       <header>
-        <h1>◧ Canvas</h1>
+        <h1><Logo size={38} /></h1>
         <p>A design tool whose documents are real HTML and CSS — and that agents can edit with you.</p>
-        <button className="button primary" onClick={() => void create()} disabled={creating}>
-          Blank document
-        </button>
+        <div className="home-actions">
+          <button className="button primary" onClick={() => void create()} disabled={creating}>
+            <Icon name="plus" size={14} /> Blank document
+          </button>
+          <button
+            className="icon-button"
+            title="Appearance"
+            aria-label="Appearance"
+            onClick={() => setShowSettings((v) => !v)}
+          ><Icon name="settings" size={15} /></button>
+          {showSettings && (
+            <Settings appearance={appearance} onChange={onAppearance} onClose={() => setShowSettings(false)} />
+          )}
+        </div>
       </header>
 
       {templates.length > 0 && (
@@ -87,6 +107,7 @@ export function Home({ onOpen }: { onOpen: (id: string) => void }) {
       {error && <p className="home-error">{error}. Is the server running on port 4000?</p>}
       {loading && <p className="dim">Loading…</p>}
 
+      {docs.length > 0 && <h2 className="home-section-title">Your documents</h2>}
       <div className="home-grid">
         {docs.map((d) => (
           <div key={d.id} className="home-card" onClick={() => onOpen(d.id)}>

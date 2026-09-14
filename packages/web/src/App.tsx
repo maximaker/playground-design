@@ -17,12 +17,39 @@ import { Import } from './panels/Import.tsx';
 import { Toolbar } from './ui/Toolbar.tsx';
 import { ContextMenu, type ContextMenuState } from './ui/ContextMenu.tsx';
 import { Shortcuts } from './ui/Shortcuts.tsx';
+import { Icon, type IconName } from './ui/Icon.tsx';
+import { Logo } from './ui/Logo.tsx';
+import { Settings } from './ui/Settings.tsx';
+import { ScrollArea } from './ui/ScrollArea.tsx';
+import {
+  type Appearance, applyAppearance, loadAppearance, saveAppearance, watchSystemTheme,
+} from './state/appearance.ts';
 import { Home } from './Home.tsx';
 
 type LeftTab = 'layers' | 'pages' | 'components' | 'tokens' | 'history';
 
+const LEFT_TABS: { id: LeftTab; icon: IconName; label: string; hint: string }[] = [
+  { id: 'layers', icon: 'layers', label: 'Layers', hint: 'The structure of this page' },
+  { id: 'pages', icon: 'page', label: 'Pages', hint: 'Pages in this document' },
+  { id: 'components', icon: 'component', label: 'Components', hint: 'Reusable components and their variants' },
+  { id: 'tokens', icon: 'palette', label: 'Tokens', hint: 'Design tokens and themes' },
+  { id: 'history', icon: 'history', label: 'History', hint: 'Changes and saved versions' },
+];
+
 export function App() {
   const [docId, setDocId] = useState<string | null>(() => docIdFromLocation());
+  const [appearance, setAppearance] = useState<Appearance>(loadAppearance);
+
+  useEffect(() => {
+    applyAppearance(appearance);
+    saveAppearance(appearance);
+  }, [appearance]);
+
+  // Follow the OS while the preference is "system".
+  useEffect(() => {
+    if (appearance.theme !== 'system') return;
+    return watchSystemTheme(() => applyAppearance(appearance));
+  }, [appearance]);
 
   useEffect(() => {
     const onPop = () => setDocId(docIdFromLocation());
@@ -31,9 +58,22 @@ export function App() {
   }, []);
 
   if (!docId) {
-    return <Home onOpen={(id) => { history.pushState({}, '', `/d/${id}`); setDocId(id); }} />;
+    return (
+      <Home
+        onOpen={(id) => { history.pushState({}, '', `/d/${id}`); setDocId(id); }}
+        appearance={appearance}
+        onAppearance={setAppearance}
+      />
+    );
   }
-  return <Editor docId={docId} onHome={() => { history.pushState({}, '', '/'); setDocId(null); }} />;
+  return (
+    <Editor
+      docId={docId}
+      onHome={() => { history.pushState({}, '', '/'); setDocId(null); }}
+      appearance={appearance}
+      onAppearance={setAppearance}
+    />
+  );
 }
 
 function docIdFromLocation(): string | null {
@@ -41,7 +81,12 @@ function docIdFromLocation(): string | null {
   return m ? m[1]! : null;
 }
 
-function Editor({ docId, onHome }: { docId: string; onHome: () => void }) {
+function Editor({ docId, onHome, appearance, onAppearance }: {
+  docId: string;
+  onHome: () => void;
+  appearance: Appearance;
+  onAppearance: (next: Appearance) => void;
+}) {
   const connection = useCanvas((s) => s.connection);
   const fatalError = useCanvas((s) => s.fatalError);
   const doc = useCanvas((s) => s.doc);
@@ -49,12 +94,14 @@ function Editor({ docId, onHome }: { docId: string; onHome: () => void }) {
   const pageId = useCanvas((s) => s.pageId);
   const setPage = useCanvas((s) => s.setPage);
   const peers = useCanvas((s) => s.peers);
+  const transport = useCanvas((s) => s.transport);
   const agentActivity = useCanvas((s) => s.agentActivity);
   const dispatch = useCanvas((s) => s.dispatch);
 
   const [leftTab, setLeftTab] = useState<LeftTab>('layers');
   const [modal, setModal] = useState<'connect' | 'export' | 'import' | 'shortcuts' | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+  const [showSettings, setShowSettings] = useState(false);
 
   useKeyboard(() => setModal('export'), () => setModal('shortcuts'));
   useClipboard();
@@ -68,7 +115,7 @@ function Editor({ docId, onHome }: { docId: string; onHome: () => void }) {
     return (
       <div className="boot">
         <div className="boot-inner">
-          <h1>Canvas</h1>
+          <Logo size={34} />
           {fatalError ? (
             <>
               <p className="boot-error">{fatalError}</p>
@@ -85,7 +132,9 @@ function Editor({ docId, onHome }: { docId: string; onHome: () => void }) {
   return (
     <div className="app">
       <header className="topbar">
-        <button className="logo" onClick={onHome} title="All documents">◧ Canvas</button>
+        <button className="logo" onClick={onHome} title="All documents">
+          <Logo size={17} />
+        </button>
 
         <input
           className="doc-name"
@@ -103,8 +152,8 @@ function Editor({ docId, onHome }: { docId: string; onHome: () => void }) {
         {peers.length > 0 && (
           <div className="peers" title={peers.map((p) => p.name).join(', ')}>
             {peers.slice(0, 5).map((p) => (
-              <span key={p.clientId} className="peer-dot" style={{ background: p.color }}>
-                {p.kind === 'agent' ? '🤖' : p.name.charAt(0).toUpperCase()}
+              <span key={p.clientId} className="peer-dot" style={{ background: p.color }} title={p.name}>
+                {p.kind === 'agent' ? <Icon name="agent" size={12} /> : p.name.charAt(0).toUpperCase()}
               </span>
             ))}
           </div>
@@ -113,19 +162,45 @@ function Editor({ docId, onHome }: { docId: string; onHome: () => void }) {
         <button
           className="icon-button"
           title="Keyboard shortcuts (?)"
+          aria-label="Keyboard shortcuts"
           onClick={() => setModal('shortcuts')}
-        >⌘</button>
+        ><Icon name="keyboard" size={15} /></button>
 
-        <span className={`conn-status is-${connection}`} title={`Connection: ${connection}`}>
-          {connection === 'open' ? 'Live' : connection === 'connecting' ? 'Connecting' : 'Offline'}
+        <button
+          className="icon-button"
+          title="Appearance"
+          aria-label="Appearance"
+          aria-expanded={showSettings}
+          onClick={() => setShowSettings((v) => !v)}
+        ><Icon name="settings" size={15} /></button>
+
+        <span
+          className={`conn-status is-${connection}`}
+          title={
+            transport === 'polling'
+              ? 'Syncing over HTTP polling — this host does not support WebSockets, so presence and agent screenshots are unavailable.'
+              : `Connection: ${connection}`
+          }
+        >
+          {connection === 'open' ? (transport === 'polling' ? 'Synced' : 'Live') : connection === 'connecting' ? 'Connecting' : 'Offline'}
         </span>
 
+        <span className="topbar-divider" />
+
         <button className="button" onClick={() => setModal('import')} title="Bring a live webpage onto the canvas">
-          Import
+          <Icon name="download" size={14} /> Import
         </button>
-        <button className="button" onClick={() => setModal('export')}>Export</button>
-        <button className="button primary" onClick={() => setModal('connect')}>Connect agent</button>
+        <button className="button" onClick={() => setModal('export')} title="Export this design (⌘⇧E)">
+          <Icon name="upload" size={14} /> Export
+        </button>
+        <button className="button primary" onClick={() => setModal('connect')}>
+          <Icon name="sparkle" size={14} /> Connect agent
+        </button>
       </header>
+
+      {showSettings && (
+        <Settings appearance={appearance} onChange={onAppearance} onClose={() => setShowSettings(false)} />
+      )}
 
       {agentActivity?.active && (
         <div className="agent-banner">
@@ -137,14 +212,25 @@ function Editor({ docId, onHome }: { docId: string; onHome: () => void }) {
 
       <div className="workspace">
         <aside className="rail rail-left">
-          <nav className="rail-tabs">
-            {(['layers', 'pages', 'components', 'tokens', 'history'] as LeftTab[]).map((t) => (
-              <button key={t} className={leftTab === t ? 'is-active' : ''} onClick={() => setLeftTab(t)}>
-                {t}
+          <nav className="rail-tabs" aria-label="Panels">
+            {LEFT_TABS.map((t) => (
+              <button
+                key={t.id}
+                className={leftTab === t.id ? 'is-active' : ''}
+                onClick={() => setLeftTab(t.id)}
+                title={`${t.label} — ${t.hint}`}
+                aria-label={t.label}
+                aria-pressed={leftTab === t.id}
+              >
+                <Icon name={t.icon} size={15} />
               </button>
             ))}
           </nav>
-          <div className="rail-body">
+
+          <div className="rail-heading">
+            {LEFT_TABS.find((t) => t.id === leftTab)?.label}
+          </div>
+          <ScrollArea className="rail-body">
             {leftTab === 'layers' && <Layers />}
             {leftTab === 'pages' && (
               <div className="pages">
@@ -173,7 +259,7 @@ function Editor({ docId, onHome }: { docId: string; onHome: () => void }) {
             {leftTab === 'components' && <Components />}
             {leftTab === 'tokens' && <Tokens />}
             {leftTab === 'history' && <History />}
-          </div>
+          </ScrollArea>
         </aside>
 
         <main className="stage">
@@ -182,7 +268,9 @@ function Editor({ docId, onHome }: { docId: string; onHome: () => void }) {
         </main>
 
         <aside className="rail rail-right">
-          <Properties />
+          <ScrollArea className="rail-body">
+            <Properties />
+          </ScrollArea>
         </aside>
       </div>
 

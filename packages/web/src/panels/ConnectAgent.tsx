@@ -9,6 +9,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { useCanvas } from '../state/store.ts';
+import { Icon } from '../ui/Icon.tsx';
 
 interface ConnectionRow {
   code: string; label: string | null;
@@ -88,7 +89,7 @@ export function ConnectAgent({ onClose }: { onClose: () => void }) {
       <div className="modal" onPointerDown={(e) => e.stopPropagation()}>
         <header className="modal-header">
           <h2>Connect an agent</h2>
-          <button className="icon-button" onClick={onClose} aria-label="Close">✕</button>
+          <button className="icon-button" onClick={onClose} aria-label="Close"><Icon name="close" size={14} /></button>
         </header>
 
         <div className="modal-body">

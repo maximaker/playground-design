@@ -1,7 +1,7 @@
 /** Conversions between the document's CSS-shaped styles and React style objects. */
 
-import type { CanvasDocument, CanvasNode, NodeId, StyleMap } from '@canvas/shared';
-import { descendants } from '@canvas/shared';
+import type { CanvasDocument, CanvasNode, NodeId, StyleMap } from '@playground/shared';
+import { descendants } from '@playground/shared';
 import type { CSSProperties } from 'react';
 
 export function toReactStyle(styles: StyleMap): CSSProperties {

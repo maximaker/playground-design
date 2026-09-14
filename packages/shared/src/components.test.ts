@@ -1,8 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createEmptyDocument, makeNode, type CanvasDocument, type CanvasNode } from './model.ts';
+import {
+  createEmptyDocument, makeNode, resolvedProps, variantMatrix,
+  type CanvasDocument, type CanvasNode,
+} from './model.ts';
 import { applyOp } from './ops.ts';
-import { expandNode, expandInstance, detachedNodes, instancesOf, collectSlots, parseInstanceKey } from './components.ts';
+import {
+  expandNode, expandInstance, detachedNodes, instancesOf, collectSlots, parseInstanceKey, findVariant,
+} from './components.ts';
 import { emitHtml } from './html.ts';
 import { emitJsx } from './jsx.ts';
 
@@ -219,4 +224,138 @@ test('component ops invert', () => {
   assert.equal(doc.components![componentId], undefined);
   applyOp(doc, inverse);
   assert.equal(doc.components![componentId]!.name, 'Button');
+});
+
+// ---------------------------------------------------------------------------
+// Variants
+// ---------------------------------------------------------------------------
+
+function seedVariants() {
+  const { doc, artboard, componentId, root, label } = seedComponent();
+  applyOp(doc, {
+    t: 'component', action: 'update',
+    component: {
+      id: componentId,
+      props: [
+        { name: 'size', values: ['sm', 'md', 'lg'], default: 'md' },
+        { name: 'tone', values: ['default', 'danger'], default: 'default' },
+      ],
+    },
+  });
+  // A size variant, a tone variant, and a more specific combination.
+  applyOp(doc, { t: 'variant', componentId, match: { size: 'lg' }, overrides: { [root.id]: { styles: { padding: '20px 32px' } } } });
+  applyOp(doc, { t: 'variant', componentId, match: { tone: 'danger' }, overrides: { [root.id]: { styles: { 'background-color': '#dc2626' } } } });
+  applyOp(doc, {
+    t: 'variant', componentId, match: { size: 'lg', tone: 'danger' },
+    overrides: { [label.id]: { text: 'Delete everything' } },
+  });
+  return { doc, artboard, componentId, root, label };
+}
+
+test('an instance uses the declared defaults', () => {
+  const { doc, artboard, componentId, root } = seedVariants();
+  const instance = instantiate(doc, componentId, artboard);
+  const expanded = expandInstance(doc, doc.nodes[instance.id]!)!;
+  assert.equal(expanded.node.styles.padding, '12px 20px', 'default size applies no variant');
+  void root;
+});
+
+test('setting a prop applies that variant', () => {
+  const { doc, artboard, componentId } = seedVariants();
+  const instance = instantiate(doc, componentId, artboard);
+  applyOp(doc, { t: 'props', updates: [{ id: instance.id, props: { size: 'lg' } }] });
+
+  const expanded = expandInstance(doc, doc.nodes[instance.id]!)!;
+  assert.equal(expanded.node.styles.padding, '20px 32px');
+});
+
+test('variants compose, with the more specific one refining the less specific', () => {
+  const { doc, artboard, componentId } = seedVariants();
+  const instance = instantiate(doc, componentId, artboard);
+  applyOp(doc, { t: 'props', updates: [{ id: instance.id, props: { size: 'lg', tone: 'danger' } }] });
+
+  const expanded = expandInstance(doc, doc.nodes[instance.id]!)!;
+  assert.equal(expanded.node.styles.padding, '20px 32px', 'size variant still applies');
+  assert.equal(expanded.node.styles['background-color'], '#dc2626', 'tone variant still applies');
+  assert.equal(expanded.children[0]!.node.text, 'Delete everything', 'the combination refines both');
+});
+
+test('instance overrides beat variants', () => {
+  const { doc, artboard, componentId, root } = seedVariants();
+  const instance = instantiate(doc, componentId, artboard);
+  applyOp(doc, { t: 'props', updates: [{ id: instance.id, props: { tone: 'danger' } }] });
+  applyOp(doc, { t: 'override', updates: [{ id: instance.id, defId: root.id, override: { styles: { 'background-color': '#16a34a' } } }] });
+
+  const expanded = expandInstance(doc, doc.nodes[instance.id]!)!;
+  assert.equal(expanded.node.styles['background-color'], '#16a34a');
+});
+
+test('two instances with different props render differently', () => {
+  const { doc, artboard, componentId } = seedVariants();
+  const a = instantiate(doc, componentId, artboard);
+  const b = instantiate(doc, componentId, artboard);
+  applyOp(doc, { t: 'props', updates: [{ id: a.id, props: { size: 'lg' } }] });
+
+  assert.equal(expandInstance(doc, doc.nodes[a.id]!)!.node.styles.padding, '20px 32px');
+  assert.equal(expandInstance(doc, doc.nodes[b.id]!)!.node.styles.padding, '12px 20px');
+});
+
+test('an undeclared prop value is ignored rather than breaking the instance', () => {
+  const { doc, artboard, componentId } = seedVariants();
+  const instance = instantiate(doc, componentId, artboard);
+  applyOp(doc, { t: 'props', updates: [{ id: instance.id, props: { size: 'enormous', colour: 'teal' } }] });
+
+  const props = resolvedProps(doc.components![componentId]!, doc.nodes[instance.id]!);
+  assert.equal(props.size, 'md', 'an unknown value falls back to the default');
+  assert.equal(props.colour, undefined, 'an undeclared property is dropped');
+});
+
+test('variant ops invert', () => {
+  const { doc, componentId, root } = seedVariants();
+  const before = structuredClone(doc.components![componentId]!.variants);
+
+  const inverse = applyOp(doc, {
+    t: 'variant', componentId, match: { size: 'lg' },
+    overrides: { [root.id]: { styles: { padding: '99px' } } },
+  });
+  assert.equal(findVariant(doc.components![componentId]!, { size: 'lg' })!.overrides[root.id]!.styles!.padding, '99px');
+
+  applyOp(doc, inverse);
+  assert.deepEqual(doc.components![componentId]!.variants, before);
+});
+
+test('clearing a variant removes it from the matrix', () => {
+  const { doc, componentId } = seedVariants();
+  const count = doc.components![componentId]!.variants!.length;
+  applyOp(doc, { t: 'variant', componentId, match: { size: 'lg' }, overrides: null });
+  assert.equal(doc.components![componentId]!.variants!.length, count - 1);
+});
+
+test('variantMatrix enumerates every combination', () => {
+  const { doc, componentId } = seedVariants();
+  const matrix = variantMatrix(doc.components![componentId]!);
+  assert.equal(matrix.length, 6, '3 sizes × 2 tones');
+  assert.ok(matrix.some((m) => m.size === 'lg' && m.tone === 'danger'));
+});
+
+test('props op inverts', () => {
+  const { doc, artboard, componentId } = seedVariants();
+  const instance = instantiate(doc, componentId, artboard);
+  applyOp(doc, { t: 'props', updates: [{ id: instance.id, props: { size: 'lg' } }] });
+  const inverse = applyOp(doc, { t: 'props', updates: [{ id: instance.id, props: { size: 'sm' } }] });
+  assert.equal(doc.nodes[instance.id]!.props!.size, 'sm');
+  applyOp(doc, inverse);
+  assert.equal(doc.nodes[instance.id]!.props!.size, 'lg');
+});
+
+test('detaching bakes in the variant, not just instance overrides', () => {
+  const { doc, artboard, componentId } = seedVariants();
+  const instance = instantiate(doc, componentId, artboard);
+  applyOp(doc, { t: 'props', updates: [{ id: instance.id, props: { size: 'lg', tone: 'danger' } }] });
+
+  let n = 0;
+  const nodes = detachedNodes(doc, doc.nodes[instance.id]!, () => `x_${n++}`);
+  const root = nodes.find((x) => x.tag === 'button')!;
+  assert.equal(root.styles.padding, '20px 32px');
+  assert.equal(root.styles['background-color'], '#dc2626');
 });

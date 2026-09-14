@@ -14,10 +14,10 @@ import { fileURLToPath } from 'node:url';
 import {
   emitHtml, emitJsx, emitStandalone, parseHtml, makeNode,
   DEFAULT_ARTBOARD_STYLES, type CanvasDocument, getNode,
-} from '@canvas/shared';
+} from '@playground/shared';
 import {
-  applyOps, createDocument, deleteDocument, getDocument, history, listDocuments,
-  createSnapshot, listSnapshots, restoreSnapshot, StoreError,
+  applyOps, createDocument, deleteDocument, ensureLoaded, getDocument, history, listDocuments,
+  createSnapshot, listSnapshots, opsSince, restoreSnapshot, StoreError,
 } from './store.ts';
 import { peersOf, hasLiveTab } from './realtime.ts';
 import { createConnection, listConnections, resolveConnection, revokeConnection } from './connections.ts';
@@ -28,7 +28,11 @@ import { getTemplate, templateSummaries, type Template } from './templates.ts';
 import { renderNode } from './render.ts';
 
 const PORT = Number(process.env.PORT ?? 4000);
-const PUBLIC_URL = process.env.CANVAS_PUBLIC_URL ?? `http://localhost:${PORT}`;
+const PUBLIC_URL =
+  process.env.PLAYGROUND_PUBLIC_URL ??
+  (process.env.VERCEL_PROJECT_PRODUCTION_URL ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}` : null) ??
+  (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null) ??
+  `http://localhost:${PORT}`;
 
 const app = new Hono();
 
@@ -50,7 +54,7 @@ const api = new Hono();
 
 api.get('/health', (c) => c.json({ ok: true, version: '0.1.0' }));
 
-api.get('/documents', (c) => c.json({ documents: listDocuments() }));
+api.get('/documents', async (c) => c.json({ documents: await listDocuments() }));
 
 api.get('/templates', (c) => c.json({ templates: templateSummaries() }));
 
@@ -64,7 +68,7 @@ api.post('/documents', async (c) => {
     return c.json({ error: `No template "${body.template}". Available: ${templateSummaries().map((t) => t.id).join(', ')}` }, 400);
   }
 
-  const doc = createDocument(body.name?.trim() || template?.name || 'Untitled');
+  const doc = await createDocument(body.name?.trim() || template?.name || 'Untitled');
   // A brand new document has only the seeded defaults, and the kit is the whole
   // point of choosing it — so it replaces them outright rather than losing every
   // colour to a name collision.
@@ -86,7 +90,7 @@ api.post('/documents', async (c) => {
 });
 
 api.post('/documents/:id/template', async (c) => {
-  const doc = requireDocument(c.req.param('id'));
+  const doc = await requireDocument(c.req.param('id'));
   const body = await c.req.json<{ template: string; replaceTokens?: boolean }>();
   const template = getTemplate(body.template);
   if (!template) return c.json({ error: `No template "${body.template}"` }, 400);
@@ -145,37 +149,51 @@ function applyTemplate(
   return { artboards: created, tokensAdded, tokensSkipped };
 }
 
-api.get('/documents/:id', (c) => {
+api.get('/documents/:id', async (c) => {
+  await ensureLoaded(c.req.param('id'));
   const doc = getDocument(c.req.param('id'));
   if (!doc) return c.json({ error: 'not found' }, 404);
   return c.json({ document: doc, peers: peersOf(doc.id), liveTabConnected: hasLiveTab(doc.id) });
 });
 
-api.delete('/documents/:id', (c) =>
-  deleteDocument(c.req.param('id')) ? c.json({ ok: true }) : c.json({ error: 'not found' }, 404));
+/**
+ * Polling transport, for runtimes without WebSockets (Vercel functions).
+ * Returns the ops after `rev`, or the whole document when the caller is further
+ * behind than the op log reaches.
+ */
+api.get('/documents/:id/sync', async (c) => {
+  const doc = await requireDocument(c.req.param('id'));
+  const since = Number(c.req.query('rev') ?? 0);
+  const ops = opsSince(doc.id, since);
+  if (ops === null) return c.json({ resync: true, document: doc, rev: doc.rev });
+  return c.json({ ops, rev: doc.rev, peers: peersOf(doc.id) });
+});
+
+api.delete('/documents/:id', async (c) =>
+  (await deleteDocument(c.req.param('id'))) ? c.json({ ok: true }) : c.json({ error: 'not found' }, 404));
 
 api.post('/documents/:id/ops', async (c) => {
-  const doc = requireDocument(c.req.param('id'));
+  const doc = await requireDocument(c.req.param('id'));
   const body = await c.req.json<{ ops: Parameters<typeof applyOps>[1] }>();
   const applied = applyOps(doc.id, body.ops);
   return c.json({ rev: doc.rev, applied: applied.length });
 });
 
-api.get('/documents/:id/history', (c) =>
-  c.json({ history: history(requireDocument(c.req.param('id')).id) }));
+api.get('/documents/:id/history', async (c) =>
+  c.json({ history: history((await requireDocument(c.req.param('id'))).id) }));
 
-api.get('/documents/:id/snapshots', (c) =>
-  c.json({ snapshots: listSnapshots(requireDocument(c.req.param('id')).id) }));
+api.get('/documents/:id/snapshots', async (c) =>
+  c.json({ snapshots: await listSnapshots((await requireDocument(c.req.param('id'))).id) }));
 
 api.post('/documents/:id/snapshots', async (c) => {
-  const doc = requireDocument(c.req.param('id'));
+  const doc = await requireDocument(c.req.param('id'));
   const body = await c.req.json<{ label?: string }>().catch(() => ({} as { label?: string }));
-  return c.json(createSnapshot(doc.id, body.label), 201);
+  return c.json(await createSnapshot(doc.id, body.label), 201);
 });
 
-api.post('/documents/:id/snapshots/:snapshotId/restore', (c) => {
-  const doc = requireDocument(c.req.param('id'));
-  return c.json({ document: restoreSnapshot(doc.id, c.req.param('snapshotId')) });
+api.post('/documents/:id/snapshots/:snapshotId/restore', async (c) => {
+  const doc = await requireDocument(c.req.param('id'));
+  return c.json({ document: await restoreSnapshot(doc.id, c.req.param('snapshotId')) });
 });
 
 // ---------------------------------------------------------------------------
@@ -183,7 +201,7 @@ api.post('/documents/:id/snapshots/:snapshotId/restore', (c) => {
 // ---------------------------------------------------------------------------
 
 api.get('/documents/:id/export/:nodeId', async (c) => {
-  const doc = requireDocument(c.req.param('id'));
+  const doc = await requireDocument(c.req.param('id'));
   const nodeId = c.req.param('nodeId');
   if (!getNode(doc, nodeId)) return c.json({ error: `node ${nodeId} not found` }, 404);
 
@@ -216,7 +234,7 @@ api.get('/documents/:id/export/:nodeId', async (c) => {
 });
 
 api.post('/documents/:id/import', async (c) => {
-  const doc = requireDocument(c.req.param('id'));
+  const doc = await requireDocument(c.req.param('id'));
   const body = await c.req.json<{ url: string; artboardId?: string; pageId?: string }>();
   const result = await importUrl(body.url);
 
@@ -266,13 +284,13 @@ function nextX(doc: CanvasDocument, artboards: string[]): number {
 // Agent connections
 // ---------------------------------------------------------------------------
 
-api.get('/documents/:id/connections', (c) =>
-  c.json({ connections: listConnections(requireDocument(c.req.param('id')).id) }));
+api.get('/documents/:id/connections', async (c) =>
+  c.json({ connections: await listConnections((await requireDocument(c.req.param('id'))).id) }));
 
 api.post('/documents/:id/connections', async (c) => {
-  const doc = requireDocument(c.req.param('id'));
+  const doc = await requireDocument(c.req.param('id'));
   const body = await c.req.json<{ label?: string }>().catch(() => ({} as { label?: string }));
-  const conn = createConnection(doc.id, body.label);
+  const conn = await createConnection(doc.id, body.label);
   const url = `${PUBLIC_URL}/mcp/${conn.code}`;
   return c.json({
     connection: conn,
@@ -289,29 +307,29 @@ api.post('/documents/:id/connections', async (c) => {
   }, 201);
 });
 
-api.delete('/connections/:code', (c) =>
-  revokeConnection(c.req.param('code')) ? c.json({ ok: true }) : c.json({ error: 'not found' }, 404));
+api.delete('/connections/:code', async (c) =>
+  (await revokeConnection(c.req.param('code'))) ? c.json({ ok: true }) : c.json({ error: 'not found' }, 404));
 
 // ---------------------------------------------------------------------------
 // Assets
 // ---------------------------------------------------------------------------
 
 api.post('/documents/:id/assets', async (c) => {
-  const doc = requireDocument(c.req.param('id'));
+  const doc = await requireDocument(c.req.param('id'));
   const form = await c.req.formData();
   const file = form.get('file');
   if (!(file instanceof File)) return c.json({ error: 'expected a "file" field' }, 400);
   if (file.size > MAX_ASSET_BYTES) return c.json({ error: `file exceeds ${MAX_ASSET_BYTES / 1e6}MB` }, 413);
 
   const bytes = Buffer.from(await file.arrayBuffer());
-  const id = storeAsset(doc.id, file.type || 'application/octet-stream', file.name, bytes);
+  const id = await storeAsset(doc.id, file.type || 'application/octet-stream', file.name, bytes);
   return c.json({ id, url: `${PUBLIC_URL}/assets/${id}`, name: file.name, size: bytes.length }, 201);
 });
 
 app.route('/api', api);
 
-app.get('/assets/:id', (c) => {
-  const asset = getAsset(c.req.param('id'));
+app.get('/assets/:id', async (c) => {
+  const asset = await getAsset(c.req.param('id'));
   if (!asset) return c.json({ error: 'not found' }, 404);
   return c.body(new Uint8Array(asset.bytes), 200, {
     'Content-Type': asset.mime,
@@ -324,7 +342,7 @@ app.get('/assets/:id', (c) => {
 // ---------------------------------------------------------------------------
 
 app.all('/mcp/:code', async (c) => {
-  const connection = resolveConnection(c.req.param('code'));
+  const connection = await resolveConnection(c.req.param('code'));
   if (!connection) {
     // Deliberately does not distinguish unknown / revoked / expired.
     return c.json({
@@ -343,7 +361,9 @@ app.all('/mcp/:code', async (c) => {
 // it serves.
 const PACKAGE_ROOT = resolve(fileURLToPath(import.meta.url), '../..');
 const WEB_DIST = resolve(PACKAGE_ROOT, '../web/dist');
-if (existsSync(WEB_DIST)) {
+/** On Vercel the platform serves the built client; the app only handles the API. */
+const SERVE_CLIENT = !process.env.VERCEL;
+if (SERVE_CLIENT && existsSync(WEB_DIST)) {
   // serveStatic resolves `root` against the process working directory, so hand
   // it a relative path computed from wherever the server was actually started.
   const relRoot = relative(process.cwd(), WEB_DIST) || '.';
@@ -359,7 +379,15 @@ if (existsSync(WEB_DIST)) {
     c.text('Canvas API is running. The web client is not built — run `npm run dev:web` (Vite serves it on :5173).'));
 }
 
-function requireDocument(id: string): CanvasDocument {
+/**
+ * Brings a document into the synchronous cache and returns it.
+ *
+ * Serverless invocations start cold with an empty cache, so every route that
+ * touches a document has to go through here rather than reading the cache
+ * directly.
+ */
+async function requireDocument(id: string): Promise<CanvasDocument> {
+  await ensureLoaded(id);
   const doc = getDocument(id);
   if (!doc) throw new StoreError(`document ${id} not found`);
   return doc;

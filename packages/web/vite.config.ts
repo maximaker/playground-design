@@ -1,7 +1,7 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
-const API = process.env.CANVAS_API ?? 'http://localhost:4000';
+const API = process.env.PLAYGROUND_API ?? 'http://localhost:4000';
 
 export default defineConfig({
   plugins: [react()],

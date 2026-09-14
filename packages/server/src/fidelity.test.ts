@@ -10,9 +10,9 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 
-process.env.CANVAS_DB = `/tmp/canvas-fidelity-${Date.now()}.db`;
+process.env.PLAYGROUND_DB = `/tmp/playground-fidelity-${Date.now()}.db`;
 
-const { createEmptyDocument, parseHtml, emitHtml, emitJsx, applyOp, cssToTailwind } = await import('@canvas/shared');
+const { createEmptyDocument, parseHtml, emitHtml, emitJsx, applyOp, cssToTailwind } = await import('@playground/shared');
 const { createDocument, getDocument, applyOps } = await import('./store.ts');
 const { renderNode, shutdownRenderer } = await import('./render.ts');
 

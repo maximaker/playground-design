@@ -6,8 +6,8 @@
  */
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import type { NodeId } from '@canvas/shared';
-import { emitHtml, emitJsx } from '@canvas/shared';
+import type { NodeId } from '@playground/shared';
+import { emitHtml, emitJsx } from '@playground/shared';
 import { useCanvas, getDoc, topLevelSelection } from '../state/store.ts';
 import { reorder } from '../canvas/arrange.ts';
 import { duplicateSelection, wrapInFrame } from '../hooks/commands.ts';

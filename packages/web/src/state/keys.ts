@@ -10,7 +10,7 @@
 import {
   type CanvasDocument, type CanvasNode, type InstanceOverride, type NodeId, type Op, type StyleMap,
   expandInstance, parseInstanceKey,
-} from '@canvas/shared';
+} from '@playground/shared';
 
 export interface ResolvedKey {
   /** The node an edit should be written to. */
@@ -78,8 +78,29 @@ export function styleOps(
   keys: string[],
   styles: StyleMap,
   selector?: string,
+  /** When set, edits to nodes inside this component's definition become variant overrides. */
+  editingVariant?: { componentId: string; match: Record<string, string> } | null,
 ): Op[] {
   if (!doc) return [];
+
+  if (editingVariant) {
+    const def = doc.components?.[editingVariant.componentId];
+    const inDefinition = def
+      ? keys.filter((k) => isUnder(doc, treeNodeId(k), def.root))
+      : [];
+    if (inDefinition.length) {
+      const rest = keys.filter((k) => !inDefinition.includes(k));
+      return [
+        {
+          t: 'variant',
+          componentId: editingVariant.componentId,
+          match: editingVariant.match,
+          overrides: Object.fromEntries(inDefinition.map((k) => [treeNodeId(k), { styles }])),
+        },
+        ...styleOps(doc, rest, styles, selector),
+      ];
+    }
+  }
 
   const plain: { id: NodeId; styles: StyleMap; selector?: string }[] = [];
   const overrides: { id: NodeId; defId: NodeId; override: InstanceOverride }[] = [];
@@ -107,7 +128,33 @@ export function styleOps(
   return ops;
 }
 
-export function textOps(doc: CanvasDocument | null, key: string, text: string): Op[] {
+/** True when `id` is `ancestor` or sits beneath it. */
+function isUnder(doc: CanvasDocument, id: NodeId, ancestor: NodeId): boolean {
+  let cur: NodeId | null = id;
+  while (cur) {
+    if (cur === ancestor) return true;
+    cur = doc.nodes[cur]?.parent ?? null;
+  }
+  return false;
+}
+
+export function textOps(
+  doc: CanvasDocument | null,
+  key: string,
+  text: string,
+  editingVariant?: { componentId: string; match: Record<string, string> } | null,
+): Op[] {
+  if (doc && editingVariant) {
+    const def = doc.components?.[editingVariant.componentId];
+    if (def && isUnder(doc, treeNodeId(key), def.root)) {
+      return [{
+        t: 'variant',
+        componentId: editingVariant.componentId,
+        match: editingVariant.match,
+        overrides: { [treeNodeId(key)]: { text } },
+      }];
+    }
+  }
   const resolved = resolveKey(doc, key);
   if (!resolved) return [];
   return resolved.defId === null

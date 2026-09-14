@@ -9,6 +9,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { useCanvas } from '../state/store.ts';
+import { Icon } from '../ui/Icon.tsx';
 
 interface Entry {
   rev: number; label: string; opCount: number; ts: number;
@@ -83,7 +84,10 @@ export function History() {
         {entries.map((e) => (
           <div key={e.rev} className={`history-entry origin-${e.origin.kind}`}>
             <span className="history-origin">
-              {e.origin.kind === 'agent' ? '🤖' : e.origin.kind === 'system' ? '⚙' : '●'}
+              <Icon
+                name={e.origin.kind === 'agent' ? 'agent' : e.origin.kind === 'system' ? 'settings' : 'edit'}
+                size={12}
+              />
             </span>
             <div>
               <strong>{e.label}</strong>

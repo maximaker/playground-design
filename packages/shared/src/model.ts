@@ -50,6 +50,12 @@ export interface CanvasNode {
   /** For `instance` nodes: the id of the component definition. */
   componentRef?: string;
   /**
+   * For `instance` nodes: the variant properties this instance is set to,
+   * e.g. `{ size: 'lg', tone: 'danger' }`. Unset properties fall back to the
+   * component's declared defaults.
+   */
+  props?: Record<string, string>;
+  /**
    * For `instance` nodes: per-definition-node changes.
    *
    * Keyed by the *definition's* node id rather than a positional path, so an
@@ -80,6 +86,30 @@ export interface ComponentDef {
   /** Root node of the definition subtree. */
   root: NodeId;
   createdAt: number;
+  /** Declared variant properties, e.g. size: sm | md | lg. */
+  props?: ComponentProp[];
+  /** Style and text changes that apply when an instance matches. */
+  variants?: ComponentVariant[];
+}
+
+export interface ComponentProp {
+  name: string;
+  values: string[];
+  /** Value used when an instance does not set this property. */
+  default: string;
+}
+
+/**
+ * One cell of the variant matrix.
+ *
+ * `match` need not name every property: a variant matching `{ tone: 'danger' }`
+ * applies at every size. More specific variants are applied after less specific
+ * ones, so `{ size: 'lg', tone: 'danger' }` refines rather than replaces.
+ */
+export interface ComponentVariant {
+  id: string;
+  match: Record<string, string>;
+  overrides: Record<NodeId, InstanceOverride>;
 }
 
 /** A node in a definition marked `data-slot` renders the instance's children. */
@@ -345,6 +375,33 @@ export function componentsOf(doc: CanvasDocument): ComponentDef[] {
 
 export function componentOfInstance(doc: CanvasDocument, node: CanvasNode): ComponentDef | undefined {
   return node.componentRef ? doc.components?.[node.componentRef] : undefined;
+}
+
+/** An instance's properties, with the component's defaults filled in. */
+export function resolvedProps(def: ComponentDef | undefined, instance: CanvasNode): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const prop of def?.props ?? []) out[prop.name] = prop.default;
+  for (const [key, value] of Object.entries(instance.props ?? {})) {
+    // Ignore a property the component no longer declares, or a value it no
+    // longer offers — otherwise deleting a value silently breaks instances.
+    const declared = def?.props?.find((p) => p.name === key);
+    if (declared && declared.values.includes(value)) out[key] = value;
+  }
+  return out;
+}
+
+/** Every combination of the component's declared properties. */
+export function variantMatrix(def: ComponentDef): Record<string, string>[] {
+  const props = def.props ?? [];
+  if (!props.length) return [];
+  return props.reduce<Record<string, string>[]>(
+    (acc, prop) => acc.flatMap((combo) => prop.values.map((v) => ({ ...combo, [prop.name]: v }))),
+    [{}],
+  );
+}
+
+export function variantKey(match: Record<string, string>): string {
+  return Object.keys(match).sort().map((k) => `${k}=${match[k]}`).join(',');
 }
 
 /** True when `id` belongs to a component definition rather than a page. */

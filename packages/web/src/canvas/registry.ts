@@ -6,7 +6,7 @@
  * one of the artboard iframes rather than in the editor's own document.
  */
 
-import type { NodeId } from '@canvas/shared';
+import type { NodeId } from '@playground/shared';
 
 const frames = new Map<NodeId, HTMLIFrameElement>();
 

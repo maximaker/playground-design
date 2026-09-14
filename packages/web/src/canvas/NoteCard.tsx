@@ -8,8 +8,9 @@
  */
 
 import { memo, useEffect, useRef, useState } from 'react';
-import { type Note, NOTE_COLORS } from '@canvas/shared';
+import { type Note, NOTE_COLORS } from '@playground/shared';
 import { useCanvas, currentPage } from '../state/store.ts';
+import { Icon } from '../ui/Icon.tsx';
 
 interface Props { note: Note }
 
@@ -26,6 +27,11 @@ export const NoteCard = memo(function NoteCard({ note }: Props) {
   const page = currentPage();
   const colors = NOTE_COLORS[note.color];
   const isSelected = selectedNote === note.id;
+
+  // Below this zoom the card is a few pixels wide: laying out text inside it
+  // produces one character per line and a card hundreds of times taller than
+  // it should be. Draw a marker instead.
+  const collapsed = zoom < 0.35;
 
   useEffect(() => { if (editing) textRef.current?.focus(); }, [editing]);
 
@@ -60,20 +66,26 @@ export const NoteCard = memo(function NoteCard({ note }: Props) {
         left: note.x * zoom,
         top: note.y * zoom,
         width: note.width * zoom,
-        // Scaling the card's own type with the canvas keeps it legible at any
-        // zoom without re-laying out its contents.
-        height: 'auto',
-        minHeight: note.height * zoom,
+        // The card's type scales with the canvas so it stays in proportion.
+        // Height is clamped when collapsed so a marker cannot grow unbounded.
+        height: collapsed ? note.height * zoom : 'auto',
+        minHeight: collapsed ? undefined : note.height * zoom,
         background: colors.bg,
         borderColor: isSelected ? 'var(--accent)' : colors.border,
         color: colors.fg,
-        fontSize: Math.max(7, 12 * zoom),
-        padding: 10 * zoom,
-        borderRadius: 8 * zoom,
+        fontSize: 12 * zoom,
+        padding: collapsed ? 0 : 10 * zoom,
+        borderRadius: Math.max(2, 8 * zoom),
       }}
       onPointerDown={(e) => { e.stopPropagation(); selectNote(note.id); }}
       onDoubleClick={(e) => { e.stopPropagation(); setEditing(true); }}
     >
+      {collapsed ? (
+        <span className="note-collapsed" title={note.text}>
+          <Icon name={note.status === 'done' ? 'check' : note.status === 'idle' ? 'note' : 'agent'} size={Math.max(6, 14 * zoom)} />
+        </span>
+      ) : (
+        <>
       <header className="note-header" style={{ gap: 4 * zoom }}>
         <span className="note-status" data-status={note.status}>
           {note.status === 'queued' && '◷ waiting for an agent'}
@@ -133,6 +145,8 @@ export const NoteCard = memo(function NoteCard({ note }: Props) {
 
       {note.targets.length > 0 && (
         <span className="note-targets">{note.targets.length} layer{note.targets.length === 1 ? '' : 's'} attached</span>
+      )}
+        </>
       )}
     </div>
   );

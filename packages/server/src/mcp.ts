@@ -16,7 +16,8 @@ import {
   makeNode, makeNote, newId, parseHtml, treeSummary, describeNode, getArtboardPosition, getArtboardSize,
   batchId, tokenToCssVar, DEFAULT_ARTBOARD_STYLES, DEFINITIONS_PAGE,
   componentsOf, collectSlots, detachedNodes, expandInstance, instancesOf,
-} from '@canvas/shared';
+  resolvedProps, variantMatrix,
+} from '@playground/shared';
 import { applyOps, getDocument, StoreError, createSnapshot } from './store.ts';
 import { callTab, notifyTabs, selectionOf, hasLiveTab, NoTabError } from './realtime.ts';
 import { renderNode } from './render.ts';
@@ -907,7 +908,7 @@ function registerWriteTools(server: McpServer, ctx: McpContext): void {
     for (const id of ids) {
       const n = node(doc, id);
       const { data, mime } = await renderNode(doc, id, { format, scale, baseUrl: ctx.baseUrl });
-      const assetId = storeAsset(doc.id, mime, `${slug(n.name)}.${format}`, data);
+      const assetId = await storeAsset(doc.id, mime, `${slug(n.name)}.${format}`, data);
       out.push({
         id, name: n.name, format, bytes: data.length,
         url: `${ctx.baseUrl}/assets/${assetId}`,
@@ -1141,6 +1142,8 @@ function registerComponentTools(server: McpServer, ctx: McpContext): void {
           root: c.root,
           instances: instancesOf(doc, c.id).length,
           slots: root ? collectSlots(doc, root) : [],
+          props: c.props ?? [],
+          variants: (c.variants ?? []).map((v) => ({ match: v.match, overrides: Object.keys(v.overrides).length })),
           structure: root ? treeSummary(doc, c.root, { depth: 3 }) : null,
         };
       }),
@@ -1289,7 +1292,112 @@ function registerComponentTools(server: McpServer, ctx: McpContext): void {
     };
     walk(expanded);
 
-    return json({ instanceId: id, component: { id: def.id, name: def.name }, overridableParts: parts });
+    return json({
+      instanceId: id,
+      component: { id: def.id, name: def.name },
+      props: resolvedProps(def, instance),
+      availableProps: def.props ?? [],
+      overridableParts: parts,
+    });
+  }));
+
+  server.registerTool('set_component_props', {
+    title: 'Declare a component’s variant properties',
+    description:
+      'Defines the properties a component varies by, e.g. size: sm|md|lg. Declare properties first, ' +
+      'then use set_variant to say what each combination looks like.',
+    inputSchema: {
+      componentId: z.string(),
+      props: z.array(z.object({
+        name: z.string().min(1).max(40),
+        values: z.array(z.string().min(1)).min(1).max(20),
+        default: z.string().describe('Must be one of `values`.'),
+      })).max(8),
+    },
+  }, async ({ componentId, props }) => guard(() => {
+    const doc = requireDoc(ctx);
+    const def = doc.components?.[componentId];
+    if (!def) return fail(`No component "${componentId}".`);
+
+    for (const p of props) {
+      if (!p.values.includes(p.default)) {
+        return fail(`Property "${p.name}" has default "${p.default}", which is not one of its values.`);
+      }
+    }
+
+    commit(ctx, [{ t: 'component', action: 'update', component: { id: componentId, props } }]);
+    return json({
+      componentId,
+      props,
+      combinations: variantMatrix({ ...def, props }).length,
+      next: 'Use set_variant for each combination you want to look different. Undefined combinations render as the base component.',
+    });
+  }));
+
+  server.registerTool('set_variant', {
+    title: 'Define what a variant looks like',
+    description:
+      'Records style or text changes for a property combination. A partial match applies broadly — ' +
+      '{tone: "danger"} applies at every size — and a more specific combination refines it rather ' +
+      'than replacing it.',
+    inputSchema: {
+      componentId: z.string(),
+      match: z.record(z.string(), z.string()).describe('e.g. {"size": "lg"} or {"size": "lg", "tone": "danger"}.'),
+      overrides: z.array(z.object({
+        defId: z.string().describe('Node id inside the component definition.'),
+        text: z.string().optional(),
+        styles: StyleRecord.optional(),
+        hidden: z.boolean().optional(),
+      })).min(1).max(100),
+    },
+  }, async ({ componentId, match, overrides }) => guard(() => {
+    const doc = requireDoc(ctx);
+    const def = doc.components?.[componentId];
+    if (!def) return fail(`No component "${componentId}".`);
+
+    for (const [key, value] of Object.entries(match)) {
+      const prop = def.props?.find((p) => p.name === key);
+      if (!prop) return fail(`Component "${def.name}" has no property "${key}". Declare it with set_component_props first.`);
+      if (!prop.values.includes(value)) return fail(`Property "${key}" has no value "${value}". Values: ${prop.values.join(', ')}`);
+    }
+    for (const o of overrides) {
+      if (!doc.nodes[o.defId]) return fail(`No node "${o.defId}" in the definition. Call list_components for its structure.`);
+    }
+
+    commit(ctx, [{
+      t: 'variant', componentId, match,
+      overrides: Object.fromEntries(overrides.map((o) => [o.defId, {
+        ...(o.text !== undefined ? { text: o.text } : {}),
+        ...(o.styles ? { styles: o.styles } : {}),
+        ...(o.hidden !== undefined ? { hidden: o.hidden } : {}),
+      }])),
+    }]);
+    return json({ componentId, match, overridden: overrides.length });
+  }));
+
+  server.registerTool('set_instance_props', {
+    title: 'Set an instance’s variant properties',
+    description: 'Switches instances between variants, e.g. making one button large and another danger-toned.',
+    inputSchema: {
+      updates: z.array(z.object({
+        instanceId: z.string(),
+        props: z.record(z.string(), z.string()),
+      })).min(1).max(200),
+    },
+  }, async ({ updates }) => guard(() => {
+    const doc = requireDoc(ctx);
+    for (const u of updates) {
+      const instance = node(doc, u.instanceId);
+      if (instance.type !== 'instance') return fail(`${u.instanceId} is not a component instance.`);
+      const def = doc.components?.[instance.componentRef ?? ''];
+      for (const [key, value] of Object.entries(u.props)) {
+        const prop = def?.props?.find((p) => p.name === key);
+        if (!prop) return fail(`"${def?.name ?? 'That component'}" has no property "${key}".`);
+        if (!prop.values.includes(value)) return fail(`Property "${key}" has no value "${value}". Values: ${prop.values.join(', ')}`);
+      }
+    }
+    commit(ctx, [{ t: 'props', updates: updates.map((u) => ({ id: u.instanceId, props: u.props })) }]);
+    return json({ updated: updates.length });
   }));
 
   server.registerTool('detach_instance', {
@@ -1337,7 +1445,7 @@ function registerSessionTools(server: McpServer, ctx: McpContext): void {
       kind: 'agent-working', active: true, artboards,
       agent: ctx.connection.label ?? 'Agent', summary: summary ?? null,
     });
-    createSnapshot(doc.id, `Before: ${summary ?? ctx.connection.label ?? 'agent edit'}`);
+    void createSnapshot(doc.id, `Before: ${summary ?? ctx.connection.label ?? 'agent edit'}`).catch(() => {});
     return json({ marked: artboards, note: 'A restore point was saved before this work.' });
   }));
 
@@ -1365,7 +1473,7 @@ function registerSessionTools(server: McpServer, ctx: McpContext): void {
  * an agent can reconnect freely and the server can restart without breaking it.
  */
 export async function handleMcpRequest(req: Request, connection: Connection, baseUrl: string): Promise<Response> {
-  touchConnection(connection.code);
+  void touchConnection(connection.code);
 
   const server = buildMcpServer({ connection, baseUrl });
   const transport = new WebStandardStreamableHTTPServerTransport({

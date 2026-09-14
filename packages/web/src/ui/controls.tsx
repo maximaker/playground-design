@@ -7,6 +7,7 @@
  */
 
 import { useEffect, useRef, useState } from 'react';
+import { Icon } from './Icon.tsx';
 
 export function Field({ label, prop, children, wide }: {
   label: string; prop?: string; children: React.ReactNode; wide?: boolean;
@@ -26,8 +27,9 @@ export function Section({ title, children, defaultOpen = true, action }: {
   return (
     <section className="prop-section">
       <header>
-        <button onClick={() => setOpen((o) => !o)}>
-          <span className="twisty">{open ? '▾' : '▸'}</span> {title}
+        <button onClick={() => setOpen((o) => !o)} aria-expanded={open}>
+          <Icon name={open ? 'chevronDown' : 'chevronRight'} size={10} className="twisty" />
+          {title}
         </button>
         {action}
       </header>
@@ -111,6 +113,7 @@ export function NumberInput({ value, onCommit, min, max, step = 1, suffix = 'px'
         <button
           className="scrub"
           title="Drag to change"
+          aria-label="Drag to change value"
           onPointerDown={(e) => {
             e.preventDefault();
             const startX = e.clientX;
@@ -130,7 +133,7 @@ export function NumberInput({ value, onCommit, min, max, step = 1, suffix = 'px'
             el.addEventListener('pointermove', move);
             el.addEventListener('pointerup', up);
           }}
-        >⇔</button>
+        ><Icon name="arrowRight" size={11} /></button>
       )}
     </div>
   );
@@ -151,7 +154,7 @@ export function Select({ value, options, onCommit }: {
 
 export function SegmentedControl({ value, options, onCommit }: {
   value: string;
-  options: { value: string; label: string; title?: string }[];
+  options: { value: string; label: React.ReactNode; title?: string }[];
   onCommit: (v: string) => void;
 }) {
   return (
@@ -160,7 +163,9 @@ export function SegmentedControl({ value, options, onCommit }: {
         <button
           key={o.value}
           className={value === o.value ? 'is-active' : ''}
-          title={o.title ?? o.label}
+          title={o.title ?? (typeof o.label === 'string' ? o.label : undefined)}
+          aria-label={o.title ?? (typeof o.label === 'string' ? o.label : undefined)}
+          aria-pressed={value === o.value}
           onClick={() => onCommit(o.value)}
         >
           {o.label}

@@ -1,5 +1,5 @@
 {
-  "name": "@canvas/web",
+  "name": "@playground/web",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -10,7 +10,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@canvas/shared": "*",
+    "@playground/shared": "*",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "zustand": "^5.0.2"

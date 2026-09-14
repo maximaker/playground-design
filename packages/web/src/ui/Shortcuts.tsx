@@ -5,6 +5,7 @@
  * most useful thing the sheet does is confirm that the shortcut already in
  * someone's fingers works here too.
  */
+import { Icon } from './Icon.tsx';
 
 const GROUPS: { title: string; items: [string, string][] }[] = [
   {
@@ -78,7 +79,7 @@ export function Shortcuts({ onClose }: { onClose: () => void }) {
       <div className="modal is-wide" onPointerDown={(e) => e.stopPropagation()}>
         <header className="modal-header">
           <h2>Keyboard shortcuts</h2>
-          <button className="icon-button" onClick={onClose} aria-label="Close">✕</button>
+          <button className="icon-button" onClick={onClose} aria-label="Close"><Icon name="close" size={14} /></button>
         </header>
         <div className="modal-body">
           <p className="modal-lede">

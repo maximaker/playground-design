@@ -3,8 +3,9 @@
  */
 
 import { useMemo, useState } from 'react';
-import { emitJsx, emitHtml, emitStandalone } from '@canvas/shared';
+import { emitJsx, emitHtml, emitStandalone } from '@playground/shared';
 import { useCanvas, getDoc } from '../state/store.ts';
+import { Icon } from '../ui/Icon.tsx';
 
 type Format = 'jsx-tailwind' | 'jsx-inline' | 'html' | 'css' | 'standalone';
 
@@ -71,7 +72,7 @@ export function Export({ onClose }: { onClose: () => void }) {
       <div className="modal is-wide" onPointerDown={(e) => e.stopPropagation()}>
         <header className="modal-header">
           <h2>Export {node ? <span className="dim">· {node.name}</span> : null}</h2>
-          <button className="icon-button" onClick={onClose} aria-label="Close">✕</button>
+          <button className="icon-button" onClick={onClose} aria-label="Close"><Icon name="close" size={14} /></button>
         </header>
 
         <div className="modal-body">

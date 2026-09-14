@@ -1,7 +1,7 @@
-/** Uploaded images, fonts and rendered exports. Stored in SQLite to keep the server single-file. */
+/** Uploaded images, fonts and rendered exports. */
 
-import { newId } from '@canvas/shared';
-import { db, now } from './db.ts';
+import { newId } from '@playground/shared';
+import { persistence } from './persistence.ts';
 
 export const MAX_ASSET_BYTES = 25 * 1024 * 1024;
 
@@ -14,7 +14,12 @@ const ALLOWED_MIME = new Set([
 
 export class AssetError extends Error {}
 
-export function storeAsset(docId: string | null, mime: string, name: string, bytes: Buffer): string {
+export async function storeAsset(
+  docId: string | null,
+  mime: string,
+  name: string,
+  bytes: Buffer,
+): Promise<string> {
   if (bytes.length > MAX_ASSET_BYTES) {
     throw new AssetError(`Asset is ${(bytes.length / 1e6).toFixed(1)}MB; the limit is ${MAX_ASSET_BYTES / 1e6}MB.`);
   }
@@ -22,14 +27,12 @@ export function storeAsset(docId: string | null, mime: string, name: string, byt
     throw new AssetError(`Unsupported type "${mime}". Allowed: ${[...ALLOWED_MIME].join(', ')}`);
   }
   const id = newId('a');
-  db.prepare('INSERT INTO assets (id, doc_id, mime, name, bytes, created_at) VALUES (?, ?, ?, ?, ?, ?)')
-    .run(id, docId, mime, name, bytes, now());
+  const store = await persistence();
+  await store.saveAsset({ id, docId, mime, name, bytes, createdAt: Date.now() });
   return id;
 }
 
-export function getAsset(id: string): { mime: string; name: string | null; bytes: Buffer } | null {
-  const row = db.prepare('SELECT mime, name, bytes FROM assets WHERE id = ?').get(id) as
-    { mime: string; name: string | null; bytes: Uint8Array } | undefined;
-  if (!row) return null;
-  return { mime: row.mime, name: row.name, bytes: Buffer.from(row.bytes) };
+export async function getAsset(id: string) {
+  const store = await persistence();
+  return store.loadAsset(id);
 }

@@ -8,6 +8,7 @@
 
 import { useState } from 'react';
 import { useCanvas } from '../state/store.ts';
+import { Icon } from '../ui/Icon.tsx';
 
 export function Import({ onClose }: { onClose: () => void }) {
   const docId = useCanvas((s) => s.docId);
@@ -50,7 +51,7 @@ export function Import({ onClose }: { onClose: () => void }) {
       <div className="modal" onPointerDown={(e) => e.stopPropagation()}>
         <header className="modal-header">
           <h2>Import a webpage</h2>
-          <button className="icon-button" onClick={onClose} aria-label="Close">✕</button>
+          <button className="icon-button" onClick={onClose} aria-label="Close"><Icon name="close" size={14} /></button>
         </header>
 
         <div className="modal-body">

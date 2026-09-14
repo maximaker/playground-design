@@ -7,9 +7,11 @@
  */
 
 import { useMemo } from 'react';
-import { componentsOf, collectSlots, instancesOf, makeNode } from '@canvas/shared';
+import { componentsOf, collectSlots, instancesOf, makeNode } from '@playground/shared';
 import { useCanvas, getDoc, currentPage } from '../state/store.ts';
 import { createComponentFromSelection, detachSelection } from '../hooks/commands.ts';
+import { Icon } from '../ui/Icon.tsx';
+import { VariantEditor, selectedDefinition } from './VariantEditor.tsx';
 
 export function Components() {
   const version = useCanvas((s) => s.version);
@@ -58,6 +60,9 @@ export function Components() {
     ]);
   };
 
+  // When the selection is inside a definition, show that component's variants.
+  const definition = selectedDefinition();
+
   const selectionIsInstance = selection.some((key) => {
     const node = doc?.nodes[key.split('::')[0]!];
     return node?.type === 'instance';
@@ -100,17 +105,31 @@ export function Components() {
               <span className="dim">
                 {count} instance{count === 1 ? '' : 's'}
                 {slots.length ? ` · ${slots.length} slot${slots.length === 1 ? '' : 's'}` : ''}
+                {c.props?.length ? ` · ${c.props.length} prop${c.props.length === 1 ? '' : 's'}` : ''}
               </span>
             </button>
             <button
               className="icon-button"
               title="Edit the component definition"
+              aria-label={`Edit ${c.name}`}
               onClick={() => root && select([root.id])}
-            >✎</button>
-            <button className="icon-button" title="Delete component" onClick={() => remove(c.id, c.name)}>✕</button>
+            ><Icon name="edit" size={12} /></button>
+            <button
+              className="icon-button"
+              title="Delete component"
+              aria-label={`Delete ${c.name}`}
+              onClick={() => remove(c.id, c.name)}
+            ><Icon name="trash" size={12} /></button>
           </div>
         );
       })}
+
+      {definition && (
+        <div className="component-detail">
+          <h4 className="component-detail-title">{definition.name}</h4>
+          <VariantEditor def={definition} />
+        </div>
+      )}
 
       {components.length > 0 && (
         <p className="panel-hint">

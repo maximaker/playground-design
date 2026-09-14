@@ -7,10 +7,10 @@ import {
   type Box, type NodeId, type Op, type SnapGuide,
   makeNode, boxOf, getArtboardPosition, getArtboardSize,
   DEFAULT_ARTBOARD_STYLES, defaultStylesFor, makeNote, notesOf,
-} from '@canvas/shared';
+} from '@playground/shared';
 import { useCanvas, getDoc, currentPage, topLevelSelection, getNodeById } from '../state/store.ts';
 import { resolveKey, treeNodeId } from '../state/keys.ts';
-import { artboardOf } from '@canvas/shared';
+import { artboardOf } from '@playground/shared';
 import { Artboard } from './Artboard.tsx';
 import { NoteCard } from './NoteCard.tsx';
 import { Overlay } from './Overlay.tsx';
@@ -41,7 +41,7 @@ interface CanvasProps {
 }
 
 export function Canvas({ onContextMenu }: CanvasProps) {
-  const version = useCanvas((s) => s.version);
+  const structureVersion = useCanvas((s) => s.structureVersion);
   const viewport = useCanvas((s) => s.viewport);
   const setViewport = useCanvas((s) => s.setViewport);
   const tool = useCanvas((s) => s.tool);
@@ -67,6 +67,10 @@ export function Canvas({ onContextMenu }: CanvasProps) {
   // Guides live in the working space of whatever is being dragged; the space
   // they belong to is recorded so the overlay can convert them to the screen.
   const [guides, setGuides] = useState<{ guides: SnapGuide[]; space: 'canvas' | NodeId } | null>(null);
+  const [dragging, setDragging] = useState(false);
+  // Hover hit-testing reads layout inside an iframe, so it runs at most once a
+  // frame rather than once per pointermove event.
+  const hoverRaf = useRef(0);
 
   const page = currentPage();
 
@@ -107,7 +111,7 @@ export function Canvas({ onContextMenu }: CanvasProps) {
     }
     return near;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, viewport.x, viewport.y, viewport.zoom, version, selection]);
+  }, [page, viewport.x, viewport.y, viewport.zoom, structureVersion, selection]);
 
   useEffect(() => {
     const el = containerRef.current;
@@ -168,6 +172,7 @@ export function Canvas({ onContextMenu }: CanvasProps) {
       }
     }
 
+    setDragging(true);
     const panning = spacePanning || tool === 'hand' || e.button === 1;
     if (panning) {
       drag.current = { kind: 'pan', startX: e.clientX, startY: e.clientY, originX: viewport.x, originY: viewport.y };
@@ -275,10 +280,14 @@ export function Canvas({ onContextMenu }: CanvasProps) {
     const vp = useCanvas.getState().viewport;
 
     if (d.kind === 'none') {
-      const hit = hitTest(e.clientX, e.clientY);
-      setHovered(hit?.nodeId ?? null);
-      // Holding Alt over another node measures the distance to the selection.
-      setMeasureTo(e.altKey && hit ? hit.nodeId : null);
+      const { clientX, clientY, altKey } = e;
+      cancelAnimationFrame(hoverRaf.current);
+      hoverRaf.current = requestAnimationFrame(() => {
+        const hit = hitTest(clientX, clientY);
+        setHovered(hit?.nodeId ?? null);
+        // Holding Alt over another node measures the distance to the selection.
+        setMeasureTo(altKey && hit ? hit.nodeId : null);
+      });
       return;
     }
 
@@ -462,6 +471,7 @@ export function Canvas({ onContextMenu }: CanvasProps) {
     const doc = getDoc();
     const d = drag.current;
     drag.current = { kind: 'none' };
+    setDragging(false);
     setMarquee(null);
     setDrawPreview(null);
     setDropTarget(null);
@@ -555,7 +565,7 @@ export function Canvas({ onContextMenu }: CanvasProps) {
     }
     return near;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, viewport.x, viewport.y, viewport.zoom, version, selection]);
+  }, [page, viewport.x, viewport.y, viewport.zoom, structureVersion, selection]);
     if (!doc || !page) return;
 
     const vp = useCanvas.getState().viewport;
@@ -661,7 +671,7 @@ export function Canvas({ onContextMenu }: CanvasProps) {
         {notesOf(page).map((note) => <NoteCard key={note.id} note={note} />)}
       </div>
 
-      <Overlay version={version} dropTarget={dropTarget} guides={guides} />
+      <Overlay version={structureVersion} dropTarget={dropTarget} guides={guides} live={dragging} />
 
       {marquee && <div className="marquee" style={marquee} />}
       {drawPreview && <div className="draw-preview" style={drawPreview} />}

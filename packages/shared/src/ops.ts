@@ -12,8 +12,8 @@
 
 import {
   type CanvasDocument, type CanvasNode, type NodeId, type StyleMap, type Page,
-  type Token, type Note, type ComponentDef, type InstanceOverride,
-  descendants, isAncestorOf, makeNote, newId,
+  type Token, type Note, type ComponentDef, type ComponentVariant, type InstanceOverride,
+  descendants, isAncestorOf, makeNote, newId, variantKey,
 } from './model.ts';
 
 export type Op =
@@ -31,6 +31,15 @@ export type Op =
   | { t: 'page'; action: 'add' | 'remove' | 'rename'; page: Page }
   | { t: 'note'; action: 'add' | 'update' | 'remove'; pageId: string; note: Partial<Note> & { id: string } }
   | { t: 'component'; action: 'add' | 'update' | 'remove'; component: Partial<ComponentDef> & { id: string } }
+  | {
+      t: 'variant';
+      componentId: string;
+      /** Property combination this applies to. */
+      match: Record<string, string>;
+      /** Per-definition-node changes; null clears the whole variant. */
+      overrides: Record<NodeId, InstanceOverride | null> | null;
+    }
+  | { t: 'props'; updates: { id: NodeId; props: Record<string, string | null> }[] }
   | {
       t: 'override';
       updates: {
@@ -80,6 +89,8 @@ export function applyOp(doc: CanvasDocument, op: Op): Op {
     case 'note': return applyNote(doc, op);
     case 'component': return applyComponent(doc, op);
     case 'override': return applyOverride(doc, op);
+    case 'variant': return applyVariant(doc, op);
+    case 'props': return applyProps(doc, op);
   }
 }
 
@@ -414,6 +425,72 @@ function applyOverride(doc: CanvasDocument, op: Extract<Op, { t: 'override' }>):
   return { t: 'override', updates: inverse };
 }
 
+function applyVariant(doc: CanvasDocument, op: Extract<Op, { t: 'variant' }>): Op {
+  const def = doc.components?.[op.componentId];
+  if (!def) throw new OpError(`component ${op.componentId} not found`);
+  if (!def.variants) def.variants = [];
+
+  const key = variantKey(op.match);
+  const index = def.variants.findIndex((v) => variantKey(v.match) === key);
+  const existing = index >= 0 ? def.variants[index]! : null;
+
+  // Clearing the variant entirely.
+  if (op.overrides === null) {
+    if (!existing) return { t: 'variant', componentId: op.componentId, match: op.match, overrides: null };
+    def.variants.splice(index, 1);
+    return {
+      t: 'variant', componentId: op.componentId, match: op.match,
+      overrides: existing.overrides as Record<NodeId, InstanceOverride | null>,
+    };
+  }
+
+  const variant: ComponentVariant = existing
+    ? { ...existing, overrides: { ...existing.overrides } }
+    : { id: newId('var'), match: { ...op.match }, overrides: {} };
+
+  const inverse: Record<NodeId, InstanceOverride | null> = {};
+  for (const [defId, override] of Object.entries(op.overrides)) {
+    inverse[defId] = variant.overrides[defId] ? structuredClone(variant.overrides[defId]!) : null;
+    if (override === null) delete variant.overrides[defId];
+    else {
+      variant.overrides[defId] = {
+        ...variant.overrides[defId],
+        ...override,
+        styles: override.styles ? { ...variant.overrides[defId]?.styles, ...override.styles } : variant.overrides[defId]?.styles,
+        attrs: override.attrs ? { ...variant.overrides[defId]?.attrs, ...override.attrs } : variant.overrides[defId]?.attrs,
+      };
+    }
+  }
+
+  if (index >= 0) def.variants[index] = variant;
+  else def.variants.push(variant);
+
+  // A variant with nothing left in it is noise in the matrix.
+  if (!Object.keys(variant.overrides).length) {
+    def.variants = def.variants.filter((v) => variantKey(v.match) !== key);
+  }
+
+  return { t: 'variant', componentId: op.componentId, match: op.match, overrides: inverse };
+}
+
+function applyProps(doc: CanvasDocument, op: Extract<Op, { t: 'props' }>): Op {
+  const inverse: { id: NodeId; props: Record<string, string | null> }[] = [];
+  for (const u of op.updates) {
+    const node = doc.nodes[u.id];
+    if (!node) continue;
+    if (!node.props) node.props = {};
+
+    const before: Record<string, string | null> = {};
+    for (const [key, value] of Object.entries(u.props)) {
+      before[key] = node.props[key] ?? null;
+      if (value === null) delete node.props[key];
+      else node.props[key] = value;
+    }
+    inverse.push({ id: u.id, props: before });
+  }
+  return { t: 'props', updates: inverse };
+}
+
 function clamp(n: number, lo: number, hi: number): number {
   if (!Number.isFinite(n) || n < 0) return hi;
   return Math.max(lo, Math.min(hi, n));
@@ -452,3 +529,64 @@ export function cloneSubtree(
 }
 
 export function batchId(): string { return newId('b'); }
+
+// ---------------------------------------------------------------------------
+// Change tracking
+// ---------------------------------------------------------------------------
+
+export interface TouchedNodes {
+  /** Nodes whose own content changed. */
+  nodes: NodeId[];
+  /** Nodes whose child list changed, so they must re-render their children. */
+  structure: NodeId[];
+  /** True when something document-wide changed: tokens, pages, components. */
+  global: boolean;
+}
+
+/**
+ * Which nodes an op affects.
+ *
+ * This is what lets the canvas re-render only what changed. Ops are already
+ * id-addressed, so deriving this is cheap — and without it every keystroke
+ * re-renders every node in the document, which on a large page means a drag
+ * runs at single-digit frames per second.
+ */
+export function touchedNodes(op: Op): TouchedNodes {
+  const empty = { nodes: [] as NodeId[], structure: [] as NodeId[], global: false };
+  switch (op.t) {
+    case 'insert':
+      return {
+        nodes: op.nodes.map((n) => n.id),
+        structure: op.parent ? [op.parent] : [],
+        global: op.parent === null,
+      };
+    case 'remove':
+      // The parent is unknown here without the document, so treat removals as
+      // structural everywhere; they are rare compared with styling.
+      return { nodes: op.ids, structure: [], global: true };
+    case 'styles':
+    case 'text':
+    case 'rename':
+    case 'attrs':
+    case 'meta':
+    case 'tag':
+      return { ...empty, nodes: op.updates.map((u) => u.id) };
+    case 'props':
+      return { ...empty, nodes: op.updates.map((u) => u.id) };
+    case 'override':
+      return { ...empty, nodes: op.updates.map((u) => u.id) };
+    case 'move':
+      return {
+        nodes: op.moves.map((m) => m.id),
+        structure: op.moves.flatMap((m) => (m.parent ? [m.parent] : [])),
+        global: op.moves.some((m) => m.parent === null),
+      };
+    case 'doc':
+    case 'tokens':
+    case 'page':
+    case 'note':
+    case 'component':
+    case 'variant':
+      return { ...empty, global: true };
+  }
+}

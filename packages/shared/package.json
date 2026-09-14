@@ -1,5 +1,5 @@
 {
-  "name": "@canvas/shared",
+  "name": "@playground/shared",
   "version": "0.1.0",
   "type": "module",
   "exports": {

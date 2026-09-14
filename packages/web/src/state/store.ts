@@ -10,8 +10,8 @@
 import { create } from 'zustand';
 import {
   type CanvasDocument, type CanvasNode, type NodeId, type Op, type OpEnvelope, type Page,
-  applyOp, artboardOf, batchId, descendants,
-} from '@canvas/shared';
+  applyOp, artboardOf, batchId, descendants, touchedNodes,
+} from '@playground/shared';
 import { styleOps, textOps, treeNodeId } from './keys.ts';
 
 export type Tool = 'move' | 'frame' | 'text' | 'rect' | 'ellipse' | 'image' | 'hand' | 'note';
@@ -40,10 +40,27 @@ interface CanvasState {
   docId: string | null;
   doc: CanvasDocument | null;
   version: number;
+  /**
+   * Per-node change counters. Node components subscribe to their own entry, so
+   * a style edit re-renders one element rather than the whole document.
+   */
+  nodeVersions: Record<NodeId, number>;
+  /** Bumped when children lists, tokens, pages or components change. */
+  structureVersion: number;
+  /**
+   * Bumped only by changes that can affect an artboard's generated stylesheet
+   * or font set — variant styles, font-family, tokens, structure.
+   *
+   * Rebuilding those means walking an artboard's whole subtree, so keying them
+   * to the document-wide version made every drag frame O(nodes).
+   */
+  styleEpoch: number;
   rev: number;
   pageId: string | null;
 
   connection: 'connecting' | 'open' | 'closed';
+  /** How this client is syncing. Polling has no presence and no agent RPC. */
+  transport: 'websocket' | 'polling';
   /** A non-retryable problem (e.g. the document does not exist). */
   fatalError: string | null;
   peers: PeerInfo[];
@@ -58,6 +75,11 @@ interface CanvasState {
   editingText: NodeId | null;
   /** Which style variant the properties panel is editing (`null` = base). */
   activeVariant: string | null;
+  /**
+   * When set, edits to the component definition are recorded into this variant
+   * rather than the base component.
+   */
+  editingVariant: { componentId: string; match: Record<string, string> } | null;
 
   viewport: Viewport;
   tool: Tool;
@@ -76,6 +98,7 @@ interface CanvasState {
 interface CanvasActions {
   loadDocument(doc: CanvasDocument): void;
   setConnection(s: CanvasState['connection']): void;
+  setTransport(t: CanvasState['transport']): void;
   setFatalError(message: string | null): void;
   setPeers(p: PeerInfo[]): void;
   setSend(fn: CanvasState['send']): void;
@@ -100,6 +123,7 @@ interface CanvasActions {
   selectNote(id: string | null): void;
   setEditingText(id: NodeId | null): void;
   setActiveVariant(v: string | null): void;
+  setEditingVariant(v: { componentId: string; match: Record<string, string> } | null): void;
   /** Writes text to a node or, for a key inside an instance, to its override. */
   setNodeText(key: string, text: string): void;
   /** Writes styles, routing each key to a node or an instance override. */
@@ -117,13 +141,71 @@ interface CanvasActions {
 
 const MAX_UNDO = 200;
 
+/**
+ * Applies the change-tracking side of a batch of ops.
+ *
+ * A change to a component definition has to invalidate every instance of that
+ * component, because those instances render the definition.
+ */
+function trackChanges(
+  doc: CanvasDocument,
+  ops: Op[],
+  versions: Record<NodeId, number>,
+): { nodeVersions: Record<NodeId, number>; structureBump: number; styleBump: number } {
+  const next = { ...versions };
+  let structureBump = 0;
+  let styleBump = 0;
+
+  const bump = (id: NodeId) => { next[id] = (next[id] ?? 0) + 1; };
+
+  const definitionRoots = Object.values(doc.components ?? {});
+
+  for (const op of ops) {
+    const touched = touchedNodes(op);
+    if (touched.global) { structureBump = 1; styleBump = 1; }
+    for (const id of touched.structure) { bump(id); structureBump = 1; styleBump = 1; }
+
+    // Only these can change an artboard's generated stylesheet or font set.
+    if (op.t === 'styles') {
+      const affects = op.updates.some(
+        (u) => u.selector !== undefined || Object.keys(u.styles).some((k) => k === 'font-family'),
+      );
+      if (affects) styleBump = 1;
+    }
+    if (op.t === 'tokens' || op.t === 'variant' || op.t === 'override' || op.t === 'props') styleBump = 1;
+
+    for (const id of touched.nodes) {
+      bump(id);
+      // Walk up to see whether this node belongs to a component definition.
+      let cursor: NodeId | null = id;
+      let guard = 0;
+      while (cursor && guard++ < 200) {
+        const owner = definitionRoots.find((c) => c.root === cursor);
+        if (owner) {
+          for (const node of Object.values(doc.nodes)) {
+            if (node.type === 'instance' && node.componentRef === owner.id) bump(node.id);
+          }
+          break;
+        }
+        cursor = doc.nodes[cursor]?.parent ?? null;
+      }
+    }
+  }
+
+  return { nodeVersions: next, structureBump, styleBump };
+}
+
 export const useCanvas = create<CanvasState & CanvasActions>((set, get) => ({
   docId: null,
   doc: null,
   version: 0,
+  nodeVersions: {},
+  structureVersion: 0,
+  styleEpoch: 0,
   rev: 0,
   pageId: null,
   connection: 'connecting',
+  transport: 'websocket',
   fatalError: null,
   peers: [],
   clientId: `c_${Math.random().toString(36).slice(2, 10)}`,
@@ -133,6 +215,7 @@ export const useCanvas = create<CanvasState & CanvasActions>((set, get) => ({
   selectedNote: null,
   editingText: null,
   activeVariant: null,
+  editingVariant: null,
   viewport: { x: 80, y: 80, zoom: 0.55 },
   tool: 'move',
   spacePanning: false,
@@ -146,11 +229,14 @@ export const useCanvas = create<CanvasState & CanvasActions>((set, get) => ({
     set({
       doc, docId: doc.id, rev: doc.rev, pageId: doc.pages[0]?.id ?? null,
       version: get().version + 1, selection: [], undoStack: [], redoStack: [],
+      nodeVersions: {}, structureVersion: get().structureVersion + 1,
+      styleEpoch: get().styleEpoch + 1,
       fatalError: null,
     });
   },
 
   setConnection(connection) { set({ connection }); },
+  setTransport(transport) { set({ transport }); },
   setFatalError(fatalError) { set({ fatalError }); },
   setPeers(peers) { set({ peers: peers.filter((p) => p.clientId !== get().clientId) }); },
   setSend(send) { set({ send }); },
@@ -171,8 +257,12 @@ export const useCanvas = create<CanvasState & CanvasActions>((set, get) => ({
     }
 
     doc.rev += ops.length;
+    const tracked = trackChanges(doc, ops, get().nodeVersions);
     set({
       version: get().version + 1,
+      nodeVersions: tracked.nodeVersions,
+      structureVersion: get().structureVersion + tracked.structureBump,
+      styleEpoch: get().styleEpoch + tracked.styleBump,
       rev: doc.rev,
       undoStack: opts?.skipUndo ? undoStack : [...undoStack, { ops: inverses, selection }].slice(-MAX_UNDO),
       redoStack: opts?.skipUndo ? get().redoStack : [],
@@ -187,14 +277,23 @@ export const useCanvas = create<CanvasState & CanvasActions>((set, get) => ({
   applyRemote(ops) {
     const { doc } = get();
     if (!doc) return;
-    let changed = false;
+    const applied: Op[] = [];
     for (const { op, rev } of ops) {
       // The server echoes our own ops back; skip anything we already applied.
       if (rev <= doc.rev) continue;
-      try { applyOp(doc, op); doc.rev = rev; changed = true; }
+      try { applyOp(doc, op); doc.rev = rev; applied.push(op); }
       catch { /* a diverged op is recovered by the server's `rejected` resync */ }
     }
-    if (changed) set({ version: get().version + 1, rev: doc.rev });
+    if (applied.length) {
+      const tracked = trackChanges(doc, applied, get().nodeVersions);
+      set({
+        version: get().version + 1,
+        nodeVersions: tracked.nodeVersions,
+        structureVersion: get().structureVersion + tracked.structureBump,
+        styleEpoch: get().styleEpoch + tracked.styleBump,
+        rev: doc.rev,
+      });
+    }
   },
 
   pushUndo(inverseOps, selection) {
@@ -217,9 +316,13 @@ export const useCanvas = create<CanvasState & CanvasActions>((set, get) => ({
       catch { get().toast('Could not undo — the document changed underneath.', 'error'); return; }
     }
     doc.rev += entry.ops.length;
+    const tracked = trackChanges(doc, entry.ops, get().nodeVersions);
 
     set({
       version: get().version + 1,
+      nodeVersions: tracked.nodeVersions,
+      structureVersion: get().structureVersion + tracked.structureBump,
+      styleEpoch: get().styleEpoch + tracked.styleBump,
       rev: doc.rev,
       undoStack: undoStack.slice(0, -1),
       redoStack: [...get().redoStack, { ops: redoOps, selection: selectionBefore }].slice(-MAX_UNDO),
@@ -241,9 +344,13 @@ export const useCanvas = create<CanvasState & CanvasActions>((set, get) => ({
       catch { get().toast('Could not redo — the document changed underneath.', 'error'); return; }
     }
     doc.rev += entry.ops.length;
+    const tracked = trackChanges(doc, entry.ops, get().nodeVersions);
 
     set({
       version: get().version + 1,
+      nodeVersions: tracked.nodeVersions,
+      structureVersion: get().structureVersion + tracked.structureBump,
+      styleEpoch: get().styleEpoch + tracked.styleBump,
       rev: doc.rev,
       redoStack: redoStack.slice(0, -1),
       undoStack: [...get().undoStack, { ops: undoOps, selection: selectionBefore }].slice(-MAX_UNDO),
@@ -270,14 +377,15 @@ export const useCanvas = create<CanvasState & CanvasActions>((set, get) => ({
   selectNote(selectedNote) { set({ selectedNote, selection: selectedNote ? [] : get().selection }); },
   setEditingText(editingText) { set({ editingText }); },
   setActiveVariant(activeVariant) { set({ activeVariant }); },
+  setEditingVariant(editingVariant) { set({ editingVariant }); },
 
   setNodeText(key, text) {
-    const ops = textOps(get().doc, key, text);
+    const ops = textOps(get().doc, key, text, get().editingVariant);
     if (ops.length) get().dispatch(ops);
   },
 
   setNodeStyles(keys, styles, selector) {
-    const ops = styleOps(get().doc, keys, styles, selector);
+    const ops = styleOps(get().doc, keys, styles, selector, get().editingVariant);
     if (ops.length) get().dispatch(ops);
   },
 
@@ -296,6 +404,13 @@ export const useCanvas = create<CanvasState & CanvasActions>((set, get) => ({
 
   dismissToast(id) { set({ toasts: get().toasts.filter((t) => t.id !== id) }); },
 }));
+
+// Diagnostics hook. Exposing the store makes it possible to profile the editor
+// from the console against a real document, which is the only way to find the
+// costs that only appear at scale.
+if (typeof window !== 'undefined') {
+  (window as unknown as { __playground?: unknown }).__playground = { store: useCanvas };
+}
 
 // ---------------------------------------------------------------------------
 // Selectors and derived helpers
@@ -336,6 +451,11 @@ export function selectionArtboards(ids: NodeId[]): NodeId[] {
   const doc = getDoc();
   if (!doc) return [];
   return [...new Set(ids.map((id) => artboardOf(doc, id)).filter((x): x is NodeId => !!x))];
+}
+
+/** A node's own change counter, for per-node subscriptions. */
+export function useNodeVersion(id: NodeId): number {
+  return useCanvas((s) => s.nodeVersions[id] ?? 0);
 }
 
 export function subtreeSize(id: NodeId): number {

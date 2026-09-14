@@ -1,9 +1,10 @@
 /** Design tokens: named values emitted as CSS custom properties, with themes. */
 
 import { useState } from 'react';
-import type { Token, TokenGroup } from '@canvas/shared';
-import { tokenToCssVar } from '@canvas/shared';
+import type { Token, TokenGroup } from '@playground/shared';
+import { tokenToCssVar } from '@playground/shared';
 import { useCanvas, getDoc } from '../state/store.ts';
+import { Icon } from '../ui/Icon.tsx';
 
 const GROUPS: TokenGroup[] = ['color', 'space', 'radius', 'font', 'shadow', 'duration'];
 
@@ -39,6 +40,7 @@ export function Tokens() {
         ))}
         <button
           className="add-variant"
+          aria-label="Add a theme"
           title="Add a theme"
           onClick={() => {
             const name = window.prompt('Theme name')?.trim();
@@ -47,7 +49,7 @@ export function Tokens() {
             commit(doc.tokens.map((t) => ({ ...t, values: { ...t.values, [name]: t.values[name] ?? t.values.default ?? '' } })));
             setTheme(name);
           }}
-        >+</button>
+        ><Icon name="plus" size={12} /></button>
       </div>
 
       {GROUPS.map((group) => {
@@ -76,7 +78,9 @@ export function Tokens() {
                   onBlur={(e) => e.target.value !== (t.values[theme] ?? '') && update(t.name, e.target.value)}
                   onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); e.stopPropagation(); }}
                 />
-                <button className="icon-button" title="Delete token" onClick={() => remove(t.name)}>✕</button>
+                <button className="icon-button" title="Delete token" aria-label={`Delete ${t.name}`} onClick={() => remove(t.name)}>
+                  <Icon name="close" size={12} />
+                </button>
               </div>
             ))}
           </div>

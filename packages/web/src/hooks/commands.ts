@@ -8,7 +8,7 @@
 import {
   type NodeId, type Op, type StyleMap,
   cloneSubtree, makeNode, defaultStylesFor, detachedNodes, getArtboardPosition, newId,
-} from '@canvas/shared';
+} from '@playground/shared';
 import { useCanvas, getDoc, currentPage, topLevelSelection } from '../state/store.ts';
 import { nodeRect } from '../canvas/registry.ts';
 import { parsePx } from '../canvas/styles.ts';

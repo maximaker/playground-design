@@ -1,4 +1,4 @@
-# Canvas
+# Playground
 
 A design tool whose documents are real HTML and CSS — and that coding agents can edit alongside you.
 
@@ -6,7 +6,7 @@ Draw on an infinite canvas with direct manipulation. Every element is a real DOM
 computed styles, real flexbox, real font rendering. There is no export step that translates a
 proprietary scene graph into code: the design already *is* the code.
 
-The other half is the agent surface. Canvas hosts an MCP server that lets Claude Code, Cursor,
+The other half is the agent surface. Playground hosts an MCP server that lets Claude Code, Cursor,
 Copilot or Claude Desktop read and write the live document — inspect the tree, take screenshots,
 write HTML, restyle layers, pull JSX. Agent edits appear in the browser within a frame, are
 attributed in version history, and are undoable.
@@ -39,7 +39,7 @@ faithful (text can re-wrap) and needs someone to have the document open.
 Open a document, click **Connect agent**, generate a code, and run the line it gives you:
 
 ```bash
-claude mcp add canvas --transport http http://localhost:4000/mcp/YOUR-CODE-HERE
+claude mcp add playground --transport http http://localhost:4000/mcp/YOUR-CODE-HERE
 ```
 
 Then ask your agent to *"describe what's on the Canvas artboard"* — or just *"build me a pricing
@@ -79,6 +79,9 @@ need a real layout engine reach into a connected tab, and they say so plainly wh
 | `get_instance` | What an instance renders, and which parts can be overridden |
 | `set_override` | Change one instance without touching the others |
 | `detach_instance` | Convert an instance back to ordinary layers |
+| `set_component_props` | Declare the properties a component varies by |
+| `set_variant` | Define what a property combination looks like |
+| `set_instance_props` | Switch instances between variants |
 
 **Orientation and reading**
 
@@ -141,10 +144,16 @@ and the answer comes back on the card. This is pen.dev's framing — an agent wo
 design file with a chatbox bolted on — and it fits a canvas far better than a chat log, because the
 request keeps its spatial context.
 
-**Components.** Create one from a selection; it is replaced by an instance so the canvas keeps
-rendering the same pixels. Editing the component updates every instance; editing inside an instance
-writes an override for that one only, and the panel says so. Mark a layer `data-slot` to let
-instances supply their own content. Detach bakes the overrides in and drops the link.
+**Components and variants.** Create a component from a selection; it is replaced by an instance so
+the canvas keeps rendering the same pixels. Declare properties (`size: sm|md|lg`, `tone: …`) and each
+combination can look different. The cascade is base → matching variants, least specific first → the
+instance's own overrides, so `{tone: danger}` applies at every size and `{size: lg, tone: danger}`
+refines it rather than replacing it. Mark a layer `data-slot` to let instances supply their own
+content. Detach bakes everything in and drops the link.
+
+**Appearance.** Light and dark themes, following the system by default. Interface scale is a separate
+control from browser zoom, because browser zoom scales the canvas too — and the canvas has to stay at
+its true size while you design.
 
 **Import from a URL.** Fetches a page and its stylesheets and parses them into layers. This is the
 thing an HTML-native model can do that a vector tool cannot — it is not a conversion, it is the same
@@ -195,6 +204,26 @@ Coding agent ──MCP/HTTP──┘         │
 
 ---
 
+## Deployment
+
+The app runs in two shapes from one codebase:
+
+| | Self-hosted (Node) | Vercel |
+|---|---|---|
+| Storage | SQLite | Vercel Blob |
+| Sync | WebSocket, instant | HTTP polling, ~1.5s |
+| Presence | Yes | No |
+| Agent screenshots | Yes (Playwright) | No |
+| Live computed styles | Yes | Authored styles only |
+
+Vercel's serverless runtime has no persistent filesystem and cannot hold a WebSocket open, so the
+client detects the missing socket and falls back to polling, and persistence goes to Blob. Everything
+else — the editor, agent read/write, components, import, export — works the same. Screenshots need a
+browser the server can drive, so they are a self-hosted capability.
+
+Blob has no transactions, so two people editing the same document on the hosted version can clobber
+one another. Self-host for real collaborative work.
+
 ## Deviations from the PRD
 
 Worth stating plainly, since the PRD is in this repo:
@@ -204,9 +233,6 @@ Worth stating plainly, since the PRD is in this repo:
   diverges is handed the authoritative document. This is correct for concurrent editing and much
   simpler, but it does not merge truly simultaneous edits to the same property as gracefully as a
   CRDT would. Swapping the transport later does not change the op vocabulary.
-- **Components have no variants.** A component has slots and per-instance overrides, but not a
-  variant matrix (`size=lg, state=hover`). Overrides cover most of what variants are used for; a
-  proper variant system is a separate build.
 - **Not built:** shaders, the pen tool, Figma paste, the Snapshot browser extension, live data
   binding, animation and prototyping, presentation mode, and the in-app AI assistant. These are M5+
   in the PRD and each is independently shippable.
@@ -236,4 +262,4 @@ first use, expire on inactivity, are compared in constant time, and are revocabl
 unused `owner_session` column is threaded through the document and session schemas so that adding
 real ownership later does not mean migrating the realtime and MCP session layers.
 
-Do not put anything sensitive in a Canvas document as it stands.
+Do not put anything sensitive in a Playground document as it stands.

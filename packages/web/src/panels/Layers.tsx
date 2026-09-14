@@ -1,27 +1,33 @@
-/** Layer tree: structure, naming, visibility, lock, and drag-to-reparent. */
+/**
+ * The layer tree.
+ *
+ * Two things keep this cheap on a large document: rows subscribe to their own
+ * node rather than a document-wide counter, and subtrees are collapsed until
+ * opened. Rendering every node of a thousand-layer page — and worse, remounting
+ * the tree on every edit — put the whole editor at single-digit frames per
+ * second, because a keystroke anywhere rebuilt this panel.
+ */
 
-import { useCallback, useState } from 'react';
-import type { NodeId } from '@canvas/shared';
-import { isAncestorOf } from '@canvas/shared';
+import { memo, useCallback, useState } from 'react';
+import type { NodeId } from '@playground/shared';
+import { isAncestorOf } from '@playground/shared';
 import { useCanvas, getDoc, getNodeById, currentPage, topLevelSelection } from '../state/store.ts';
+import { Icon, iconForNodeType } from '../ui/Icon.tsx';
 
-const TYPE_ICON: Record<string, string> = {
-  artboard: '▢', frame: '▣', text: 'T', image: '🖼', vector: '✎', shape: '◼', embed: '⧉', instance: '◈',
-};
-
-/** Instances show their component name, and their contents are not editable here. */
-function labelFor(node: { type: string; name: string }, componentName?: string): string {
-  return node.type === 'instance' ? componentName ?? node.name : node.name;
-}
+type DropHint = { id: NodeId; where: 'before' | 'after' | 'inside' } | null;
 
 export function Layers() {
-  const version = useCanvas((s) => s.version);
+  // Only the shape of the tree matters here; row contents subscribe themselves.
+  const structureVersion = useCanvas((s) => s.structureVersion);
   const page = currentPage();
-  const [collapsed, setCollapsed] = useState<Set<NodeId>>(new Set());
-  const [dropHint, setDropHint] = useState<{ id: NodeId; where: 'before' | 'after' | 'inside' } | null>(null);
+
+  // Artboards start open, everything else closed — the same default every
+  // design tool uses, and what keeps the row count bounded.
+  const [expanded, setExpanded] = useState<Set<NodeId>>(new Set());
+  const [dropHint, setDropHint] = useState<DropHint>(null);
 
   const toggle = useCallback((id: NodeId) => {
-    setCollapsed((prev) => {
+    setExpanded((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id); else next.add(id);
       return next;
@@ -31,16 +37,19 @@ export function Layers() {
   if (!page) return null;
 
   return (
-    <div className="layers" key={version}>
+    <div className="layers" key={page.id}>
       {page.artboards.map((id) => (
         <LayerRow
-          key={id} id={id} depth={0}
-          collapsed={collapsed} toggle={toggle}
+          key={id} id={id} depth={0} defaultOpen
+          expanded={expanded} toggle={toggle}
           dropHint={dropHint} setDropHint={setDropHint}
+          structureVersion={structureVersion}
         />
       ))}
       {page.artboards.length === 0 && (
-        <p className="panel-empty">No artboards yet. Press <kbd>F</kbd> and drag on the canvas.</p>
+        <p className="panel-empty">
+          No artboards yet. Press <kbd>F</kbd> and drag on the canvas.
+        </p>
       )}
     </div>
   );
@@ -49,14 +58,23 @@ export function Layers() {
 interface RowProps {
   id: NodeId;
   depth: number;
-  collapsed: Set<NodeId>;
+  defaultOpen?: boolean;
+  expanded: Set<NodeId>;
   toggle: (id: NodeId) => void;
-  dropHint: { id: NodeId; where: 'before' | 'after' | 'inside' } | null;
-  setDropHint: (h: { id: NodeId; where: 'before' | 'after' | 'inside' } | null) => void;
+  dropHint: DropHint;
+  setDropHint: (h: DropHint) => void;
+  structureVersion: number;
 }
 
-function LayerRow({ id, depth, collapsed, toggle, dropHint, setDropHint }: RowProps) {
-  const selection = useCanvas((s) => s.selection);
+const LayerRow = memo(function LayerRow({
+  id, depth, defaultOpen, expanded, toggle, dropHint, setDropHint, structureVersion,
+}: RowProps) {
+  // This row re-renders when its own node changes, not when anything does.
+  useCanvas((s) => s.nodeVersions[id] ?? 0);
+
+  const isSelected = useCanvas(
+    (s) => s.selection.includes(id) || s.selection.some((k) => k.startsWith(`${id}::`)),
+  );
   const select = useCanvas((s) => s.select);
   const dispatch = useCanvas((s) => s.dispatch);
   const setHovered = useCanvas((s) => s.setHovered);
@@ -65,14 +83,15 @@ function LayerRow({ id, depth, collapsed, toggle, dropHint, setDropHint }: RowPr
   const node = getNodeById(id);
   if (!node) return null;
 
-  const isSelected = selection.includes(id) || selection.some((k) => k.startsWith(`${id}::`));
-  const isCollapsed = collapsed.has(id);
+  // Artboards open by default, so for them the set records what is *closed*.
+  const open = defaultOpen ? !expanded.has(id) : expanded.has(id);
   const hasChildren = node.children.length > 0;
+  const doc = getDoc();
+  const componentName = node.componentRef ? doc?.components?.[node.componentRef]?.name : undefined;
 
   const onDrop = (e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    const doc = getDoc();
     const hint = dropHint;
     setDropHint(null);
     if (!doc || !hint) return;
@@ -112,10 +131,10 @@ function LayerRow({ id, depth, collapsed, toggle, dropHint, setDropHint }: RowPr
           !node.visible ? 'is-hidden' : '',
           dropHint?.id === id ? `drop-${dropHint.where}` : '',
         ].filter(Boolean).join(' ')}
-        style={{ paddingLeft: 6 + depth * 14 }}
+        style={{ paddingLeft: `calc(${depth} * 0.85rem + 0.4rem)` }}
         draggable={!renaming}
         onDragStart={(e) => {
-          const ids = isSelected ? selection : [id];
+          const ids = isSelected ? useCanvas.getState().selection : [id];
           if (!isSelected) select([id]);
           e.dataTransfer.setData('text/canvas-ids', JSON.stringify(ids));
           e.dataTransfer.effectAllowed = 'move';
@@ -135,12 +154,13 @@ function LayerRow({ id, depth, collapsed, toggle, dropHint, setDropHint }: RowPr
           className="layer-twisty"
           style={{ visibility: hasChildren ? 'visible' : 'hidden' }}
           onClick={(e) => { e.stopPropagation(); toggle(id); }}
-          aria-label={isCollapsed ? 'Expand' : 'Collapse'}
+          aria-label={open ? 'Collapse' : 'Expand'}
+          aria-expanded={open}
         >
-          {isCollapsed ? '▸' : '▾'}
+          <Icon name={open ? 'chevronDown' : 'chevronRight'} size={10} />
         </button>
 
-        <span className="layer-icon" aria-hidden>{TYPE_ICON[node.type] ?? '◼'}</span>
+        <span className="layer-icon"><Icon name={iconForNodeType(node.type)} size={13} /></span>
 
         {renaming ? (
           <input
@@ -159,40 +179,41 @@ function LayerRow({ id, depth, collapsed, toggle, dropHint, setDropHint }: RowPr
             }}
           />
         ) : (
-          <span className="layer-name" title={node.name}>
-          {labelFor(node, getDoc()?.components?.[node.componentRef ?? '']?.name)}
-        </span>
+          <span className="layer-name" title={node.name}>{componentName ?? node.name}</span>
         )}
 
         <button
           className="layer-toggle"
           title={node.visible ? 'Hide' : 'Show'}
+          aria-label={node.visible ? 'Hide layer' : 'Show layer'}
           onClick={(e) => {
             e.stopPropagation();
             dispatch([{ t: 'meta', updates: [{ id, visible: !node.visible }] }]);
           }}
         >
-          {node.visible ? '👁' : '⌀'}
+          <Icon name={node.visible ? 'eye' : 'eyeOff'} size={13} />
         </button>
         <button
           className="layer-toggle"
           title={node.locked ? 'Unlock' : 'Lock'}
+          aria-label={node.locked ? 'Unlock layer' : 'Lock layer'}
           onClick={(e) => {
             e.stopPropagation();
             dispatch([{ t: 'meta', updates: [{ id, locked: !node.locked }] }]);
           }}
         >
-          {node.locked ? '🔒' : '🔓'}
+          <Icon name={node.locked ? 'lock' : 'unlock'} size={13} />
         </button>
       </div>
 
-      {!isCollapsed && node.children.map((c) => (
+      {open && node.children.map((c) => (
         <LayerRow
           key={c} id={c} depth={depth + 1}
-          collapsed={collapsed} toggle={toggle}
+          expanded={expanded} toggle={toggle}
           dropHint={dropHint} setDropHint={setDropHint}
+          structureVersion={structureVersion}
         />
       ))}
     </>
   );
-}
+});

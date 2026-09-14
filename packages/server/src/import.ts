@@ -9,7 +9,7 @@
  * addresses are refused, redirects are bounded, and the response is size-capped.
  */
 
-import { parseHtml, type CanvasNode } from '@canvas/shared';
+import { parseHtml, type CanvasNode } from '@playground/shared';
 import { lookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
 

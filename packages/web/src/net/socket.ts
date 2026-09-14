@@ -6,7 +6,7 @@
  * a rasterized screenshot.
  */
 
-import type { CanvasDocument, OpEnvelope, Op } from '@canvas/shared';
+import type { CanvasDocument, OpEnvelope, Op } from '@playground/shared';
 import { useCanvas } from '../state/store.ts';
 import { findElement, nodeRect } from '../canvas/registry.ts';
 import { rasterizeNode } from './rasterize.ts';
@@ -18,13 +18,79 @@ const WS_URL = () => {
 
 export interface Connection { close(): void }
 
+/**
+ * How many failed WebSocket attempts before falling back to polling.
+ *
+ * Serverless hosts (Vercel among them) cannot hold a WebSocket open at all, so
+ * retrying forever would leave the editor permanently disconnected. Polling is
+ * slower and drops presence and agent RPC, but the document still syncs.
+ */
+const WS_ATTEMPTS_BEFORE_POLLING = 3;
+const POLL_INTERVAL_MS = 1500;
+
 export function connectDocument(docId: string): Connection {
   let ws: WebSocket | null = null;
   let closed = false;
   let retry = 0;
   let presenceTimer: number | undefined;
+  let pollTimer: number | undefined;
+  let polling = false;
 
   const store = useCanvas;
+
+  /** HTTP polling fallback: fetch ops since our revision, or resync wholesale. */
+  const poll = async () => {
+    if (closed) return;
+    try {
+      const rev = store.getState().rev;
+      const res = await fetch(`/api/documents/${docId}/sync?rev=${rev}`);
+      if (!res.ok) throw new Error(`sync failed: ${res.status}`);
+      const body = (await res.json()) as {
+        resync?: boolean; document?: CanvasDocument;
+        ops?: { op: Op; rev: number; origin: { kind: string; label?: string } }[];
+      };
+
+      if (body.resync && body.document) store.getState().loadDocument(body.document);
+      else if (body.ops?.length) store.getState().applyRemote(body.ops);
+
+      store.getState().setConnection('open');
+    } catch {
+      store.getState().setConnection('closed');
+    } finally {
+      if (!closed) pollTimer = window.setTimeout(poll, POLL_INTERVAL_MS);
+    }
+  };
+
+  const startPolling = async () => {
+    if (polling || closed) return;
+    polling = true;
+    store.getState().setTransport('polling');
+
+    // Load the document once up front, since there is no `joined` message.
+    try {
+      const res = await fetch(`/api/documents/${docId}`);
+      if (res.ok) {
+        const { document } = (await res.json()) as { document: CanvasDocument };
+        store.getState().loadDocument(document);
+        store.getState().setConnection('open');
+        store.getState().setSend((envelopes: OpEnvelope[]) => {
+          // Fire-and-forget: the optimistic local apply already happened.
+          void fetch(`/api/documents/${docId}/ops`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ ops: envelopes }),
+          });
+        });
+      } else if (res.status === 404) {
+        store.getState().setFatalError(`document ${docId} not found`);
+        closed = true;
+        return;
+      }
+    } catch {
+      store.getState().setConnection('closed');
+    }
+    pollTimer = window.setTimeout(poll, POLL_INTERVAL_MS);
+  };
 
   const open = () => {
     if (closed) return;
@@ -49,7 +115,8 @@ export function connectDocument(docId: string): Connection {
 
     ws.onclose = () => {
       store.getState().setConnection('closed');
-      if (closed) return;
+      if (closed || polling) return;
+      if (retry >= WS_ATTEMPTS_BEFORE_POLLING) { void startPolling(); return; }
       // Back off, but stay responsive: a dev server restart should reconnect fast.
       const delay = Math.min(10_000, 400 * 2 ** retry++);
       setTimeout(open, delay);
@@ -67,6 +134,7 @@ export function connectDocument(docId: string): Connection {
       case 'joined': {
         store.getState().loadDocument(msg.doc as CanvasDocument);
         store.getState().setConnection('open');
+        store.getState().setTransport('websocket');
         store.getState().setSend((envelopes: OpEnvelope[]) => send({ type: 'ops', ops: envelopes }));
         break;
       }
@@ -142,6 +210,7 @@ export function connectDocument(docId: string): Connection {
       closed = true;
       unsubscribe();
       clearTimeout(presenceTimer);
+      clearTimeout(pollTimer);
       ws?.close();
     },
   };

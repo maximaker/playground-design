@@ -7,22 +7,23 @@
  * right control, and the tooltip says so.
  */
 
-import type { NodeId } from '@canvas/shared';
+import type { NodeId } from '@playground/shared';
 import { useCanvas, getDoc } from '../state/store.ts';
 import { type AlignKind, type DistributeKind, align, distribute } from '../canvas/arrange.ts';
+import { Icon, type IconName } from './Icon.tsx';
 
-const ALIGNMENTS: { kind: AlignKind; icon: string; title: string }[] = [
-  { kind: 'left', icon: '⇤', title: 'Align left' },
-  { kind: 'center-x', icon: '⇹', title: 'Align horizontal centers' },
-  { kind: 'right', icon: '⇥', title: 'Align right' },
-  { kind: 'top', icon: '⇡', title: 'Align top' },
-  { kind: 'center-y', icon: '⇕', title: 'Align vertical centers' },
-  { kind: 'bottom', icon: '⇣', title: 'Align bottom' },
+const ALIGNMENTS: { kind: AlignKind; icon: IconName; title: string }[] = [
+  { kind: 'left', icon: 'alignLeft', title: 'Align left' },
+  { kind: 'center-x', icon: 'alignCenterX', title: 'Align horizontal centres' },
+  { kind: 'right', icon: 'alignRight', title: 'Align right' },
+  { kind: 'top', icon: 'alignTop', title: 'Align top' },
+  { kind: 'center-y', icon: 'alignCenterY', title: 'Align vertical centres' },
+  { kind: 'bottom', icon: 'alignBottom', title: 'Align bottom' },
 ];
 
-const DISTRIBUTIONS: { kind: DistributeKind; icon: string; title: string }[] = [
-  { kind: 'horizontal', icon: '⇿', title: 'Distribute horizontally' },
-  { kind: 'vertical', icon: '↕', title: 'Distribute vertically' },
+const DISTRIBUTIONS: { kind: DistributeKind; icon: IconName; title: string }[] = [
+  { kind: 'horizontal', icon: 'distributeX', title: 'Distribute horizontally' },
+  { kind: 'vertical', icon: 'distributeY', title: 'Distribute vertically' },
 ];
 
 export function ArrangeBar({ ids }: { ids: NodeId[] }) {
@@ -61,8 +62,9 @@ export function ArrangeBar({ ids }: { ids: NodeId[] }) {
           key={a.kind}
           title={reason ?? a.title}
           disabled={!canAlign}
+          aria-label={a.title}
           onClick={() => doc && run(align(doc, ids, a.kind), 'align')}
-        >{a.icon}</button>
+        ><Icon name={a.icon} size={14} /></button>
       ))}
       <span className="arrange-spacer" />
       {DISTRIBUTIONS.map((d) => (
@@ -70,8 +72,9 @@ export function ArrangeBar({ ids }: { ids: NodeId[] }) {
           key={d.kind}
           title={canDistribute ? d.title : 'Distributing needs three or more independently positioned layers'}
           disabled={!canDistribute}
+          aria-label={d.title}
           onClick={() => doc && run(distribute(doc, ids, d.kind), 'distribute')}
-        >{d.icon}</button>
+        ><Icon name={d.icon} size={14} /></button>
       ))}
     </div>
   );

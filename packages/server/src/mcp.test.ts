@@ -9,7 +9,7 @@ import { serve } from '@hono/node-server';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 
-process.env.CANVAS_DB = `/tmp/canvas-test-${Date.now()}.db`;
+process.env.PLAYGROUND_DB = `/tmp/playground-test-${Date.now()}.db`;
 
 const { app } = await import('./app.ts');
 const { createDocument, getDocument } = await import('./store.ts');
@@ -33,8 +33,8 @@ before(async () => {
   base = `http://127.0.0.1:${port}`;
   server = serve({ fetch: app.fetch, port });
 
-  docId = createDocument('MCP Test').id;
-  const conn = createConnection(docId, 'Test Agent');
+  docId = (await createDocument('MCP Test')).id;
+  const conn = await createConnection(docId, 'Test Agent');
 
   client = new Client({ name: 'test', version: '1.0.0' });
   await client.connect(new StreamableHTTPClientTransport(new URL(`${base}/mcp/${conn.code}`)));
@@ -458,7 +458,7 @@ test('editing the component updates every instance', async () => {
 
   const doc = getDocument(docId)!;
   const instance = Object.values(doc.nodes).find((n) => n.componentRef === def.id)!;
-  const { html } = await import('@canvas/shared').then((m) => m.emitHtml(doc, instance.id, { mode: 'inline' }));
+  const { html } = await import('@playground/shared').then((m) => m.emitHtml(doc, instance.id, { mode: 'inline' }));
   assert.match(html, /border-radius:999px/);
 });
 

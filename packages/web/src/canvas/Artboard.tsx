@@ -8,8 +8,8 @@
 
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import type { NodeId } from '@canvas/shared';
-import { getArtboardPosition, getArtboardSize } from '@canvas/shared';
+import type { NodeId } from '@playground/shared';
+import { getArtboardPosition, getArtboardSize } from '@playground/shared';
 import { useCanvas, getDoc, getNodeById } from '../state/store.ts';
 import { registerFrame } from './registry.ts';
 import { NodeView } from './NodeView.tsx';
@@ -34,7 +34,11 @@ interface Props {
 }
 
 export const Artboard = memo(function Artboard({ id, live }: Props) {
-  const version = useCanvas((s) => s.version);
+  // Narrow subscriptions: an artboard only needs to re-render for its own
+  // node, structural changes, and the things that change its stylesheet.
+  const nodeVersion = useCanvas((s) => s.nodeVersions[id] ?? 0);
+  const structureVersion = useCanvas((s) => s.structureVersion);
+  const styleEpoch = useCanvas((s) => s.styleEpoch);
   const zoom = useCanvas((s) => s.viewport.zoom);
   const agentActivity = useCanvas((s) => s.agentActivity);
   const selection = useCanvas((s) => s.selection);
@@ -49,15 +53,17 @@ export const Artboard = memo(function Artboard({ id, live }: Props) {
   const { x, y } = node ? getArtboardPosition(node) : { x: 0, y: 0 };
   const { width, height } = node ? getArtboardSize(node) : { width: 0, height: 0 };
 
+  // Both walk the artboard's entire subtree, so they must not be keyed to a
+  // counter that changes on every edit.
   const stylesheet = useMemo(
     () => (doc ? artboardStylesheet(doc, id) : ''),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [doc, id, version],
+    [doc, id, structureVersion, styleEpoch],
   );
   const fontsHref = useMemo(
     () => (doc ? googleFontsHref(fontFamilies(doc, id)) : null),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [doc, id, version],
+    [doc, id, structureVersion, styleEpoch],
   );
 
   // Set up the iframe document once it exists, then portal the node tree in.
@@ -113,10 +119,14 @@ export const Artboard = memo(function Artboard({ id, live }: Props) {
     if (link.href !== fontsHref) link.href = fontsHref;
   }, [fontsHref, body]);
 
+  void nodeVersion;
   if (!node) return null;
 
   const isSelected = selection.includes(id);
   const agentWorking = agentActivity?.active && agentActivity.artboards.includes(id);
+  // Labels are unreadable far out, and adjacent artboards' labels overlap into
+  // an unreadable run of text. Below this zoom they are noise.
+  const showLabel = zoom > 0.12;
 
   const rename = (name: string) => {
     if (name.trim() && name !== node.name) dispatch([{ t: 'rename', updates: [{ id, name: name.trim() }] }]);
@@ -134,13 +144,17 @@ export const Artboard = memo(function Artboard({ id, live }: Props) {
       }}
       data-artboard-id={id}
     >
+      {showLabel && (
       <div
         className="artboard-label"
         // The canvas handles pointerdown here (see `data-artboard-label`) so the
         // label is a drag handle for the whole artboard, the way it is in every
         // other design tool.
         data-artboard-label={id}
-        style={{ color: isSelected ? '#3b82f6' : undefined }}
+        style={{
+          maxWidth: Math.max(80, width * zoom),
+          color: isSelected ? 'var(--accent)' : undefined,
+        }}
         onDoubleClick={(e) => {
           e.stopPropagation();
           const el = e.currentTarget;
@@ -165,6 +179,7 @@ export const Artboard = memo(function Artboard({ id, live }: Props) {
         <span className="artboard-name">{node.name}</span>
         <span className="artboard-size">{Math.round(width)} × {Math.round(height)}</span>
       </div>
+      )}
 
       {agentWorking && (
         <div className="artboard-agent-badge" title={agentActivity?.summary ?? undefined}>

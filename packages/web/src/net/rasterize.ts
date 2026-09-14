@@ -8,7 +8,7 @@
  * and only falls back to here.
  */
 
-import type { NodeId } from '@canvas/shared';
+import type { NodeId } from '@playground/shared';
 import { findElement } from '../canvas/registry.ts';
 
 export async function rasterizeNode(nodeId: NodeId, scale = 1, format = 'png'): Promise<string> {

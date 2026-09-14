@@ -10,8 +10,9 @@ import { useMemo, useState } from 'react';
 import {
   type Gradient, type GradientType,
   DEFAULT_GRADIENT, parseGradient, serializeGradient,
-} from '@canvas/shared';
+} from '@playground/shared';
 import { TextInput } from './controls.tsx';
+import { Icon } from './Icon.tsx';
 
 interface Props {
   value: string;
@@ -69,8 +70,9 @@ export function GradientEditor({ value, onCommit, tokens }: Props) {
         <button
           className={parsed.repeating ? 'is-active' : ''}
           title="Repeating"
+          aria-label="Repeating gradient"
           onClick={() => update({ ...parsed, repeating: !parsed.repeating })}
-        >↻</button>
+        ><Icon name="redo" size={12} /></button>
       </div>
 
       <div
@@ -140,12 +142,13 @@ export function GradientEditor({ value, onCommit, tokens }: Props) {
           <button
             className="icon-button"
             title="Remove this stop"
+            aria-label="Remove this stop"
             disabled={stops.length <= 2}
             onClick={() => {
               update({ ...parsed, stops: stops.filter((_, i) => i !== selected) });
               setSelected(0);
             }}
-          >✕</button>
+          ><Icon name="close" size={12} /></button>
         </div>
       )}
 

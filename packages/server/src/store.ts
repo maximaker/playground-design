@@ -5,13 +5,18 @@
  * broadcasts. Clients apply optimistically and reconcile against the revision
  * they get back. This is a deliberate simplification over a CRDT for v1 — see
  * README "Deviations from the PRD".
+ *
+ * Documents live in a synchronous in-memory cache; persistence is async and
+ * behind an adapter. Callers `await ensureLoaded(id)` once at the edge, then
+ * work synchronously — which is what let a serverless backend be added without
+ * making the whole codebase async.
  */
 
 import {
   type CanvasDocument, type Op, type OpEnvelope,
   applyOp, createEmptyDocument, newId,
-} from '@canvas/shared';
-import { db, now } from './db.ts';
+} from '@playground/shared';
+import { persistence, type DocSummary } from './persistence.ts';
 
 export interface AppliedOp extends OpEnvelope {
   rev: number;
@@ -24,68 +29,122 @@ type Listener = (ops: AppliedOp[]) => void;
 const cache = new Map<string, CanvasDocument>();
 const listeners = new Map<string, Set<Listener>>();
 const dirty = new Set<string>();
+const inflight = new Map<string, Promise<CanvasDocument | null>>();
+
+/**
+ * Recent ops per document, for clients that poll instead of holding a socket.
+ * Bounded: a client further behind than this gets a full resync instead.
+ */
+const opLog = new Map<string, AppliedOp[]>();
+const OP_LOG_LIMIT = 400;
+
+const HISTORY_LIMIT = 400;
+const history_ = new Map<string, HistoryEntry[]>();
+
+export function now(): number { return Date.now(); }
+
+export class StoreError extends Error {}
+
+// ---------------------------------------------------------------------------
+// Loading and saving
+// ---------------------------------------------------------------------------
+
+/** Brings a document into the synchronous cache. Safe to call repeatedly. */
+export async function ensureLoaded(id: string): Promise<CanvasDocument | null> {
+  const cached = cache.get(id);
+  if (cached) return cached;
+
+  const existing = inflight.get(id);
+  if (existing) return existing;
+
+  const load = (async () => {
+    const store = await persistence();
+    const doc = await store.loadDocument(id);
+    if (doc) cache.set(id, doc);
+    inflight.delete(id);
+    return doc;
+  })();
+
+  inflight.set(id, load);
+  return load;
+}
+
+/** Synchronous cache read. Call `ensureLoaded` first on a cold path. */
+export function getDocument(id: string): CanvasDocument | null {
+  return cache.get(id) ?? null;
+}
 
 // Persist on a short timer rather than per-op: a drag produces dozens of ops a
-// second and each one would otherwise rewrite the whole document JSON.
+// second and each one would otherwise rewrite the whole document.
 const FLUSH_MS = 400;
-setInterval(flushAll, FLUSH_MS).unref?.();
+let flushTimer: ReturnType<typeof setInterval> | null = null;
 
-export function flushAll(): void {
+function scheduleFlush(): void {
+  if (flushTimer) return;
+  flushTimer = setInterval(() => { void flushAll(); }, FLUSH_MS);
+  flushTimer.unref?.();
+}
+
+export async function flushAll(): Promise<void> {
+  if (!dirty.size) return;
+  const store = await persistence();
   for (const id of [...dirty]) {
-    const doc = cache.get(id);
-    if (!doc) { dirty.delete(id); continue; }
-    db.prepare('UPDATE documents SET data = ?, rev = ?, name = ?, updated_at = ? WHERE id = ?')
-      .run(JSON.stringify(doc), doc.rev, doc.name, now(), id);
     dirty.delete(id);
+    const doc = cache.get(id);
+    if (doc) await store.saveDocument(doc).catch((err) => console.error('[playground] save failed', err));
   }
 }
 
-process.on('exit', flushAll);
-process.on('SIGINT', () => { flushAll(); process.exit(0); });
-process.on('SIGTERM', () => { flushAll(); process.exit(0); });
+/**
+ * Serverless invocations end as soon as the response is sent, so a timer-based
+ * flush would never run. There, persist immediately instead.
+ */
+async function markDirty(id: string): Promise<void> {
+  const store = await persistence();
+  if (store.kind === 'blob') {
+    const doc = cache.get(id);
+    if (doc) await store.saveDocument(doc).catch((err) => console.error('[playground] save failed', err));
+    return;
+  }
+  dirty.add(id);
+  scheduleFlush();
+}
 
 // ---------------------------------------------------------------------------
+// Documents
+// ---------------------------------------------------------------------------
 
-export function createDocument(name = 'Untitled', seed?: CanvasDocument): CanvasDocument {
+export async function createDocument(name = 'Untitled', seed?: CanvasDocument): Promise<CanvasDocument> {
   const doc = seed ?? createEmptyDocument(name);
   doc.name = name;
-  const t = now();
-  db.prepare('INSERT INTO documents (id, name, data, rev, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)')
-    .run(doc.id, doc.name, JSON.stringify(doc), doc.rev, t, t);
   cache.set(doc.id, doc);
+  const store = await persistence();
+  await store.saveDocument(doc);
   return doc;
 }
 
-export function listDocuments(): { id: string; name: string; rev: number; updated_at: number; nodeCount: number }[] {
-  const rows = db.prepare('SELECT id, name, rev, updated_at, data FROM documents ORDER BY updated_at DESC').all() as
-    { id: string; name: string; rev: number; updated_at: number; data: string }[];
-  return rows.map((r) => {
-    const cached = cache.get(r.id);
-    const nodeCount = cached
-      ? Object.keys(cached.nodes).length
-      : Object.keys((JSON.parse(r.data) as CanvasDocument).nodes).length;
-    return { id: r.id, name: cached?.name ?? r.name, rev: cached?.rev ?? r.rev, updated_at: r.updated_at, nodeCount };
+export async function listDocuments(): Promise<DocSummary[]> {
+  const store = await persistence();
+  const stored = await store.listDocuments();
+  // The cache is fresher than storage between flushes.
+  return stored.map((s) => {
+    const live = cache.get(s.id);
+    return live
+      ? { ...s, name: live.name, rev: live.rev, nodeCount: Object.keys(live.nodes).length }
+      : s;
   });
 }
 
-export function getDocument(id: string): CanvasDocument | null {
-  const cached = cache.get(id);
-  if (cached) return cached;
-  const row = db.prepare('SELECT data FROM documents WHERE id = ?').get(id) as { data: string } | undefined;
-  if (!row) return null;
-  const doc = JSON.parse(row.data) as CanvasDocument;
-  cache.set(id, doc);
-  return doc;
-}
-
-export function deleteDocument(id: string): boolean {
-  const res = db.prepare('DELETE FROM documents WHERE id = ?').run(id);
+export async function deleteDocument(id: string): Promise<boolean> {
+  const store = await persistence();
+  const existed = (await store.loadDocument(id)) !== null || cache.has(id);
+  await store.deleteDocument(id);
   cache.delete(id);
   dirty.delete(id);
-  return res.changes > 0;
+  opLog.delete(id);
+  history_.delete(id);
+  return existed;
 }
-
-export class StoreError extends Error {}
 
 /**
  * Applies a batch of ops atomically: if any op throws, the document is rolled
@@ -96,7 +155,9 @@ export function applyOps(docId: string, envelopes: OpEnvelope[]): AppliedOp[] {
   if (!doc) throw new StoreError(`document ${docId} not found`);
   if (envelopes.length === 0) return [];
 
-  const rollback = structuredClone(doc);
+  // Only the nodes an op can touch need capturing, so a rollback does not mean
+  // cloning the whole document on every edit.
+  const rollback = snapshotFor(doc, envelopes);
   const applied: AppliedOp[] = [];
   const ts = now();
 
@@ -107,22 +168,71 @@ export function applyOps(docId: string, envelopes: OpEnvelope[]): AppliedOp[] {
       applied.push({ ...env, inverse, rev: doc.rev, ts });
     }
   } catch (err) {
-    // Restore in place so any handle already held by a caller stays valid.
-    Object.assign(doc, rollback);
-    cache.set(docId, doc);
+    restore(doc, rollback);
     throw new StoreError(err instanceof Error ? err.message : String(err));
   }
 
-  const insert = db.prepare(
-    'INSERT INTO ops (doc_id, rev, op, inverse, origin, batch, ts) VALUES (?, ?, ?, ?, ?, ?, ?)',
-  );
-  for (const a of applied) {
-    insert.run(docId, a.rev, JSON.stringify(a.op), JSON.stringify(a.inverse), JSON.stringify(a.origin), a.batch ?? null, ts);
-  }
+  const log = opLog.get(docId) ?? [];
+  log.push(...applied);
+  opLog.set(docId, log.slice(-OP_LOG_LIMIT));
 
-  dirty.add(docId);
+  recordHistory(docId, applied);
+  void markDirty(docId);
   broadcast(docId, applied);
   return applied;
+}
+
+interface Snapshot {
+  nodes: Record<string, unknown>;
+  pages: unknown;
+  tokens: unknown;
+  components: unknown;
+  rev: number;
+  name: string;
+}
+
+function snapshotFor(doc: CanvasDocument, envelopes: OpEnvelope[]): Snapshot {
+  return {
+    // Structural ops can reshape arbitrary parts of the tree, so those still
+    // need a full copy; everything else is far more common and stays cheap.
+    nodes: envelopes.some((e) => isStructural(e.op))
+      ? structuredClone(doc.nodes)
+      : Object.fromEntries(
+          affectedIds(envelopes).flatMap((id) => (doc.nodes[id] ? [[id, structuredClone(doc.nodes[id])]] : [])),
+        ),
+    pages: structuredClone(doc.pages),
+    tokens: structuredClone(doc.tokens),
+    components: structuredClone(doc.components ?? {}),
+    rev: doc.rev,
+    name: doc.name,
+  };
+}
+
+function restore(doc: CanvasDocument, snapshot: Snapshot): void {
+  Object.assign(doc.nodes, snapshot.nodes as CanvasDocument['nodes']);
+  doc.pages = snapshot.pages as CanvasDocument['pages'];
+  doc.tokens = snapshot.tokens as CanvasDocument['tokens'];
+  doc.components = snapshot.components as CanvasDocument['components'];
+  doc.rev = snapshot.rev;
+  doc.name = snapshot.name;
+}
+
+function isStructural(op: Op): boolean {
+  return op.t === 'insert' || op.t === 'remove' || op.t === 'move' || op.t === 'page' || op.t === 'component';
+}
+
+function affectedIds(envelopes: OpEnvelope[]): string[] {
+  const ids: string[] = [];
+  for (const { op } of envelopes) {
+    switch (op.t) {
+      case 'styles': case 'text': case 'rename': case 'attrs': case 'meta': case 'tag': case 'props':
+        ids.push(...op.updates.map((u) => u.id)); break;
+      case 'override':
+        ids.push(...op.updates.map((u) => u.id)); break;
+      default: break;
+    }
+  }
+  return ids;
 }
 
 export function subscribe(docId: string, fn: Listener): () => void {
@@ -136,30 +246,25 @@ export function subscribe(docId: string, fn: Listener): () => void {
 }
 
 function broadcast(docId: string, ops: AppliedOp[]): void {
-  const set = listeners.get(docId);
-  if (!set) return;
-  for (const fn of set) {
+  for (const fn of listeners.get(docId) ?? []) {
     try { fn(ops); } catch { /* a broken subscriber must not fail the write */ }
   }
+}
+
+/**
+ * Ops after `rev`, for polling clients. Returns null when the caller is further
+ * behind than the log reaches, which means they need a full resync.
+ */
+export function opsSince(docId: string, rev: number): AppliedOp[] | null {
+  const log = opLog.get(docId) ?? [];
+  if (!log.length) return rev >= (getDocument(docId)?.rev ?? 0) ? [] : null;
+  if (rev < log[0]!.rev - 1) return null;
+  return log.filter((o) => o.rev > rev);
 }
 
 // ---------------------------------------------------------------------------
 // History
 // ---------------------------------------------------------------------------
-
-export function opsSince(docId: string, rev: number, limit = 1000): AppliedOp[] {
-  const rows = db.prepare(
-    'SELECT rev, op, inverse, origin, batch, ts FROM ops WHERE doc_id = ? AND rev > ? ORDER BY rev ASC LIMIT ?',
-  ).all(docId, rev, limit) as { rev: number; op: string; inverse: string; origin: string; batch: string | null; ts: number }[];
-  return rows.map((r) => ({
-    rev: r.rev,
-    op: JSON.parse(r.op) as Op,
-    inverse: JSON.parse(r.inverse) as Op,
-    origin: JSON.parse(r.origin) as OpEnvelope['origin'],
-    batch: r.batch ?? undefined,
-    ts: r.ts,
-  }));
-}
 
 export interface HistoryEntry {
   rev: number;
@@ -170,26 +275,25 @@ export interface HistoryEntry {
   opCount: number;
 }
 
-/** Op log collapsed into human-readable, batch-level entries. */
-export function history(docId: string, limit = 100): HistoryEntry[] {
-  const rows = db.prepare(
-    'SELECT rev, op, origin, batch, ts FROM ops WHERE doc_id = ? ORDER BY rev DESC LIMIT ?',
-  ).all(docId, limit * 4) as { rev: number; op: string; origin: string; batch: string | null; ts: number }[];
-
-  const out: HistoryEntry[] = [];
-  for (const r of rows) {
-    const op = JSON.parse(r.op) as Op;
-    const origin = JSON.parse(r.origin) as OpEnvelope['origin'];
-    const prev = out[out.length - 1];
-    if (prev && r.batch && prev.batch === r.batch) {
-      prev.opCount += 1;
-      prev.rev = Math.max(prev.rev, r.rev);
+function recordHistory(docId: string, applied: AppliedOp[]): void {
+  const entries = history_.get(docId) ?? [];
+  for (const a of applied) {
+    const last = entries[entries.length - 1];
+    if (last && a.batch && last.batch === a.batch) {
+      last.opCount += 1;
+      last.rev = a.rev;
       continue;
     }
-    out.push({ rev: r.rev, label: describeOp(op), origin, batch: r.batch ?? undefined, ts: r.ts, opCount: 1 });
-    if (out.length >= limit) break;
+    entries.push({
+      rev: a.rev, label: describeOp(a.op), origin: a.origin,
+      batch: a.batch, ts: a.ts, opCount: 1,
+    });
   }
-  return out;
+  history_.set(docId, entries.slice(-HISTORY_LIMIT));
+}
+
+export function history(docId: string, limit = 100): HistoryEntry[] {
+  return [...(history_.get(docId) ?? [])].reverse().slice(0, limit);
 }
 
 function describeOp(op: Op): string {
@@ -209,41 +313,49 @@ function describeOp(op: Op): string {
     case 'note': return `${op.action === 'add' ? 'Added' : op.action === 'remove' ? 'Removed' : 'Updated'} a note`;
     case 'component': return `${op.action === 'add' ? 'Created' : op.action === 'remove' ? 'Deleted' : 'Updated'} a component`;
     case 'override': return `Overrode ${op.updates.length} component ${op.updates.length === 1 ? 'layer' : 'layers'}`;
+    case 'variant': return 'Edited a component variant';
+    case 'props': return 'Changed component properties';
   }
 }
 
-export function createSnapshot(docId: string, label?: string): { id: string; rev: number } {
+// ---------------------------------------------------------------------------
+// Snapshots
+// ---------------------------------------------------------------------------
+
+export async function createSnapshot(docId: string, label?: string): Promise<{ id: string; rev: number }> {
   const doc = getDocument(docId);
   if (!doc) throw new StoreError(`document ${docId} not found`);
   const id = newId('snap');
-  db.prepare('INSERT INTO snapshots (id, doc_id, rev, label, data, ts) VALUES (?, ?, ?, ?, ?, ?)')
-    .run(id, docId, doc.rev, label ?? null, JSON.stringify(doc), now());
+  const store = await persistence();
+  await store.saveSnapshot({
+    id, docId, rev: doc.rev, label: label ?? null, data: structuredClone(doc), ts: now(),
+  });
   return { id, rev: doc.rev };
 }
 
-export function listSnapshots(docId: string): { id: string; rev: number; label: string | null; ts: number }[] {
-  return db.prepare('SELECT id, rev, label, ts FROM snapshots WHERE doc_id = ? ORDER BY ts DESC')
-    .all(docId) as { id: string; rev: number; label: string | null; ts: number }[];
+export async function listSnapshots(docId: string) {
+  const store = await persistence();
+  return store.loadSnapshots(docId);
 }
 
 /**
  * Restores a snapshot as a *new* revision rather than rewinding, so the op log
  * stays append-only and the restore itself is undoable.
  */
-export function restoreSnapshot(docId: string, snapshotId: string): CanvasDocument {
-  const row = db.prepare('SELECT data FROM snapshots WHERE id = ? AND doc_id = ?')
-    .get(snapshotId, docId) as { data: string } | undefined;
-  if (!row) throw new StoreError('snapshot not found');
-  const snap = JSON.parse(row.data) as CanvasDocument;
+export async function restoreSnapshot(docId: string, snapshotId: string): Promise<CanvasDocument> {
+  const store = await persistence();
+  const snap = await store.loadSnapshot(docId, snapshotId);
+  if (!snap) throw new StoreError('snapshot not found');
   const doc = getDocument(docId);
   if (!doc) throw new StoreError(`document ${docId} not found`);
 
-  doc.nodes = snap.nodes;
-  doc.pages = snap.pages;
-  doc.tokens = snap.tokens;
-  doc.themes = snap.themes;
+  doc.nodes = snap.data.nodes;
+  doc.pages = snap.data.pages;
+  doc.tokens = snap.data.tokens;
+  doc.themes = snap.data.themes;
+  doc.components = snap.data.components;
   doc.rev += 1;
-  dirty.add(docId);
+  await markDirty(docId);
   broadcast(docId, [{
     op: { t: 'doc' }, origin: { kind: 'system', id: 'restore' },
     rev: doc.rev, inverse: { t: 'doc' }, ts: now(),
@@ -251,9 +363,9 @@ export function restoreSnapshot(docId: string, snapshotId: string): CanvasDocume
   return doc;
 }
 
-export function autoSnapshotIfStale(docId: string): void {
-  const last = db.prepare('SELECT ts FROM snapshots WHERE doc_id = ? ORDER BY ts DESC LIMIT 1')
-    .get(docId) as { ts: number } | undefined;
+export async function autoSnapshotIfStale(docId: string): Promise<void> {
+  const store = await persistence();
+  const snaps = await store.loadSnapshots(docId);
   const FIFTEEN_MIN = 15 * 60 * 1000;
-  if (!last || now() - last.ts > FIFTEEN_MIN) createSnapshot(docId, 'Autosave');
+  if (!snaps.length || now() - snaps[0]!.ts > FIFTEEN_MIN) await createSnapshot(docId, 'Autosave');
 }

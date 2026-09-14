@@ -10,8 +10,9 @@
  */
 
 import {
-  type CanvasDocument, type CanvasNode, type ComponentDef, type NodeId,
-  componentOfInstance, slotNameOf,
+  type CanvasDocument, type CanvasNode, type ComponentDef, type ComponentVariant,
+  type InstanceOverride, type NodeId,
+  componentOfInstance, resolvedProps, slotNameOf, variantKey,
 } from './model.ts';
 
 export interface ExpandedNode {
@@ -63,7 +64,7 @@ export function expandInstance(
   if (!root) return null;
 
   const nextSeen = new Set(seen).add(def.id);
-  const overrides = instance.overrides ?? {};
+  const overrides = effectiveOverrides(def, instance);
   // The instance's own children fill the definition's slots.
   const slotted = instance.children.map((id) => doc.nodes[id]).filter((n): n is CanvasNode => !!n);
 
@@ -132,6 +133,51 @@ export function expandInstance(
 
 /** Marks which slot an instance child belongs to. */
 export const SLOT_SOURCE_ATTR = 'data-slot-target';
+
+/**
+ * The override cascade for an instance.
+ *
+ * Base definition, then every variant the instance matches — least specific
+ * first, so `{tone: danger}` is refined rather than replaced by
+ * `{size: lg, tone: danger}` — then the instance's own overrides, which always
+ * win because they are the most local statement of intent.
+ */
+export function effectiveOverrides(
+  def: ComponentDef,
+  instance: CanvasNode,
+): Record<NodeId, InstanceOverride> {
+  const props = resolvedProps(def, instance);
+  const matching = (def.variants ?? [])
+    .filter((v) => matchesProps(v, props))
+    .sort((a, b) => Object.keys(a.match).length - Object.keys(b.match).length);
+
+  const out: Record<NodeId, InstanceOverride> = {};
+  for (const source of [...matching.map((v) => v.overrides), instance.overrides ?? {}]) {
+    for (const [defId, override] of Object.entries(source)) {
+      out[defId] = mergeOverride(out[defId], override);
+    }
+  }
+  return out;
+}
+
+export function matchesProps(variant: ComponentVariant, props: Record<string, string>): boolean {
+  return Object.entries(variant.match).every(([key, value]) => props[key] === value);
+}
+
+function mergeOverride(base: InstanceOverride | undefined, next: InstanceOverride): InstanceOverride {
+  return {
+    ...base,
+    ...next,
+    styles: next.styles ? { ...base?.styles, ...next.styles } : base?.styles,
+    attrs: next.attrs ? { ...base?.attrs, ...next.attrs } : base?.attrs,
+  };
+}
+
+/** The variant a given property combination resolves to, if one is defined. */
+export function findVariant(def: ComponentDef, match: Record<string, string>): ComponentVariant | undefined {
+  const key = variantKey(match);
+  return (def.variants ?? []).find((v) => variantKey(v.match) === key);
+}
 
 /** Expands any node, following instances. The entry point for renderers. */
 export function expandNode(

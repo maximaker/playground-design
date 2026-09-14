@@ -6,10 +6,10 @@
 import {
   type CanvasDocument, type CanvasNode, type NodeId, type Op,
   getArtboardPosition, getArtboardSize, isAncestorOf,
-} from '@canvas/shared';
+} from '@playground/shared';
 import { nodeRect, nodeInnerRect, hitTest } from './registry.ts';
 import { parsePx } from './styles.ts';
-import { type Box, type SnapGuide, boxOf, computeSnap, snapResize } from '@canvas/shared';
+import { type Box, type SnapGuide, boxOf, computeSnap, snapResize } from '@playground/shared';
 
 /** Snap strength in screen pixels; converted to working units by the caller. */
 export const SNAP_THRESHOLD_PX = 6;

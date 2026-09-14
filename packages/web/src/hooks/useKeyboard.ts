@@ -180,7 +180,7 @@ async function copyAsCss(): Promise<void> {
   const doc = getDoc();
   const { selection, toast } = useCanvas.getState();
   if (!doc || !selection.length) return;
-  const { emitHtml } = await import('@canvas/shared');
+  const { emitHtml } = await import('@playground/shared');
   const css = selection.map((id) => emitHtml(doc, id, { mode: 'stylesheet', includeTokens: false }).css).join('\n\n');
   await navigator.clipboard.writeText(css);
   toast('Copied CSS', 'success');

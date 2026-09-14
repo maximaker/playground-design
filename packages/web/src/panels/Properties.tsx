@@ -7,18 +7,25 @@
  */
 
 import { useMemo } from 'react';
-import type { CanvasNode, NodeId, StyleMap } from '@canvas/shared';
+import { type CanvasNode, type ComponentDef, type NodeId, type StyleMap, resolvedProps } from '@playground/shared';
 import { useCanvas, getDoc } from '../state/store.ts';
 import { attrOps, resolveKey, resetOverrideOps } from '../state/keys.ts';
 import { Field, NumberInput, Row, Section, SegmentedControl, Select, TextInput, ColorInput } from '../ui/controls.tsx';
 import { ArrangeBar } from '../ui/ArrangeBar.tsx';
 import { GradientEditor } from '../ui/GradientEditor.tsx';
+import { Icon } from '../ui/Icon.tsx';
 
 const MIXED = '—'; // em dash: "these nodes disagree"
 
 export function Properties() {
-  const version = useCanvas((s) => s.version);
+  // Narrow: the panel shows the selection, so it only needs those nodes'
+  // versions plus structure — not a counter that ticks on every document edit.
   const selection = useCanvas((s) => s.selection);
+  const structureVersion = useCanvas((s) => s.structureVersion);
+  const version = useCanvas(
+    (s) => s.selection.reduce((sum, key) => sum + (s.nodeVersions[key.split('::')[0]!] ?? 0), 0) + s.structureVersion,
+  );
+  void structureVersion;
   const activeVariant = useCanvas((s) => s.activeVariant);
   const setActiveVariant = useCanvas((s) => s.setActiveVariant);
   const dispatch = useCanvas((s) => s.dispatch);
@@ -34,6 +41,12 @@ export function Properties() {
   );
   const nodes = resolved.map((r) => r.node).filter((n): n is CanvasNode => !!n);
   const insideInstance = resolved.some((r) => r.defId !== null);
+
+  // A single selected instance gets its variant switcher.
+  const instanceNode = resolved.length === 1 ? doc?.nodes[resolved[0]!.targetId] : undefined;
+  const instanceDef = instanceNode?.type === 'instance'
+    ? doc?.components?.[instanceNode.componentRef ?? '']
+    : undefined;
 
   const tokens = useMemo(() => (doc?.tokens ?? [])
     .filter((t) => t.group === 'color')
@@ -108,6 +121,8 @@ export function Properties() {
           >Reset to component</button>
         </div>
       )}
+
+      {instanceNode && instanceDef && <InstanceProps instanceId={resolved[0]!.targetId} def={instanceDef} node={instanceNode} />}
 
       {nodes.length > 1 && <ArrangeBar ids={nodes.map((n) => n.id)} />}
 
@@ -262,10 +277,10 @@ export function Properties() {
                   <SegmentedControl
                     value={read('flex-direction') || 'row'}
                     options={[
-                      { value: 'row', label: '→', title: 'row' },
-                      { value: 'column', label: '↓', title: 'column' },
-                      { value: 'row-reverse', label: '←', title: 'row-reverse' },
-                      { value: 'column-reverse', label: '↑', title: 'column-reverse' },
+                      { value: 'row', label: <Icon name="arrowRight" size={13} />, title: 'row' },
+                      { value: 'column', label: <Icon name="arrowDown" size={13} />, title: 'column' },
+                      { value: 'row-reverse', label: <Icon name="arrowLeft" size={13} />, title: 'row-reverse' },
+                      { value: 'column-reverse', label: <Icon name="arrowUp" size={13} />, title: 'column-reverse' },
                     ]}
                     onCommit={set('flex-direction')}
                   />
@@ -350,8 +365,10 @@ export function Properties() {
               <SegmentedControl
                 value={read('text-align') || 'left'}
                 options={[
-                  { value: 'left', label: '⬅' }, { value: 'center', label: '↔' },
-                  { value: 'right', label: '➡' }, { value: 'justify', label: '☰' },
+                  { value: 'left', label: <Icon name="textLeft" size={13} />, title: 'Left' },
+                  { value: 'center', label: <Icon name="textCenter" size={13} />, title: 'Centre' },
+                  { value: 'right', label: <Icon name="textRight" size={13} />, title: 'Right' },
+                  { value: 'justify', label: <Icon name="textJustify" size={13} />, title: 'Justify' },
                 ]}
                 onCommit={set('text-align')}
               />
@@ -469,6 +486,58 @@ export function Properties() {
       </Section>
 
       <RawCss nodes={nodes} keys={selection} activeVariant={activeVariant} />
+    </div>
+  );
+}
+
+/**
+ * Variant switcher for a selected instance.
+ *
+ * Shown above everything else because it is the highest-level thing about an
+ * instance: which variant it is determines most of what the other panels show.
+ */
+function InstanceProps({ instanceId, def, node }: {
+  instanceId: string;
+  def: ComponentDef;
+  node: CanvasNode;
+}) {
+  const dispatch = useCanvas((s) => s.dispatch);
+  const props = resolvedProps(def, node);
+
+  if (!def.props?.length) {
+    return (
+      <div className="instance-props">
+        <span className="field-label">{def.name}</span>
+        <p className="panel-hint">
+          This component has no variant properties. Add them in the Components panel to vary it by
+          size, tone, state and so on.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="instance-props">
+      <span className="field-label">{def.name}</span>
+      {def.props.map((prop) => (
+        <Row key={prop.name}>
+          <Field label={prop.name} prop={`variant property "${prop.name}"`} wide>
+            {prop.values.length <= 4 ? (
+              <SegmentedControl
+                value={props[prop.name] ?? prop.default}
+                options={prop.values.map((v) => ({ value: v, label: v }))}
+                onCommit={(v) => dispatch([{ t: 'props', updates: [{ id: instanceId, props: { [prop.name]: v } }] }])}
+              />
+            ) : (
+              <Select
+                value={props[prop.name] ?? prop.default}
+                options={prop.values.map((v) => ({ value: v, label: v }))}
+                onCommit={(v) => dispatch([{ t: 'props', updates: [{ id: instanceId, props: { [prop.name]: v } }] }])}
+              />
+            )}
+          </Field>
+        </Row>
+      ))}
     </div>
   );
 }

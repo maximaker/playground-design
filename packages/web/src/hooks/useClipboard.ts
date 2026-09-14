@@ -7,7 +7,7 @@
  */
 
 import { useEffect } from 'react';
-import { type CanvasNode, type NodeId, emitHtml, parseHtml, makeNode, defaultStylesFor } from '@canvas/shared';
+import { type CanvasNode, type NodeId, emitHtml, parseHtml, makeNode, defaultStylesFor } from '@playground/shared';
 import { useCanvas, getDoc, currentPage, topLevelSelection } from '../state/store.ts';
 
 export function useClipboard(): void {

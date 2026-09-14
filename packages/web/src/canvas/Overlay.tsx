@@ -7,10 +7,10 @@
  * no width in the document at all.
  */
 
-import { memo, useEffect, useRef, useState } from 'react';
-import type { NodeId, SnapGuide } from '@canvas/shared';
+import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import type { NodeId, SnapGuide } from '@playground/shared';
 import { useCanvas, getNodeById, getDoc } from '../state/store.ts';
-import { allFrames, nodeRect, nodeInnerRect } from './registry.ts';
+import { allFrames, findElement, nodeRect } from './registry.ts';
 import { HANDLES, type DropTarget } from './interactions.ts';
 
 interface Rects { selection: Record<NodeId, DOMRect>; hovered: DOMRect | null; peers: { color: string; rect: DOMRect }[] }
@@ -20,9 +20,11 @@ interface OverlayProps {
   dropTarget: DropTarget | null;
   /** Snap guides, in the working space named by `space`. */
   guides: { guides: SnapGuide[]; space: 'canvas' | NodeId } | null;
+  /** True while a gesture is changing geometry every frame. */
+  live: boolean;
 }
 
-export const Overlay = memo(function Overlay({ version, dropTarget, guides }: OverlayProps) {
+export const Overlay = memo(function Overlay({ version, dropTarget, guides, live }: OverlayProps) {
   const selection = useCanvas((s) => s.selection);
   const hovered = useCanvas((s) => s.hovered);
   const editingText = useCanvas((s) => s.editingText);
@@ -32,31 +34,58 @@ export const Overlay = memo(function Overlay({ version, dropTarget, guides }: Ov
   const [rects, setRects] = useState<Rects>({ selection: {}, hovered: null, peers: [] });
   const raf = useRef<number>(0);
 
-  // Re-measure on a rAF loop rather than on state changes: layout inside the
-  // iframes settles asynchronously (fonts, images, reflow), so a one-shot
-  // measurement after a change is routinely wrong by a frame or two.
+  const measure = useCallback(() => {
+    const next: Rects = { selection: {}, hovered: null, peers: [] };
+    for (const id of selection) {
+      const r = nodeRect(id);
+      if (r) next.selection[id] = r;
+    }
+    if (hovered && !selection.includes(hovered)) next.hovered = nodeRect(hovered);
+    for (const peer of peers) {
+      for (const id of peer.selection) {
+        const r = nodeRect(id);
+        if (r) next.peers.push({ color: peer.color, rect: r });
+      }
+    }
+    setRects((prev) => (sameRects(prev, next) ? prev : next));
+  }, [selection, hovered, peers]);
+
+  /**
+   * Measure on change, not on a loop.
+   *
+   * Reading a rect inside an artboard iframe forces that document to lay out.
+   * Doing it every frame forever is permanent layout thrash — on a page with a
+   * thousand nodes it saturated the main thread even while the editor sat idle.
+   * Layout does settle asynchronously (fonts, images), so a ResizeObserver on
+   * the measured elements covers what a one-shot measurement would miss.
+   */
+  useLayoutEffect(() => {
+    measure();
+
+    const observer = new ResizeObserver(measure);
+    for (const id of [...selection, ...(hovered ? [hovered] : [])]) {
+      const el = findElement(id);
+      if (el) observer.observe(el);
+    }
+    // Fonts arriving after first paint move text, and therefore boxes.
+    const fontsReady = [...allFrames()].map(([, frame]) => frame.contentDocument?.fonts?.ready).filter(Boolean);
+    void Promise.all(fontsReady).then(measure).catch(() => {});
+
+    return () => observer.disconnect();
+  }, [measure, selection, hovered, version, viewport]);
+
+  /** During a drag the geometry changes every frame, so track it every frame. */
   useEffect(() => {
+    if (!live) return;
     let running = true;
     const tick = () => {
       if (!running) return;
-      const next: Rects = { selection: {}, hovered: null, peers: [] };
-      for (const id of selection) {
-        const r = nodeRect(id);
-        if (r) next.selection[id] = r;
-      }
-      if (hovered && !selection.includes(hovered)) next.hovered = nodeRect(hovered);
-      for (const peer of peers) {
-        for (const id of peer.selection) {
-          const r = nodeRect(id);
-          if (r) next.peers.push({ color: peer.color, rect: r });
-        }
-      }
-      setRects((prev) => (sameRects(prev, next) ? prev : next));
+      measure();
       raf.current = requestAnimationFrame(tick);
     };
     raf.current = requestAnimationFrame(tick);
     return () => { running = false; cancelAnimationFrame(raf.current); };
-  }, [selection, hovered, peers, version, viewport]);
+  }, [live, measure]);
 
   const measureTo = useCanvas((s) => s.measureTo);
   const single = selection.length === 1 ? selection[0]! : null;
@@ -244,19 +273,4 @@ function sameRects(a: Rects, b: Rects): boolean {
 function sameRect(a: DOMRect, b: DOMRect): boolean {
   return Math.abs(a.left - b.left) < 0.5 && Math.abs(a.top - b.top) < 0.5
     && Math.abs(a.width - b.width) < 0.5 && Math.abs(a.height - b.height) < 0.5;
-}
-
-/** Keeps the overlay honest when an artboard's iframe reflows on its own. */
-export function useReflowWatcher(onReflow: () => void): void {
-  useEffect(() => {
-    const observers: ResizeObserver[] = [];
-    for (const [, frame] of allFrames()) {
-      const body = frame.contentDocument?.body;
-      if (!body) continue;
-      const ro = new ResizeObserver(onReflow);
-      ro.observe(body);
-      observers.push(ro);
-    }
-    return () => observers.forEach((o) => o.disconnect());
-  }, [onReflow]);
 }
