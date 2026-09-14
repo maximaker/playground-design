@@ -39,6 +39,22 @@ const SERVE_CLIENT = !process.env.VERCEL;
 
 const app = new Hono();
 
+/**
+ * Assets are fetched by code-component sandboxes, which have an opaque origin,
+ * so their requests carry `Origin: null`. The general CORS policy echoes the
+ * origin back with credentials enabled, and a browser refuses that pairing for
+ * a null origin — the module import fails with a bare "failed to fetch".
+ *
+ * Assets are public to anyone holding the id and are never credentialed, so
+ * this route answers with a plain wildcard instead. Registered before the CORS
+ * middleware so that its post-response code runs last and wins.
+ */
+app.use('/assets/*', async (c, next) => {
+  await next();
+  c.res.headers.set('Access-Control-Allow-Origin', '*');
+  c.res.headers.delete('Access-Control-Allow-Credentials');
+});
+
 app.use('*', cors({ origin: (o) => o ?? '*', credentials: true }));
 
 // ---------------------------------------------------------------------------
@@ -329,6 +345,11 @@ app.get('/assets/:id', async (c) => {
   return c.body(new Uint8Array(asset.bytes), 200, {
     'Content-Type': asset.mime,
     'Cache-Control': 'public, max-age=31536000, immutable',
+    // Code-component bundles are imported by a sandboxed frame, which has an
+    // opaque origin — every fetch from it is cross-origin, CORS included.
+    // Assets are already public to anyone holding the id, so this grants
+    // nothing that the URL did not.
+    'Access-Control-Allow-Origin': '*',
   });
 });
 

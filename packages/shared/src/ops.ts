@@ -16,6 +16,7 @@ import {
   type Breakpoint, breakpointsOf,
   descendants, isAncestorOf, makeNote, newId, variantKey,
 } from './model.ts';
+import type { CodeComponent } from './code-components.ts';
 
 export type Op =
   | { t: 'insert'; nodes: CanvasNode[]; parent: NodeId | null; index: number; page?: string }
@@ -42,6 +43,7 @@ export type Op =
     }
   | { t: 'props'; updates: { id: NodeId; props: Record<string, string | null> }[] }
   | { t: 'breakpoints'; breakpoints: Breakpoint[] }
+  | { t: 'code-component'; action: 'add' | 'update' | 'remove'; component: Partial<CodeComponent> & { id: string } }
   | {
       t: 'override';
       updates: {
@@ -94,6 +96,7 @@ export function applyOp(doc: CanvasDocument, op: Op): Op {
     case 'variant': return applyVariant(doc, op);
     case 'props': return applyProps(doc, op);
     case 'breakpoints': return applyBreakpoints(doc, op);
+    case 'code-component': return applyCodeComponent(doc, op);
   }
 }
 
@@ -500,6 +503,41 @@ function applyBreakpoints(doc: CanvasDocument, op: Extract<Op, { t: 'breakpoints
   return { t: 'breakpoints', breakpoints: before };
 }
 
+function applyCodeComponent(doc: CanvasDocument, op: Extract<Op, { t: 'code-component' }>): Op {
+  if (!doc.codeComponents) doc.codeComponents = {};
+  const current = doc.codeComponents[op.component.id];
+
+  if (op.action === 'add') {
+    if (current) throw new OpError(`code component ${op.component.id} already exists`);
+    const { id, name, importPath, bundle } = op.component;
+    if (!name || !importPath || !bundle) throw new OpError('a code component needs a name, import path and bundle');
+    doc.codeComponents[id] = {
+      id, name, importPath, bundle,
+      exportName: op.component.exportName ?? 'default',
+      props: op.component.props ?? [],
+      sourcePath: op.component.sourcePath,
+      naturalSize: op.component.naturalSize,
+      createdAt: op.component.createdAt ?? Date.now(),
+    };
+    return { t: 'code-component', action: 'remove', component: { id } };
+  }
+
+  if (op.action === 'remove') {
+    if (!current) throw new OpError(`code component ${op.component.id} not found`);
+    delete doc.codeComponents[op.component.id];
+    return { t: 'code-component', action: 'add', component: current };
+  }
+
+  if (!current) throw new OpError(`code component ${op.component.id} not found`);
+  const before: Partial<CodeComponent> & { id: string } = { id: current.id };
+  for (const key of Object.keys(op.component) as (keyof CodeComponent)[]) {
+    if (key === 'id') continue;
+    (before as Record<string, unknown>)[key] = current[key];
+  }
+  doc.codeComponents[op.component.id] = { ...current, ...op.component };
+  return { t: 'code-component', action: 'update', component: before };
+}
+
 function clamp(n: number, lo: number, hi: number): number {
   if (!Number.isFinite(n) || n < 0) return hi;
   return Math.max(lo, Math.min(hi, n));
@@ -597,6 +635,7 @@ export function touchedNodes(op: Op): TouchedNodes {
     case 'component':
     case 'variant':
     case 'breakpoints':
+    case 'code-component':
       return { ...empty, global: true };
   }
 }

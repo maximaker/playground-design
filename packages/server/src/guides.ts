@@ -134,6 +134,10 @@ change, that is a variant. \`detach_instance\` is the escape hatch when one
 instance has to diverge past what overrides can express.
 
 Put shared values in tokens so a change is one edit, not N.
+
+If the component already exists in the project's code, do not rebuild it — see
+\`get_code_component_guide\`. A canvas component is for things that do not exist
+yet; a code component is the real one.
 `.trim(),
 
   export: `
@@ -145,6 +149,11 @@ Put shared values in tokens so a change is one edit, not N.
 - Properties with no Tailwind utility are emitted in a \`style\` prop, so the
   output is complete either way.
 - \`export\` produces PNG/JPG/SVG/HTML files.
+
+Code components export as themselves: \`<Button variant="primary" />\` with a real
+import of the project's own module, not a copy of their markup. HTML export
+cannot do that — it leaves a marked mount point — so prefer JSX for any design
+that uses them.
 `.trim(),
 };
 

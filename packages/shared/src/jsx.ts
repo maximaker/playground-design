@@ -10,6 +10,8 @@
 
 import type { CanvasDocument, CanvasNode, NodeId, StyleMap } from './model.ts';
 import { type ExpandedNode, expandNode } from './components.ts';
+import { sanitizeMarkup } from './sanitize.ts';
+import { codeComponentOf, codeElementJsx, collectCodeImports, explicitCodeProps } from './code-components.ts';
 
 export type JsxFormat = 'tailwind' | 'inline';
 
@@ -38,11 +40,18 @@ export function emitJsx(doc: CanvasDocument, rootId: NodeId, opts: JsxOptions = 
     const props = propsFor(node, format);
     const tag = node.tag;
 
+    // A code node *is* the project's component — emit the real element, not a
+    // rendering of it. This is the point of the whole feature: round-tripping.
+    if (node.type === 'code') {
+      const component = codeComponentOf(doc, node);
+      if (component) return pad + codeElementJsx(component, explicitCodeProps(component, node));
+    }
+
     if (VOID_TAGS.has(tag)) return `${pad}<${tag}${props} />`;
 
     if (node.type === 'vector') {
       // SVG children are kept verbatim; re-authoring them as JSX loses detail.
-      return `${pad}<${tag}${props} dangerouslySetInnerHTML={{ __html: ${JSON.stringify(node.text ?? '')} }} />`;
+      return `${pad}<${tag}${props} dangerouslySetInnerHTML={{ __html: ${JSON.stringify(sanitizeMarkup(node.text ?? ''))} }} />`;
     }
     if (node.type === 'text') {
       return `${pad}<${tag}${props}>${escapeJsxText(node.text ?? '')}</${tag}>`;
@@ -56,7 +65,9 @@ export function emitJsx(doc: CanvasDocument, rootId: NodeId, opts: JsxOptions = 
   const root = doc.nodes[rootId];
   const body = root ? render(expandNode(doc, root), opts.componentName ? 2 : 0) : '';
   if (!opts.componentName) return body;
-  return `export function ${opts.componentName}() {\n  return (\n${body}\n  );\n}\n`;
+  const imports = collectCodeImports(doc, rootId);
+  const preamble = imports.length ? `${imports.join('\n')}\n\n` : '';
+  return `${preamble}export function ${opts.componentName}() {\n  return (\n${body}\n  );\n}\n`;
 }
 
 function propsFor(node: CanvasNode, format: JsxFormat): string {

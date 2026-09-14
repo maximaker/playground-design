@@ -300,6 +300,7 @@ function describeOp(op: Op): string {
   switch (op.t) {
     case 'insert': return `Added ${op.nodes.length} ${op.nodes.length === 1 ? 'layer' : 'layers'}`;
     case 'remove': return `Deleted ${op.ids.length} ${op.ids.length === 1 ? 'layer' : 'layers'}`;
+    case 'code-component': return `${op.action === 'add' ? 'Registered' : op.action === 'remove' ? 'Unregistered' : 'Updated'} a code component`;
     case 'styles': return `Restyled ${op.updates.length} ${op.updates.length === 1 ? 'layer' : 'layers'}`;
     case 'text': return 'Edited text';
     case 'rename': return 'Renamed layer';

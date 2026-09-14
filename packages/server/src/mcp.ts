@@ -19,6 +19,8 @@ import {
   resolvedProps, variantMatrix, lintDocument, summarise, RULES,
   breakpointsOf, breakpointSelector,
   parseTokensFromCss, parseTokensFromTailwind, serializeTokens, diffTokens, mergeTokens,
+  type CodeComponent, type CodeProp, codeComponentsOf, codeComponentOf, resolvedCodeProps,
+  codeElementJsx, explicitCodeProps, MOUNT_CONTRACT,
 } from '@playground/shared';
 import { applyOps, getDocument, StoreError, createSnapshot } from './store.ts';
 import { callTab, notifyTabs, selectionOf, hasLiveTab, NoTabError } from './realtime.ts';
@@ -121,6 +123,7 @@ export function buildMcpServer(ctx: McpContext): McpServer {
   registerWriteTools(server, ctx);
   registerNoteTools(server, ctx);
   registerComponentTools(server, ctx);
+  registerCodeComponentTools(server, ctx);
   registerSessionTools(server, ctx);
   return server;
 }
@@ -1721,6 +1724,234 @@ function registerComponentTools(server: McpServer, ctx: McpContext): void {
     ]);
     return json({ detached: id, newRoot: root.id, nodeCount: nodes.length });
   }));
+}
+
+
+// ---------------------------------------------------------------------------
+// Code components
+// ---------------------------------------------------------------------------
+
+const CodePropSchema = z.object({
+  name: z.string(),
+  type: z.enum(['string', 'number', 'boolean', 'enum']).default('string'),
+  values: z.array(z.string()).optional().describe('Allowed values, for type "enum".'),
+  default: z.string().optional(),
+  required: z.boolean().optional(),
+  description: z.string().optional(),
+});
+
+function registerCodeComponentTools(server: McpServer, ctx: McpContext): void {
+  server.registerTool('get_code_component_guide', {
+    title: 'How to put a real component on the canvas',
+    description:
+      'Read this before register_code_component. Explains the bundle contract and how to build one.',
+    inputSchema: {},
+    annotations: { readOnlyHint: true },
+  }, async () => guard(() => text(
+    `Code components render the project's real React components on the canvas, with their real ` +
+    `props. What the designer sees is the component that ships.\n\n` +
+    `Playground runs in a browser and cannot read or build a repository — you do that part.\n\n` +
+    `1. Bundle the component to a single self-contained ES module, with React bundled in ` +
+    `(esbuild: --bundle --format=esm --loader:.tsx=tsx). The module must export:\n\n` +
+    MOUNT_CONTRACT + `\n\n` +
+    `2. Call register_code_component with that JavaScript as "bundle", plus the import path the ` +
+    `project really uses and the props the component accepts. Declare props honestly: they become ` +
+    `the controls the designer gets, and anything undeclared is ignored.\n\n` +
+    `3. Call add_code_instance to place it.\n\n` +
+    `The bundle runs in a sandboxed iframe with an opaque origin: no access to the document, the ` +
+    `page, cookies or storage. Network requests still work, so do not bundle anything you would ` +
+    `not run in a preview. Styles must come with the bundle — the artboard's stylesheet and CSS ` +
+    `variables do not cross into the sandbox, so inline the component's CSS or pass tokens as props.\n\n` +
+    `On export, a code node emits "<Button variant=\"primary\" />" with a real import — not a ` +
+    `copy of its markup.`,
+  )));
+
+  server.registerTool('register_code_component', {
+    title: 'Register a real component',
+    description:
+      'Uploads a bundled component so it can be placed on the canvas. Call get_code_component_guide first for the bundle contract.',
+    inputSchema: {
+      name: z.string().describe('Component name as the code spells it, e.g. "Button".'),
+      importPath: z.string().describe('How the project imports it, e.g. "@/components/Button".'),
+      bundle: z.string().describe('The bundled ES module source, exporting mount(element, props).'),
+      exportName: z.string().optional().describe('Named export, or "default" (the default).'),
+      sourcePath: z.string().optional().describe('Source file, shown to the human.'),
+      props: z.array(CodePropSchema).optional(),
+      replace: z.boolean().optional().describe('Update the existing component with this name instead of failing.'),
+    },
+    annotations: { destructiveHint: false },
+  }, async ({ name, importPath, bundle, exportName, sourcePath, props, replace }) => guard(async () => {
+    const doc = requireDoc(ctx);
+    const existing = codeComponentsOf(doc).find((c) => c.name === name);
+    if (existing && !replace) {
+      return fail(
+        `A code component named "${name}" is already registered (${existing.id}). ` +
+        `Pass replace: true to update it — every instance on the canvas picks up the new bundle.`,
+      );
+    }
+    // Minified output exports as `export{a as mount}` — no space, aliased — so
+    // the check has to look for the exported *name*, not the declaration.
+    if (!/\bexport\s*(?:function\s+mount\b|\{[^}]*\bmount\b)/.test(bundle)) {
+      return fail('The bundle must export a `mount(element, props)` function. See get_code_component_guide.');
+    }
+
+    const assetId = await storeAsset(doc.id, 'text/javascript', `${name}.mjs`, Buffer.from(bundle, 'utf8'));
+    const declared = (props ?? []) as CodeProp[];
+
+    if (existing) {
+      commit(ctx, [{
+        t: 'code-component', action: 'update',
+        component: { id: existing.id, importPath, bundle: assetId, exportName: exportName ?? existing.exportName, sourcePath, props: declared },
+      }]);
+      return json({ id: existing.id, updated: true, instances: instancesOfCode(requireDoc(ctx), existing.id).length });
+    }
+
+    const id = newId('cc');
+    commit(ctx, [{
+      t: 'code-component', action: 'add',
+      component: { id, name, importPath, bundle: assetId, exportName: exportName ?? 'default', sourcePath, props: declared },
+    }]);
+    return json({
+      id, name,
+      next: `Place it with add_code_instance({ componentId: "${id}", parentId: <a frame id> }).`,
+    });
+  }));
+
+  server.registerTool('list_code_components', {
+    title: 'List registered components',
+    description: 'The project components available to place, with their props and how many instances exist.',
+    inputSchema: {},
+    annotations: { readOnlyHint: true },
+  }, async () => guard(() => {
+    const doc = requireDoc(ctx);
+    return json(codeComponentsOf(doc).map((c) => ({
+      id: c.id, name: c.name, importPath: c.importPath, exportName: c.exportName,
+      sourcePath: c.sourcePath,
+      props: c.props,
+      instances: instancesOfCode(doc, c.id).length,
+    })));
+  }));
+
+  server.registerTool('add_code_instance', {
+    title: 'Place a real component',
+    description: 'Adds an instance of a registered code component to the canvas.',
+    inputSchema: {
+      componentId: z.string().describe('Id or name from list_code_components.'),
+      parentId: z.string().describe('Frame or artboard to place it in.'),
+      index: z.number().int().optional(),
+      props: z.record(z.string(), z.string()).optional().describe('Prop values. Numbers and booleans as strings; they are coerced to the declared type.'),
+      styles: StyleRecord.optional().describe('CSS for the wrapper box (margin, width, position).'),
+    },
+  }, async ({ componentId, parentId, index, props, styles }) => guard(() => {
+    const doc = requireDoc(ctx);
+    const component = resolveCodeComponent(doc, componentId);
+    const parent = node(doc, parentId);
+
+    const unknown = Object.keys(props ?? {}).filter((k) => !component.props.some((p) => p.name === k));
+    if (unknown.length) {
+      return fail(
+        `${component.name} does not declare ${unknown.map((u) => `"${u}"`).join(', ')}. ` +
+        `Declared props: ${component.props.map((p) => p.name).join(', ') || '(none)'}. ` +
+        `Re-register the component if the code really takes these.`,
+      );
+    }
+
+    const instance = makeNode({
+      type: 'code',
+      name: component.name,
+      codeRef: component.id,
+      props: props ?? {},
+      // A code component brings its own size; the wrapper must not impose one.
+      styles: { display: 'block', ...styles },
+    });
+    commit(ctx, [{
+      t: 'insert', nodes: [{ ...instance, parent: parent.id }], parent: parent.id,
+      index: index ?? parent.children.length,
+    }]);
+    return json({ id: instance.id, component: component.name, props: resolvedCodeProps(component, instance) });
+  }));
+
+  server.registerTool('set_code_props', {
+    title: 'Change a component instance’s props',
+    description: 'Sets prop values on a placed code component. Props not mentioned keep their value.',
+    inputSchema: {
+      id: z.string(),
+      props: z.record(z.string(), z.string()),
+    },
+  }, async ({ id, props }) => guard(() => {
+    const doc = requireDoc(ctx);
+    const target = node(doc, id);
+    if (target.type !== 'code') return fail(`Node ${id} is a ${target.type}, not a code component.`);
+    const component = codeComponentOf(doc, target);
+
+    const unknown = Object.keys(props).filter((k) => !component?.props.some((p) => p.name === k));
+    if (unknown.length && component) {
+      return fail(`${component.name} does not declare ${unknown.join(', ')}. Declared: ${component.props.map((p) => p.name).join(', ') || '(none)'}.`);
+    }
+
+    commit(ctx, [{ t: 'props', updates: [{ id, props: { ...target.props, ...props } }] }]);
+    return json({ id, props: resolvedCodeProps(component, requireDoc(ctx).nodes[id]!) });
+  }));
+
+  server.registerTool('remove_code_component', {
+    title: 'Unregister a component',
+    description: 'Removes a code component. Refuses while instances still exist unless told otherwise.',
+    inputSchema: {
+      componentId: z.string(),
+      removeInstances: z.boolean().optional(),
+    },
+  }, async ({ componentId, removeInstances }) => guard(() => {
+    const doc = requireDoc(ctx);
+    const component = resolveCodeComponent(doc, componentId);
+    const instances = instancesOfCode(doc, component.id);
+    if (instances.length && !removeInstances) {
+      return fail(
+        `${component.name} still has ${instances.length} instance${instances.length === 1 ? '' : 's'} on the canvas ` +
+        `(${instances.slice(0, 5).map((n) => n.id).join(', ')}). Pass removeInstances: true to delete them too.`,
+      );
+    }
+    const ops: Op[] = [];
+    if (instances.length) ops.push({ t: 'remove', ids: instances.map((n) => n.id) });
+    ops.push({ t: 'code-component', action: 'remove', component: { id: component.id } });
+    commit(ctx, ops);
+    return json({ removed: component.name, instancesRemoved: instances.length });
+  }));
+
+  server.registerTool('get_code_usage', {
+    title: 'Where a component is used',
+    description: 'Every instance of a code component, with its props and the artboard it sits on.',
+    inputSchema: { componentId: z.string() },
+    annotations: { readOnlyHint: true },
+  }, async ({ componentId }) => guard(() => {
+    const doc = requireDoc(ctx);
+    const component = resolveCodeComponent(doc, componentId);
+    return json({
+      component: component.name,
+      importPath: component.importPath,
+      instances: instancesOfCode(doc, component.id).map((n) => ({
+        id: n.id,
+        artboard: doc.nodes[artboardOf(doc, n.id) ?? '']?.name,
+        props: n.props ?? {},
+        jsx: codeElementJsx(component, explicitCodeProps(component, n)),
+      })),
+    });
+  }));
+}
+
+function instancesOfCode(doc: CanvasDocument, componentId: string): CanvasNode[] {
+  return Object.values(doc.nodes).filter((n) => n.type === 'code' && n.codeRef === componentId);
+}
+
+function resolveCodeComponent(doc: CanvasDocument, ref: string): CodeComponent {
+  const all = codeComponentsOf(doc);
+  const found = doc.codeComponents?.[ref] ?? all.find((c) => c.name === ref);
+  if (!found) {
+    throw new Error(
+      `No code component "${ref}". Registered: ${all.map((c) => c.name).join(', ') || '(none yet)'}. ` +
+      `Register one with register_code_component.`,
+    );
+  }
+  return found;
 }
 
 // ---------------------------------------------------------------------------

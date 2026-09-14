@@ -61,6 +61,10 @@ export function describeNode(node: CanvasNode, includeStyles = false): string {
   if (node.type === 'text' && node.text) {
     parts.push(`text=${JSON.stringify(node.text.length > 60 ? node.text.slice(0, 59) + '…' : node.text)}`);
   }
+  // A code node's markup says nothing about it; its props are the content.
+  if (node.type === 'code' && node.props && Object.keys(node.props).length) {
+    parts.push(`props=${JSON.stringify(node.props)}`);
+  }
   if (node.children.length) parts.push(`(${node.children.length} children)`);
   if (!node.visible) parts.push('hidden');
   if (node.locked) parts.push('locked');

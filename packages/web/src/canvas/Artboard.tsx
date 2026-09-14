@@ -9,7 +9,7 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { NodeId } from '@playground/shared';
-import { getArtboardPosition, getArtboardSize } from '@playground/shared';
+import { descendants, getArtboardPosition, getArtboardSize } from '@playground/shared';
 import { useCanvas, getDoc, getNodeById } from '../state/store.ts';
 import { registerFrame } from './registry.ts';
 import { NodeView } from './NodeView.tsx';
@@ -50,6 +50,14 @@ export const Artboard = memo(function Artboard({ id, live }: Props) {
 
   const node = getNodeById(id);
   const doc = getDoc();
+
+  // Whether to allow scripts in this frame. Keyed to the structure counter
+  // rather than every edit: it only changes when a node is added or removed.
+  const hasCodeComponent = useMemo(
+    () => !!doc && descendants(doc, id).some((n) => doc.nodes[n]?.type === 'code'),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [doc, id, structureVersion],
+  );
 
   const { x, y } = node ? getArtboardPosition(node) : { x: 0, y: 0 };
   const { width, height } = node ? getArtboardSize(node) : { width: 0, height: 0 };
@@ -206,9 +214,15 @@ export const Artboard = memo(function Artboard({ id, live }: Props) {
               title={node.name}
               width={width}
               height={height}
-              // The iframe holds only document content, never third-party pages,
+              // The frame holds only document content, never third-party pages,
               // and must stay same-origin so the editor can measure and hit-test it.
-              sandbox="allow-same-origin"
+              //
+              // Scripts are off unless the artboard hosts a code component —
+              // sandbox flags are inherited, so a nested frame cannot re-enable
+              // what its parent forbids, and a code component is a real script.
+              // Vector markup is sanitised at render either way, so turning this
+              // on does not hand an imported SVG a way to run.
+              sandbox={hasCodeComponent ? 'allow-same-origin allow-scripts' : 'allow-same-origin'}
               scrolling="no"
               style={{ border: 0, display: 'block', width, height, background: '#fff' }}
             />

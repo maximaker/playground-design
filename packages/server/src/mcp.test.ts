@@ -58,6 +58,8 @@ test('lists the full tool surface', async () => {
     'create_artboard', 'write_html', 'update_styles', 'set_text_content', 'rename_nodes',
     'set_attributes', 'move_nodes', 'duplicate_nodes', 'delete_nodes', 'set_tokens',
     'set_selection', 'export', 'start_working_on_nodes', 'finish_working_on_nodes',
+    'register_code_component', 'list_code_components', 'add_code_instance', 'set_code_props',
+    'remove_code_component', 'get_code_usage', 'get_code_component_guide',
   ]) {
     assert.ok(names.includes(expected), `missing tool: ${expected}`);
   }
@@ -475,4 +477,128 @@ test('detach_instance bakes in overrides and drops the link', async () => {
   assert.equal(root.componentRef, undefined);
   const text = Object.values(after.nodes).find((n) => n.text === 'Only this one');
   assert.ok(text, 'the override survived detaching');
+});
+
+// ---------------------------------------------------------------------------
+// Code components
+// ---------------------------------------------------------------------------
+
+const BUNDLE = 'export function mount(el, props) { el.textContent = props.label ?? "x"; }';
+
+test('registering a code component stores the bundle as an asset', async () => {
+  const res = jsonOf<{ id: string }>(await client.callTool({
+    name: 'register_code_component',
+    arguments: {
+      name: 'Button', importPath: '@/components/Button', bundle: BUNDLE,
+      sourcePath: 'components/Button.tsx',
+      props: [
+        { name: 'label', type: 'string', default: 'Button' },
+        { name: 'variant', type: 'enum', values: ['primary', 'ghost'], default: 'primary' },
+      ],
+    },
+  }));
+
+  const component = getDocument(docId)!.codeComponents![res.id]!;
+  assert.equal(component.name, 'Button');
+
+  // The bundle has to be fetchable, or nothing renders on the canvas.
+  const asset = await fetch(`${base}/assets/${component.bundle}`);
+  assert.equal(asset.status, 200);
+  assert.equal(asset.headers.get('content-type'), 'text/javascript');
+  assert.equal(await asset.text(), BUNDLE);
+});
+
+test('a bundle without a mount export is refused', async () => {
+  const res = await client.callTool({
+    name: 'register_code_component',
+    arguments: { name: 'Broken', importPath: '@/x', bundle: 'export const nope = 1;' },
+  });
+  assert.ok(isError(res));
+  assert.match(textOf(res), /mount\(element, props\)/);
+});
+
+test('a minified bundle that aliases its export is accepted', async () => {
+  const res = await client.callTool({
+    name: 'register_code_component',
+    arguments: { name: 'Minified', importPath: '@/m', bundle: 'function a(e,t){}export{a as mount};' },
+  });
+  assert.ok(!isError(res), textOf(res));
+});
+
+test('registering the same name twice needs an explicit replace', async () => {
+  const dup = await client.callTool({
+    name: 'register_code_component',
+    arguments: { name: 'Button', importPath: '@/components/Button', bundle: BUNDLE },
+  });
+  assert.ok(isError(dup));
+  assert.match(textOf(dup), /replace: true/);
+
+  const replaced = jsonOf<{ updated: boolean }>(await client.callTool({
+    name: 'register_code_component',
+    arguments: {
+      name: 'Button', importPath: '@/components/Button', bundle: BUNDLE, replace: true,
+      props: [
+        { name: 'label', type: 'string', default: 'Button' },
+        { name: 'variant', type: 'enum', values: ['primary', 'ghost'], default: 'primary' },
+      ],
+    },
+  }));
+  assert.equal(replaced.updated, true);
+});
+
+test('placing an instance and setting props round-trips', async () => {
+  const artboard = jsonOf<{ artboards: { id: string }[] }>(
+    await client.callTool({ name: 'get_basic_info', arguments: {} }),
+  ).artboards[0]!.id;
+
+  const placed = jsonOf<{ id: string }>(await client.callTool({
+    name: 'add_code_instance',
+    arguments: { componentId: 'Button', parentId: artboard, props: { label: 'Save' } },
+  }));
+
+  const node = getDocument(docId)!.nodes[placed.id]!;
+  assert.equal(node.type, 'code');
+  assert.equal(node.props!.label, 'Save');
+
+  await client.callTool({
+    name: 'set_code_props', arguments: { id: placed.id, props: { variant: 'ghost' } },
+  });
+  const after = getDocument(docId)!.nodes[placed.id]!;
+  assert.equal(after.props!.variant, 'ghost');
+  assert.equal(after.props!.label, 'Save', 'props not mentioned keep their value');
+});
+
+test('an undeclared prop is refused rather than silently dropped', async () => {
+  const artboard = jsonOf<{ artboards: { id: string }[] }>(
+    await client.callTool({ name: 'get_basic_info', arguments: {} }),
+  ).artboards[0]!.id;
+
+  const res = await client.callTool({
+    name: 'add_code_instance',
+    arguments: { componentId: 'Button', parentId: artboard, props: { colour: 'red' } },
+  });
+  assert.ok(isError(res));
+  assert.match(textOf(res), /does not declare/);
+});
+
+test('get_code_usage reports every instance with its real JSX', async () => {
+  const usage = jsonOf<{ instances: { jsx: string }[] }>(
+    await client.callTool({ name: 'get_code_usage', arguments: { componentId: 'Button' } }),
+  );
+  assert.ok(usage.instances.length >= 1);
+  assert.match(usage.instances[0]!.jsx, /^<Button /);
+});
+
+test('unregistering refuses while instances are still placed', async () => {
+  const res = await client.callTool({
+    name: 'remove_code_component', arguments: { componentId: 'Button' },
+  });
+  assert.ok(isError(res));
+  assert.match(textOf(res), /removeInstances: true/);
+
+  const forced = jsonOf<{ instancesRemoved: number }>(await client.callTool({
+    name: 'remove_code_component', arguments: { componentId: 'Button', removeInstances: true },
+  }));
+  assert.ok(forced.instancesRemoved >= 1);
+  assert.equal(getDocument(docId)!.codeComponents!.Button, undefined);
 });

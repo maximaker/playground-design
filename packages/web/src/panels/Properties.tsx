@@ -10,6 +10,7 @@ import { useMemo } from 'react';
 import {
   type Breakpoint, type CanvasNode, type ComponentDef, type NodeId, type StyleMap,
   breakpointSelector, breakpointsOf, maxWidthOf, resolvedProps,
+  codeComponentOf,
 } from '@playground/shared';
 import { useCanvas, getDoc } from '../state/store.ts';
 import { attrOps, resolveKey, resetOverrideOps } from '../state/keys.ts';
@@ -125,6 +126,8 @@ export function Properties() {
           >Reset to component</button>
         </div>
       )}
+
+      {nodes.length === 1 && first.type === 'code' && <CodeProps node={first} />}
 
       {instanceNode && instanceDef && <InstanceProps instanceId={resolved[0]!.targetId} def={instanceDef} node={instanceNode} />}
 
@@ -506,6 +509,84 @@ export function Properties() {
       </Section>
 
       <RawCss nodes={nodes} keys={selection} activeVariant={activeVariant} />
+    </div>
+  );
+}
+
+/**
+ * Controls for a placed code component.
+ *
+ * The prop list comes from what the component declares, so this panel is only
+ * as good as the registration — which is the right pressure to apply: a
+ * component that declares its props honestly is one a designer can actually use.
+ */
+function CodeProps({ node }: { node: CanvasNode }) {
+  const dispatch = useCanvas((s) => s.dispatch);
+  const doc = useCanvas((s) => s.doc);
+  const component = doc ? codeComponentOf(doc, node) : undefined;
+
+  if (!component) {
+    return (
+      <div className="instance-props">
+        <p className="panel-hint">
+          This component is no longer registered. Ask the agent to register it again, or delete the layer.
+        </p>
+      </div>
+    );
+  }
+
+  const set = (name: string) => (value: string) =>
+    dispatch([{ t: 'props', updates: [{ id: node.id, props: { [name]: value } }] }]);
+  const value = (name: string) => node.props?.[name] ?? component.props.find((p) => p.name === name)?.default ?? '';
+
+  return (
+    <div className="instance-props">
+      <span className="field-label">{component.name}</span>
+      <p className="panel-hint code-source">{component.sourcePath ?? component.importPath}</p>
+
+      {component.props.length === 0 && (
+        <p className="panel-hint">This component was registered without any props.</p>
+      )}
+
+      {component.props.map((prop) => (
+        <Row key={prop.name}>
+          <Field label={prop.name} prop={prop.description ?? `prop "${prop.name}"`} wide>
+            {prop.type === 'boolean' ? (
+              <SegmentedControl
+                value={value(prop.name) === 'true' ? 'true' : 'false'}
+                options={[{ value: 'false', label: 'Off' }, { value: 'true', label: 'On' }]}
+                onCommit={set(prop.name)}
+              />
+            ) : prop.type === 'enum' && prop.values?.length ? (
+              prop.values.length <= 4 ? (
+                <SegmentedControl
+                  value={value(prop.name)}
+                  options={prop.values.map((v) => ({ value: v, label: v }))}
+                  onCommit={set(prop.name)}
+                />
+              ) : (
+                <Select
+                  value={value(prop.name)}
+                  options={prop.values.map((v) => ({ value: v, label: v }))}
+                  onCommit={set(prop.name)}
+                />
+              )
+            ) : (
+              <TextInput value={value(prop.name)} placeholder={prop.default ?? ''} onCommit={set(prop.name)} />
+            )}
+          </Field>
+        </Row>
+      ))}
+
+      <Row>
+        <Field label="Interactive" prop="whether clicks reach the component instead of selecting it" wide>
+          <SegmentedControl
+            value={node.attrs['data-interactive'] === 'true' ? 'true' : 'false'}
+            options={[{ value: 'false', label: 'Select' }, { value: 'true', label: 'Click through' }]}
+            onCommit={(v) => dispatch([{ t: 'attrs', updates: [{ id: node.id, attrs: { 'data-interactive': v === 'true' ? 'true' : null } }] }])}
+          />
+        </Field>
+      </Row>
     </div>
   );
 }

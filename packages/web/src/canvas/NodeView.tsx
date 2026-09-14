@@ -12,7 +12,10 @@
  */
 
 import { createElement, memo, useCallback, useEffect, useRef } from 'react';
-import { type ExpandedNode, type NodeId, contestedProperties, expandInstance } from '@playground/shared';
+import {
+  type ExpandedNode, type NodeId, codeComponentOf, contestedProperties, expandInstance, resolvedCodeProps, sanitizeMarkup,
+} from '@playground/shared';
+import { CodeFrame } from './CodeFrame.tsx';
 import { useCanvas, getDoc, getNodeById } from '../state/store.ts';
 import { toReactStyle } from './styles.ts';
 
@@ -44,8 +47,24 @@ export const NodeView = memo(function NodeView({ id, isRoot }: Props) {
 
   const props = domProps(node.attrs, id, node.styles, isRoot, contestedProperties(node));
 
+  if (node.type === 'code') {
+    const component = codeComponentOf(doc, node);
+    return createElement(
+      node.tag,
+      props,
+      component
+        ? <CodeFrame
+            component={component}
+            props={resolvedCodeProps(component, node)}
+            interactive={node.attrs['data-interactive'] === 'true'}
+            hug={!node.styles.width}
+          />
+        : <MissingComponent name={node.name} />,
+    );
+  }
+
   if (node.type === 'vector') {
-    return createElement(node.tag, { ...props, dangerouslySetInnerHTML: { __html: node.text ?? '' } });
+    return createElement(node.tag, { ...props, dangerouslySetInnerHTML: { __html: sanitizeMarkup(node.text ?? '') } });
   }
   if (VOID_TAGS.has(node.tag)) {
     return createElement(node.tag, props);
@@ -78,7 +97,7 @@ const ExpandedView = memo(function ExpandedView({ expanded, isRoot, editingText 
   const props = domProps(node.attrs, expanded.key, node.styles, isRoot, contestedProperties(node));
 
   if (node.type === 'vector') {
-    return createElement(node.tag, { ...props, dangerouslySetInnerHTML: { __html: node.text ?? '' } });
+    return createElement(node.tag, { ...props, dangerouslySetInnerHTML: { __html: sanitizeMarkup(node.text ?? '') } });
   }
   if (VOID_TAGS.has(node.tag)) {
     return createElement(node.tag, props);
@@ -98,6 +117,18 @@ const ExpandedView = memo(function ExpandedView({ expanded, isRoot, editingText 
     )),
   );
 });
+
+/** The component was unregistered but instances survived. Say so on the canvas. */
+function MissingComponent({ name }: { name: string }) {
+  return (
+    <div style={{
+      font: '12px ui-monospace, monospace', color: '#b54708', background: '#fffaeb',
+      border: '1px dashed #f79009', borderRadius: 6, padding: '8px 10px',
+    }}>
+      {name} is no longer registered
+    </div>
+  );
+}
 
 function domProps(
   attrs: Record<string, string>,

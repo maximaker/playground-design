@@ -10,6 +10,10 @@ const ALLOWED_MIME = new Set([
   'video/mp4', 'video/webm',
   'font/woff2', 'font/woff', 'font/ttf', 'font/otf',
   'text/html', 'text/plain', 'application/json',
+  // Code-component bundles. These are only ever executed inside a sandboxed
+  // iframe without allow-same-origin, so they run with an opaque origin and
+  // cannot reach the document, the parent page, cookies or storage.
+  'text/javascript',
 ]);
 
 export class AssetError extends Error {}

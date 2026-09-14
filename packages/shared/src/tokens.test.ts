@@ -1,3 +1,4 @@
+import type { Token } from './model.ts';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createEmptyDocument } from './model.ts';
@@ -127,9 +128,9 @@ test('diff reports what drifted', () => {
 });
 
 test('merge keeps tokens the incoming set does not mention', () => {
-  const current = [
-    { name: 'color.brand', group: 'color' as const, values: { default: '#000', dark: '#fff' } },
-    { name: 'color.keep', group: 'color' as const, values: { default: '#abc' } },
+  const current: Token[] = [
+    { name: 'color.brand', group: 'color', values: { default: '#000', dark: '#fff' } },
+    { name: 'color.keep', group: 'color', values: { default: '#abc' } },
   ];
   const merged = mergeTokens(current, [{ name: 'color.brand', group: 'color', values: { default: '#111' } }]);
   assert.equal(merged.length, 2, 'a partial stylesheet must not delete the rest of the system');

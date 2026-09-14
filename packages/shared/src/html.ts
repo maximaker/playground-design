@@ -6,6 +6,7 @@
  * original styles preserved rather than being dropped.
  */
 
+import { sanitizeMarkup } from './sanitize.ts';
 import { parse as parseHtmlDom, type HTMLElement as ParsedElement } from 'node-html-parser';
 import {
   type CanvasDocument, type CanvasNode, type NodeId, type NodeType, type StyleMap,
@@ -137,8 +138,17 @@ export function emitHtml(doc: CanvasDocument, rootId: NodeId, opts: EmitOptions 
     const attrStr = attrs.length ? ' ' + attrs.join(' ') : '';
     const tag = node.tag;
 
+    // A code component has no HTML of its own here — it is React, rendered in a
+    // sandbox. Static HTML export leaves a marked mount point rather than
+    // pretending, so the gap is visible instead of silently empty.
+    if (node.type === 'code') {
+      const component = doc.codeComponents?.[node.codeRef ?? ''];
+      const label = component ? `${component.name} from ${component.importPath}` : node.name;
+      return `${pad}<${tag}${attrStr}><!-- ${escapeText(label)}: a code component. Export as JSX to get the real element. --></${tag}>`;
+    }
+
     if (VOID_TAGS.has(tag)) return `${pad}<${tag}${attrStr} />`;
-    if (node.type === 'vector') return `${pad}<${tag}${attrStr}>${node.text ?? ''}</${tag}>`;
+    if (node.type === 'vector') return `${pad}<${tag}${attrStr}>${sanitizeMarkup(node.text ?? '')}</${tag}>`;
     if (node.type === 'text') return `${pad}<${tag}${attrStr}>${escapeText(node.text ?? '')}</${tag}>`;
 
     const kids = expanded.children.map((c) => emitNode(c, depth + 1)).filter(Boolean);

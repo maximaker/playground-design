@@ -7,7 +7,7 @@
  */
 
 import { useMemo } from 'react';
-import { componentsOf, collectSlots, instancesOf, makeNode } from '@playground/shared';
+import { codeComponentsOf, componentsOf, collectSlots, instancesOf, makeNode } from '@playground/shared';
 import { useCanvas, getDoc, currentPage } from '../state/store.ts';
 import { createComponentFromSelection, detachSelection } from '../hooks/commands.ts';
 import { Icon } from '../ui/Icon.tsx';
@@ -58,6 +58,31 @@ export function Components() {
       { t: 'component', action: 'remove', component: { id: componentId } },
       ...(def ? [{ t: 'remove' as const, ids: [def.root] }] : []),
     ]);
+  };
+
+  const codeComponents = useMemo(
+    () => (doc ? codeComponentsOf(doc) : []),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [doc, version],
+  );
+
+  const insertCode = (componentId: string) => {
+    const page = currentPage();
+    if (!doc || !page) return;
+    let parent = selection[0] ? doc.nodes[selection[0].split('::')[0]!] : undefined;
+    while (parent && (parent.type === 'text' || parent.type === 'image' || parent.type === 'vector')) {
+      parent = parent.parent ? doc.nodes[parent.parent] : undefined;
+    }
+    const parentId = parent?.id ?? page.artboards[0];
+    if (!parentId) { toast('Create an artboard first', 'error'); return; }
+
+    const component = doc.codeComponents?.[componentId];
+    const node = makeNode({
+      type: 'code', name: component?.name ?? 'Component',
+      codeRef: componentId, styles: { display: 'block' },
+    });
+    dispatch([{ t: 'insert', nodes: [node], parent: parentId, index: doc.nodes[parentId]!.children.length }]);
+    select([node.id]);
   };
 
   // When the selection is inside a definition, show that component's variants.
@@ -123,6 +148,33 @@ export function Components() {
           </div>
         );
       })}
+
+      <div className="components-section">
+        <h4 className="components-section-title">From your code</h4>
+        {codeComponents.length === 0 ? (
+          <p className="panel-empty">
+            <span className="dim">
+              An agent connected to this document can register your real React components here —
+              ask it for <code>register_code_component</code>. They render on the canvas with their
+              own props, and export as a real import rather than a copy of their markup.
+            </span>
+          </p>
+        ) : codeComponents.map((c) => {
+          const count = Object.values(doc?.nodes ?? {}).filter((n) => n.codeRef === c.id).length;
+          return (
+            <div key={c.id} className="component-row">
+              <button className="component-main" onClick={() => insertCode(c.id)} title="Insert an instance">
+                <span className="component-name">{c.name}</span>
+                <span className="dim">
+                  {c.importPath}
+                  {` · ${count} instance${count === 1 ? '' : 's'}`}
+                  {c.props.length ? ` · ${c.props.length} prop${c.props.length === 1 ? '' : 's'}` : ''}
+                </span>
+              </button>
+            </div>
+          );
+        })}
+      </div>
 
       {definition && (
         <div className="component-detail">

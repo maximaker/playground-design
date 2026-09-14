@@ -31,6 +31,8 @@ const PATHS = {
   vector: 'M8 2.8 13.2 8 8 13.2 2.8 8zM8 5.6 10.4 8 8 10.4 5.6 8z',
   embed: 'M6 4 2.8 8 6 12M10 4l3.2 4-3.2 4',
   slot: 'M3 3h10v10H3zM6 6h4v4H6z',
+  // Angle brackets around a diamond: a component that is source code.
+  codeComponent: 'M5.2 3.8 2.2 8l3 4.2M10.8 3.8 13.8 8l-3 4.2M8 5.9 9.8 8 8 10.1 6.2 8z',
 
   // --- Panel controls ----------------------------------------------------
   chevronRight: 'm6.2 3.6 4.4 4.4-4.4 4.4',
@@ -141,6 +143,7 @@ export function iconForNodeType(type: string): IconName {
     case 'shape': return 'square';
     case 'embed': return 'embed';
     case 'instance': return 'instance';
+    case 'code': return 'codeComponent';
     default: return 'square';
   }
 }

@@ -126,6 +126,37 @@ need a real layout engine reach into a connected tab, and they say so plainly wh
 | `apply_template` | Merge a starter design system's tokens and foundations sheet |
 | `start_working_on_nodes` / `finish_working_on_nodes` | Live "agent working" indicator, and a restore point |
 
+**Code components**
+
+| Tool | Notes |
+|---|---|
+| `get_code_component_guide` | The bundle contract. Read it before registering |
+| `register_code_component` | Upload a bundled component; declare its props |
+| `list_code_components` | What is available to place, and how often it is used |
+| `add_code_instance` | Place one, with props |
+| `set_code_props` | Change a placed instance's props |
+| `get_code_usage` | Every instance, with the JSX it will export as |
+| `remove_code_component` | Unregister; refuses while instances exist |
+
+### Designing with the project's real components
+
+A design tool that makes you rebuild a button you already have is guessing at your codebase. Code
+components close that loop: the agent bundles a real component out of the repo — it has the
+filesystem and the toolchain, the browser has neither — and uploads a self-contained ES module that
+exports `mount(element, props)`. The canvas renders it for real, with the props you declared as the
+designer's controls, and JSX export emits `<Button variant="primary" />` with an import of your own
+module rather than a copy of its markup.
+
+The bundle is third-party code, so it runs in an iframe sandboxed `allow-scripts` and deliberately
+*without* `allow-same-origin`: an opaque origin, with no access to the document, the page, cookies or
+storage. It never fetches its own module either — an opaque origin cannot reach a private address at
+all, so the editor fetches the bundle once and the sandbox imports a blob it creates itself. Styles
+do not cross that boundary, so a component must bring its own CSS or take tokens as props.
+
+Artboards that host one run with scripts enabled, which used to be impossible anywhere on the canvas;
+vector markup is sanitised at render and at export so that loosening it does not hand an imported SVG
+a way to run.
+
 ### Why `write_html` rather than granular creation tools
 
 Giving agents an HTML-shaped write primitive is the single highest-leverage decision in this design.
@@ -281,6 +312,21 @@ It loads the editor at seven widths from 1680px down to 360px and fails on
 horizontal overflow, controls pushed off-screen, drawers that will not open, and
 tap targets below 32px on a coarse pointer.
 
+Code components cross more boundaries than anything else here — MCP, asset
+storage, CORS, two levels of iframe sandbox, a postMessage handshake, React
+inside React — and every one of them fails silently, leaving a component that is
+missing or stuck on its defaults. So they are checked end to end, with a real
+component bundled out of `scripts/fixtures/repo` by real esbuild:
+
+```bash
+node scripts/code-component-check.mjs
+```
+
+It asserts the sandbox actually held (no same-origin access, scripts enabled only
+on the hosting artboard), that props reach the component rather than being
+replaced by its defaults, that a prop change re-renders the live instance, and
+that export emits the import rather than the markup.
+
 - `packages/shared` — model, ops and their inverses, CSS/HTML parsing, JSX and Tailwind emission,
   snapping geometry, gradient parsing, component expansion
 - `packages/server/src/mcp.test.ts` — a real MCP client over real HTTP, exercising the whole tool
@@ -295,5 +341,9 @@ connection code is the only thing between an agent and write access. So codes ar
 first use, expire on inactivity, are compared in constant time, and are revocable from the UI. An
 unused `owner_session` column is threaded through the document and session schemas so that adding
 real ownership later does not mean migrating the realtime and MCP session layers.
+
+Code component bundles are executed, which is a larger trust decision than anything else the tool
+does. The sandbox contains what they can reach — no document, no parent page, no cookies or storage —
+but it does not stop network access, so register bundles you would be willing to run in a preview.
 
 Do not put anything sensitive in a Playground document as it stands.

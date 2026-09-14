@@ -7,6 +7,8 @@
  * to resolved values).
  */
 
+import type { CodeComponent } from './code-components.ts';
+
 export type NodeId = string;
 
 export type NodeType =
@@ -17,7 +19,9 @@ export type NodeType =
   | 'vector'
   | 'shape'
   | 'embed'
-  | 'instance';
+  | 'instance'
+  /** An instance of one of the project's real components. */
+  | 'code';
 
 /** CSS declarations keyed by kebab-case property name. Values may be `var(--token)`. */
 export type StyleMap = Record<string, string>;
@@ -49,6 +53,8 @@ export interface CanvasNode {
   visible: boolean;
   /** For `instance` nodes: the id of the component definition. */
   componentRef?: string;
+  /** For `code` nodes: the id of the code component. */
+  codeRef?: string;
   /**
    * For `instance` nodes: the variant properties this instance is set to,
    * e.g. `{ size: 'lg', tone: 'danger' }`. Unset properties fall back to the
@@ -275,6 +281,8 @@ export interface CanvasDocument {
   themes: string[];
   /** Component definitions, keyed by id. */
   components?: Record<string, ComponentDef>;
+  /** The project's real components, keyed by id. */
+  codeComponents?: Record<string, CodeComponent>;
   /** Named widths this design is authored against. */
   breakpoints?: Breakpoint[];
   /** Monotonic, bumped on every applied op. Used for reconnect/catch-up. */
@@ -359,6 +367,7 @@ export function defaultTagFor(type: NodeType): string {
     case 'image': return 'img';
     case 'vector': return 'svg';
     case 'embed': return 'iframe';
+    case 'code': return 'div';
     default: return 'div';
   }
 }
@@ -379,6 +388,9 @@ export function makeNode(partial: Partial<CanvasNode> & { type: NodeType }): Can
     locked: partial.locked ?? false,
     visible: partial.visible ?? true,
     componentRef: partial.componentRef,
+    codeRef: partial.codeRef,
+    ...(partial.props ? { props: partial.props } : {}),
+    ...(partial.overrides ? { overrides: partial.overrides } : {}),
   };
 }
 
@@ -386,6 +398,7 @@ function defaultNameFor(type: NodeType): string {
   const names: Record<NodeType, string> = {
     artboard: 'Artboard', frame: 'Frame', text: 'Text', image: 'Image',
     vector: 'Vector', shape: 'Rectangle', embed: 'Embed', instance: 'Instance',
+    code: 'Component',
   };
   return names[type];
 }
