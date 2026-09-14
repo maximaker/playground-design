@@ -60,6 +60,26 @@ Most tools run against the server's copy of the document, so they work with **no
 — an agent can create a document, build in it, render it, and hand back a URL. Only the tools that
 need a real layout engine reach into a connected tab, and they say so plainly when there isn't one.
 
+**Prompt cards**
+
+| Tool | What it does |
+|---|---|
+| `list_notes` | Cards on the canvas. A `queued` one is a request waiting for an agent |
+| `claim_note` | Take a card, so a second agent does not duplicate the work |
+| `respond_to_note` | Record what you did; the answer appears on the card |
+| `create_note` | Leave a note for the human where they will see it, next to the design |
+
+**Components**
+
+| Tool | What it does |
+|---|---|
+| `list_components` | Components, with instance counts, slots and structure |
+| `create_component` | Turn a subtree into a component and replace it with an instance |
+| `insert_instance` | Place instances |
+| `get_instance` | What an instance renders, and which parts can be overridden |
+| `set_override` | Change one instance without touching the others |
+| `detach_instance` | Convert an instance back to ordinary layers |
+
 **Orientation and reading**
 
 | Tool | What it gives you |
@@ -77,6 +97,7 @@ need a real layout engine reach into a connected tab, and they say so plainly wh
 | `get_font_family_info` | Whether a family and weight are actually available |
 | `get_tokens` | Design tokens and themes |
 | `get_guide` | Workflow briefs: `layout`, `styling`, `responsive`, `components`, `export`, `figma-import` |
+| `list_templates` | Built-in starter design systems |
 
 **Writing**
 
@@ -93,6 +114,8 @@ need a real layout engine reach into a connected tab, and they say so plainly wh
 | `set_tokens` | Add or update tokens |
 | `set_selection` | Select nodes in the human's browser and scroll them into view |
 | `export` | PNG, JPG, SVG or standalone HTML, returned as download URLs |
+| `import_url` | Fetch a public webpage and turn it into editable layers |
+| `apply_template` | Merge a starter design system's tokens and foundations sheet |
 | `start_working_on_nodes` / `finish_working_on_nodes` | Live "agent working" indicator, and a restore point |
 
 ### Why `write_html` rather than granular creation tools
@@ -103,6 +126,37 @@ HTML is the format models are most fluent in, so one tool covers what would othe
 `:hover` and `@media` rules become node variants; `<script>` is stripped.
 
 ---
+
+## In the editor
+
+**Canvas craft.** Snapping to edges, centres and equal-spacing runs, with guides drawn live and ⌘
+to suspend it. Option-hover measures the distance from the selection to whatever is under the
+cursor. Align and distribute for multi-selections — disabled with an explanation when a parent's
+flex layout owns the position, rather than silently doing nothing. Right-click menu, and shortcuts
+that follow Figma (press `?` for the sheet).
+
+**Prompt cards.** Sticky notes that live next to the thing they are about. Write what you want
+changed, attach the layers it concerns, and hand it to an agent: it claims the card, does the work,
+and the answer comes back on the card. This is pen.dev's framing — an agent workspace rather than a
+design file with a chatbox bolted on — and it fits a canvas far better than a chat log, because the
+request keeps its spatial context.
+
+**Components.** Create one from a selection; it is replaced by an instance so the canvas keeps
+rendering the same pixels. Editing the component updates every instance; editing inside an instance
+writes an override for that one only, and the panel says so. Mark a layer `data-slot` to let
+instances supply their own content. Detach bakes the overrides in and drops the link.
+
+**Import from a URL.** Fetches a page and its stylesheets and parses them into layers. This is the
+thing an HTML-native model can do that a vector tool cannot — it is not a conversion, it is the same
+kind of document. SSRF-guarded: private and loopback addresses are refused, redirects bounded,
+responses size-capped.
+
+**Starter design systems.** Four kits — Clean, Editorial, Brutalist, Soft — each a token set plus a
+foundations sheet. Mostly so that neither you nor an agent starts from a blank canvas inventing hex
+codes.
+
+**Gradients.** A visual editor for linear, radial and conic gradients that reads whatever CSS is
+already there, including gradients typed by hand or imported from a live page.
 
 ## How it works
 
@@ -117,10 +171,20 @@ resolves the way it will in production. Selection chrome is drawn in an overlay 
 the real DOM on a rAF loop — a hugging frame or a wrapped line has no width in the document at all,
 only in the layout engine.
 
+**Components.** A definition's nodes live in `doc.nodes` like any others, simply attached to no
+page — so every existing op, style and selection mechanism works on them unchanged. An instance
+carries overrides keyed by *definition node id*, which survives the definition being restructured.
+One `expandInstance` function resolves instances, slots and overrides, and the canvas, HTML export
+and JSX export all go through it, so what you see is what is emitted.
+
 **Agent pairing.** Paper solves this by running MCP on localhost inside a desktop app. Canvas is
 web-only, so the MCP endpoint is hosted and a connection code binds it to one document. That
 constraint turns out to be an advantage: because tools run against the stored document rather than
 a browser tab, fully headless agent sessions work.
+
+**Performance.** Only artboards near the viewport hold a live iframe; the rest keep their footprint
+and drop their document. Each iframe is a real layout and style engine, so without this a page of
+dozens of artboards would cost hundreds of megabytes.
 
 ```
 Browser tab ──WebSocket──┐
@@ -140,10 +204,16 @@ Worth stating plainly, since the PRD is in this repo:
   diverges is handed the authoritative document. This is correct for concurrent editing and much
   simpler, but it does not merge truly simultaneous edits to the same property as gracefully as a
   CRDT would. Swapping the transport later does not change the op vocabulary.
-- **Not built:** shaders, the pen tool, component instances and variants, Figma paste, the Snapshot
-  extension, live data binding, animation/prototyping, and the in-app AI assistant. These are M5+ in
-  the PRD and each is independently shippable.
+- **Components have no variants.** A component has slots and per-instance overrides, but not a
+  variant matrix (`size=lg, state=hover`). Overrides cover most of what variants are used for; a
+  proper variant system is a separate build.
+- **Not built:** shaders, the pen tool, Figma paste, the Snapshot browser extension, live data
+  binding, animation and prototyping, presentation mode, and the in-app AI assistant. These are M5+
+  in the PRD and each is independently shippable.
 - **Grid support is partial** — a `grid-template-columns` field, not a visual track editor.
+- **Webpage import is a static snapshot.** Scripts and client-rendered content do not come across,
+  and the CSS selector matcher handles simple selectors only, so complex descendant rules can
+  over-apply.
 
 ## Testing
 
@@ -151,7 +221,8 @@ Worth stating plainly, since the PRD is in this repo:
 npm test
 ```
 
-- `packages/shared` — model, ops and their inverses, CSS/HTML parsing, JSX and Tailwind emission
+- `packages/shared` — model, ops and their inverses, CSS/HTML parsing, JSX and Tailwind emission,
+  snapping geometry, gradient parsing, component expansion
 - `packages/server/src/mcp.test.ts` — a real MCP client over real HTTP, exercising the whole tool
   surface the way an agent does, including the error paths
 - `packages/server/src/fidelity.test.ts` — the export-fidelity gate: render an artboard, export it,

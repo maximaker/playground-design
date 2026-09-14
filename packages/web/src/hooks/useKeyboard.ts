@@ -27,7 +27,7 @@ function isTyping(target: EventTarget | null): boolean {
   return el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable;
 }
 
-export function useKeyboard(onExport?: () => void): void {
+export function useKeyboard(onExport?: () => void, onShortcuts?: () => void): void {
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       const state = useCanvas.getState();
@@ -148,6 +148,8 @@ export function useKeyboard(onExport?: () => void): void {
         return;
       }
 
+      if (e.key === '?' || (e.shiftKey && e.key === '/')) { e.preventDefault(); onShortcuts?.(); return; }
+
       // --- Tools ------------------------------------------------------------
       if (!mod && TOOL_KEYS[key]) { setTool(TOOL_KEYS[key]!); return; }
     };
@@ -171,7 +173,7 @@ export function useKeyboard(onExport?: () => void): void {
       window.removeEventListener('keyup', onKeyUp);
       window.removeEventListener('blur', onBlur);
     };
-  }, [onExport]);
+  }, [onExport, onShortcuts]);
 }
 
 async function copyAsCss(): Promise<void> {

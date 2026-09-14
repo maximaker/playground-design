@@ -6,3 +6,4 @@ export * from './jsx.ts';
 export * from './summary.ts';
 export * from './snap.ts';
 export * from './components.ts';
+export * from './gradient.ts';

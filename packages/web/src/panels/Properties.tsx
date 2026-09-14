@@ -12,6 +12,7 @@ import { useCanvas, getDoc } from '../state/store.ts';
 import { attrOps, resolveKey, resetOverrideOps } from '../state/keys.ts';
 import { Field, NumberInput, Row, Section, SegmentedControl, Select, TextInput, ColorInput } from '../ui/controls.tsx';
 import { ArrangeBar } from '../ui/ArrangeBar.tsx';
+import { GradientEditor } from '../ui/GradientEditor.tsx';
 
 const MIXED = '—'; // em dash: "these nodes disagree"
 
@@ -389,11 +390,10 @@ export function Properties() {
         </Row>
         <Row>
           <Field label="Image / gradient" prop="background-image" wide>
-            <TextInput
-              value={read('background-image')}
-              placeholder="linear-gradient(...) or url(...)"
+            <GradientEditor
+              value={read('background-image') === MIXED ? '' : read('background-image')}
               onCommit={set('background-image')}
-              mono
+              tokens={tokens}
             />
           </Field>
         </Row>

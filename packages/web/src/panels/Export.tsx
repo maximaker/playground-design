@@ -22,6 +22,25 @@ export function Export({ onClose }: { onClose: () => void }) {
   const docId = useCanvas((s) => s.docId);
   const toast = useCanvas((s) => s.toast);
   const [format, setFormat] = useState<Format>('jsx-tailwind');
+  const [imageFormat, setImageFormat] = useState('png');
+  const [scale, setScale] = useState(2);
+
+  /**
+   * Batch export. Downloads are triggered one at a time with a small gap —
+   * browsers silently drop a burst of simultaneous download navigations.
+   */
+  const downloadAll = async () => {
+    for (const id of selection) {
+      const a = document.createElement('a');
+      a.href = `/api/documents/${docId}/export/${id}?format=${imageFormat}&scale=${scale}`;
+      a.download = '';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      await new Promise((r) => setTimeout(r, 350));
+    }
+    toast(`Exported ${selection.length} layers`, 'success');
+  };
 
   const doc = getDoc();
   const targetId = selection[0] ?? doc?.pages[0]?.artboards[0];
@@ -75,12 +94,34 @@ export function Export({ onClose }: { onClose: () => void }) {
                   className="button primary"
                   onClick={async () => { await navigator.clipboard.writeText(code); toast('Copied to clipboard', 'success'); }}
                 >Copy</button>
-                <a className="button" href={`/api/documents/${docId}/export/${targetId}?format=png&scale=2`} download>
-                  Download PNG @2x
-                </a>
-                <a className="button" href={`/api/documents/${docId}/export/${targetId}?format=html`} download>
-                  Download HTML
-                </a>
+
+                <span className="export-group">
+                  <select className="input select" value={imageFormat} onChange={(e) => setImageFormat(e.target.value)}>
+                    <option value="png">PNG</option>
+                    <option value="jpg">JPG</option>
+                    <option value="webp">WebP</option>
+                    <option value="svg">SVG</option>
+                    <option value="html">HTML</option>
+                  </select>
+                  {imageFormat !== 'svg' && imageFormat !== 'html' && (
+                    <select className="input select" value={scale} onChange={(e) => setScale(Number(e.target.value))}>
+                      <option value={1}>1×</option>
+                      <option value={2}>2×</option>
+                      <option value={3}>3×</option>
+                    </select>
+                  )}
+                  <a
+                    className="button"
+                    href={`/api/documents/${docId}/export/${targetId}?format=${imageFormat}&scale=${scale}`}
+                    download
+                  >Download</a>
+                </span>
+
+                {selection.length > 1 && (
+                  <button className="button" onClick={() => void downloadAll()}>
+                    Download {selection.length} selected
+                  </button>
+                )}
               </div>
 
               <p className="panel-hint">

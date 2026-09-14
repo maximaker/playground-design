@@ -48,8 +48,19 @@ export function TextInput({ value, onCommit, placeholder, mono, ...rest }: {
 } & Omit<React.InputHTMLAttributes<HTMLInputElement>, 'value' | 'onChange'>) {
   const [draft, setDraft] = useState(value);
   const dirty = useRef(false);
+  // Mirrored in a ref because the blur handler must read the latest text, not
+  // whatever `draft` was when this render's closure was created — a change and
+  // a blur in the same tick would otherwise commit the previous value.
+  const latest = useRef(value);
 
-  useEffect(() => { if (!dirty.current) setDraft(value); }, [value]);
+  useEffect(() => {
+    if (!dirty.current) { setDraft(value); latest.current = value; }
+  }, [value]);
+
+  const commit = () => {
+    dirty.current = false;
+    if (latest.current !== value) onCommit(latest.current);
+  };
 
   return (
     <input
@@ -57,11 +68,11 @@ export function TextInput({ value, onCommit, placeholder, mono, ...rest }: {
       className={`input${mono ? ' is-mono' : ''}${rest.className ? ` ${rest.className}` : ''}`}
       value={draft}
       placeholder={placeholder}
-      onChange={(e) => { dirty.current = true; setDraft(e.target.value); }}
-      onBlur={() => { dirty.current = false; if (draft !== value) onCommit(draft); }}
+      onChange={(e) => { dirty.current = true; latest.current = e.target.value; setDraft(e.target.value); }}
+      onBlur={commit}
       onKeyDown={(e) => {
         if (e.key === 'Enter') { e.currentTarget.blur(); }
-        if (e.key === 'Escape') { dirty.current = false; setDraft(value); e.currentTarget.blur(); }
+        if (e.key === 'Escape') { dirty.current = false; latest.current = value; setDraft(value); e.currentTarget.blur(); }
         e.stopPropagation();
       }}
     />

@@ -16,6 +16,7 @@ import { Export } from './panels/Export.tsx';
 import { Import } from './panels/Import.tsx';
 import { Toolbar } from './ui/Toolbar.tsx';
 import { ContextMenu, type ContextMenuState } from './ui/ContextMenu.tsx';
+import { Shortcuts } from './ui/Shortcuts.tsx';
 import { Home } from './Home.tsx';
 
 type LeftTab = 'layers' | 'pages' | 'components' | 'tokens' | 'history';
@@ -52,10 +53,10 @@ function Editor({ docId, onHome }: { docId: string; onHome: () => void }) {
   const dispatch = useCanvas((s) => s.dispatch);
 
   const [leftTab, setLeftTab] = useState<LeftTab>('layers');
-  const [modal, setModal] = useState<'connect' | 'export' | 'import' | null>(null);
+  const [modal, setModal] = useState<'connect' | 'export' | 'import' | 'shortcuts' | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
 
-  useKeyboard(() => setModal('export'));
+  useKeyboard(() => setModal('export'), () => setModal('shortcuts'));
   useClipboard();
 
   useEffect(() => {
@@ -108,6 +109,12 @@ function Editor({ docId, onHome }: { docId: string; onHome: () => void }) {
             ))}
           </div>
         )}
+
+        <button
+          className="icon-button"
+          title="Keyboard shortcuts (?)"
+          onClick={() => setModal('shortcuts')}
+        >⌘</button>
 
         <span className={`conn-status is-${connection}`} title={`Connection: ${connection}`}>
           {connection === 'open' ? 'Live' : connection === 'connecting' ? 'Connecting' : 'Offline'}
@@ -190,6 +197,7 @@ function Editor({ docId, onHome }: { docId: string; onHome: () => void }) {
       {modal === 'connect' && <ConnectAgent onClose={() => setModal(null)} />}
       {modal === 'export' && <Export onClose={() => setModal(null)} />}
       {modal === 'import' && <Import onClose={() => setModal(null)} />}
+      {modal === 'shortcuts' && <Shortcuts onClose={() => setModal(null)} />}
 
       <Toasts />
     </div>
