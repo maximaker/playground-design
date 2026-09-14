@@ -6,12 +6,8 @@
   "framework": null,
   "rewrites": [
     {
-      "source": "/api/(.*)",
-      "destination": "/api"
-    },
-    {
       "source": "/mcp/(.*)",
-      "destination": "/api"
+      "destination": "/api/mcp/$1"
     },
     {
       "source": "/assets/app/(.*)",
@@ -19,7 +15,7 @@
     },
     {
       "source": "/assets/(.*)",
-      "destination": "/api"
+      "destination": "/api/assets/$1"
     },
     {
       "source": "/d/(.*)",
@@ -27,7 +23,7 @@
     }
   ],
   "functions": {
-    "api/index.js": {
+    "api/[...path].js": {
       "maxDuration": 30
     }
   }

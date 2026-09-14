@@ -34,9 +34,30 @@ const PUBLIC_URL =
   (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null) ??
   `http://localhost:${PORT}`;
 
+/** On Vercel the platform serves the built client; the app only handles the API. */
+const SERVE_CLIENT = !process.env.VERCEL;
+
 const app = new Hono();
 
 app.use('*', cors({ origin: (o) => o ?? '*', credentials: true }));
+
+/**
+ * On Vercel every route reaches the function under `/api`, because that is the
+ * only path that maps to a serverless function. Strip the prefix for the routes
+ * that are not part of the API, so their URLs stay the same in both shapes.
+ */
+if (!SERVE_CLIENT) {
+  app.use('*', async (c, next) => {
+    const url = new URL(c.req.url);
+    const alias = url.pathname.startsWith('/api/mcp/')
+      ? url.pathname.slice(4)
+      : url.pathname.startsWith('/api/assets/')
+        ? url.pathname.slice(4)
+        : null;
+    if (!alias) return next();
+    return app.fetch(new Request(new URL(alias + url.search, url.origin), c.req.raw));
+  });
+}
 
 app.onError((err, c) => {
   if (err instanceof ImportError) return c.json({ error: err.message }, 422);
@@ -361,8 +382,6 @@ app.all('/mcp/:code', async (c) => {
 // it serves.
 const PACKAGE_ROOT = resolve(fileURLToPath(import.meta.url), '../..');
 const WEB_DIST = resolve(PACKAGE_ROOT, '../web/dist');
-/** On Vercel the platform serves the built client; the app only handles the API. */
-const SERVE_CLIENT = !process.env.VERCEL;
 if (SERVE_CLIENT && existsSync(WEB_DIST)) {
   // serveStatic resolves `root` against the process working directory, so hand
   // it a relative path computed from wherever the server was actually started.

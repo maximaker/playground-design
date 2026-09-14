@@ -13,7 +13,9 @@ mkdirSync('api', { recursive: true });
 
 await build({
   entryPoints: ['server-entry/index.ts'],
-  outfile: 'api/index.js',
+  // Catch-all: a rewrite to a plain `api/index` would hand the function the
+  // destination path, losing the route the client asked for.
+  outfile: 'api/[...path].js',
   bundle: true,
   platform: 'node',
   target: 'node22',
