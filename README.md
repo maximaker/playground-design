@@ -252,6 +252,19 @@ Worth stating plainly, since the PRD is in this repo:
 npm test
 ```
 
+Frame timing has its own check, because it cannot be measured from an unfocused
+browser — `requestAnimationFrame` is throttled there, and an idle page will
+report multi-second "frames":
+
+```bash
+node scripts/perf-check.mjs
+```
+
+It drives a real Chromium and prints an idle baseline next to each gesture, so
+the numbers validate themselves: if idle is not ~16.7ms, the run was throttled
+and the rest should be ignored. On a 998-node document with three live
+artboards, idle, dragging and panning all sit at 60fps.
+
 - `packages/shared` — model, ops and their inverses, CSS/HTML parsing, JSX and Tailwind emission,
   snapping geometry, gradient parsing, component expansion
 - `packages/server/src/mcp.test.ts` — a real MCP client over real HTTP, exercising the whole tool
