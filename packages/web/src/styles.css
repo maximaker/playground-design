@@ -1312,3 +1312,65 @@ code { font-family: var(--mono); font-size: 0.92em; }
   color: var(--fg-faint);
   overflow-wrap: anywhere;
 }
+
+/* Numeric scrubbing --------------------------------------------------- */
+
+.number-input .scrub { cursor: ew-resize; }
+
+/*
+ * While dragging, the cursor must not flicker as the pointer crosses other
+ * elements — pointer capture keeps the events coming, but not the cursor.
+ */
+.number-input .scrub.is-scrubbing,
+.number-input .scrub.is-scrubbing ~ * { cursor: ew-resize; }
+
+.number-input .scrub.is-scrubbing {
+  background: var(--accent);
+  color: #fff;
+  opacity: 1;
+}
+
+/* Align pad ------------------------------------------------------------ */
+
+.align-pad-wrap { display: flex; flex-direction: column; gap: var(--s3); width: 100%; }
+
+.align-pad {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 2px;
+  padding: 2px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  /* Square cells at any panel width, so the pad reads as a space, not a row. */
+  aspect-ratio: 1;
+  max-width: 7.5rem;
+}
+
+.align-pad button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: calc(var(--radius-sm) - 2px);
+  background: transparent;
+  cursor: pointer;
+  transition: background var(--transition);
+}
+
+.align-pad button:hover { background: var(--bg-hover); }
+.align-pad button.is-active { background: var(--accent); }
+
+.align-dot {
+  width: 0.45rem;
+  height: 0.45rem;
+  border-radius: 1px;
+  background: var(--fg-faint);
+  transition: background var(--transition), transform var(--transition);
+}
+
+.align-pad button:hover .align-dot { background: var(--fg-muted); }
+.align-pad button.is-active .align-dot { background: #fff; transform: scale(1.25); }
+
+.align-spread { display: flex; flex-direction: column; gap: var(--s1); }
+.align-spread .segmented { width: 100%; }

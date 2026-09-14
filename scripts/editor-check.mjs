@@ -203,6 +203,112 @@ const artboardSpot = (fx, fy) => () => page.evaluate(([ax, ay]) => {
   check('place a prompt card', notes > 0, `${notes} card(s)`);
 }
 
+// --- Property panel: stepping, arithmetic, alignment ---------------------
+
+{
+  // A frame with two children, so both the container pad and the
+  // align-a-selection path have something real to work on.
+  // Anywhere in the tree, not just directly under the artboard: the earlier
+  // sections have been drawing and deleting, so the shape of this document is
+  // not something to assume.
+  const ids = await page.evaluate(() => {
+    const s = window.__playground.store.getState();
+    const frame = Object.values(s.doc.nodes).find(
+      (n) => (n.type === 'frame' || n.type === 'artboard') && n.children.length >= 2,
+    );
+    if (!frame) return null;
+    s.select([frame.id]);
+    return { frame: frame.id, children: frame.children.slice(0, 2) };
+  });
+
+  if (!ids) {
+    check('a frame with children to align', false, 'the fixture document has none');
+  } else {
+    await page.waitForTimeout(400);
+
+    // Give the container a known layout so the assertions below are exact.
+    await page.evaluate((id) => window.__playground.store.getState()
+      .setNodeStyles([id], { display: 'flex', 'flex-direction': 'column', width: '400px' }), ids.frame);
+    await page.waitForTimeout(400);
+
+    // Arrow stepping. Key repeat outpaces React's commits, so a burst is the
+    // case that matters: every press must count, not just the first.
+    const field = await page.$('.properties input.input');
+    await field.click();
+    const widthBefore = await page.evaluate((id) =>
+      window.__playground.store.getState().doc.nodes[id].styles.width, ids.frame);
+    const undoBefore = await page.evaluate(() => window.__playground.store.getState().undoStack.length);
+
+    for (let i = 0; i < 5; i++) await page.keyboard.press('ArrowUp');
+    await page.waitForTimeout(300);
+    const widthStepped = await page.evaluate((id) =>
+      window.__playground.store.getState().doc.nodes[id].styles.width, ids.frame);
+    check('arrow keys step a value', widthStepped === '405px', `${widthBefore} -> ${widthStepped}`);
+
+    await page.keyboard.down('Shift');
+    await page.keyboard.press('ArrowUp');
+    await page.keyboard.up('Shift');
+    await page.waitForTimeout(300);
+    const widthShift = await page.evaluate((id) =>
+      window.__playground.store.getState().doc.nodes[id].styles.width, ids.frame);
+    check('shift steps by ten', widthShift === '415px', `${widthStepped} -> ${widthShift}`);
+
+    const undoAfter = await page.evaluate(() => window.__playground.store.getState().undoStack.length);
+    check('a run of steps is one undo', undoAfter - undoBefore === 1, `${undoAfter - undoBefore} entries`);
+
+    // Arithmetic relative to what the field already holds.
+    await page.evaluate(() => {
+      const el = document.querySelector('.properties input.input');
+      const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+      el.focus();
+      set.call(el, '+85');
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(300);
+    const widthMath = await page.evaluate((id) =>
+      window.__playground.store.getState().doc.nodes[id].styles.width, ids.frame);
+    check('typing +85 adds to the current value', widthMath === '500px', `${widthShift} -> ${widthMath}`);
+
+    // The alignment pad writes the property that actually moves things, which
+    // differs by flex-direction — the whole reason the pad exists.
+    const cells = await page.$$('.align-pad button');
+    check('the alignment pad is shown for a container', cells.length === 9, `${cells.length} cells`);
+    if (cells.length === 9) {
+      await cells[4].click(); // centre
+      await page.waitForTimeout(400);
+      const styles = await page.evaluate((id) => {
+        const n = window.__playground.store.getState().doc.nodes[id];
+        return { justify: n.styles['justify-content'], align: n.styles['align-items'] };
+      }, ids.frame);
+      check('centring a column writes align-items, not justify-content',
+        styles.align === 'center' && styles.justify === 'center',
+        JSON.stringify(styles));
+    }
+
+    // Aligning a flow-laid-out selection targets the container that positions
+    // them, rather than being disabled or silently doing nothing. Pin the
+    // children into flow first: an absolutely positioned pair takes the other
+    // path (move each one), which is correct but not what this checks.
+    await page.evaluate((children) => window.__playground.store.getState()
+      .setNodeStyles(children, { position: 'static' }), ids.children);
+    await page.waitForTimeout(300);
+    await page.evaluate((children) => window.__playground.store.getState().select(children), ids.children);
+    await page.waitForTimeout(400);
+    const alignButtons = await page.$$('.arrange-bar button');
+    const enabled = alignButtons.length
+      ? await alignButtons[0].evaluate((b) => !b.disabled) : false;
+    check('aligning flow children is offered, not disabled', enabled);
+    if (enabled) {
+      await alignButtons[0].click(); // align left
+      await page.waitForTimeout(400);
+      const align = await page.evaluate((id) =>
+        window.__playground.store.getState().doc.nodes[id].styles['align-items'], ids.frame);
+      check('it aligns their container', align === 'flex-start', `align-items: ${align}`);
+    }
+  }
+}
+
 check('no runtime errors', errors.length === 0, errors[0] ?? '');
 
 await browser.close();

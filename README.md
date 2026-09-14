@@ -8,8 +8,8 @@ Draw on an infinite canvas with direct manipulation. Every element is a real DOM
 computed styles, real flexbox, real font rendering. There is no export step that translates a
 proprietary scene graph into code: the design already *is* the code.
 
-The other half is the agent surface. Playground hosts an MCP server that lets Claude Code, Cursor,
-Copilot or Claude Desktop read and write the live document — inspect the tree, take screenshots,
+The other half is the agent surface. Playground hosts an MCP server that lets Claude Code, Codex,
+Cursor, Copilot or Claude Desktop read and write the live document — inspect the tree, take screenshots,
 write HTML, restyle layers, pull JSX. Agent edits appear in the browser within a frame, are
 attributed in version history, and are undoable.
 
@@ -48,7 +48,8 @@ The hosted version works the same way — its codes point at
 `https://playground-design-theta.vercel.app/mcp/…`.
 
 Then ask your agent to *"describe what's on the Canvas artboard"* — or just *"build me a pricing
-page"*. Setup snippets for Claude Desktop, Cursor and VS Code are in the same panel.
+page"*. Setup snippets for Codex, Claude Desktop, Cursor and VS Code are in the same panel — Codex
+gets both the `codex mcp add` line and the `~/.codex/config.toml` block.
 
 Two scripts show the shape of an agent session end to end:
 
@@ -170,9 +171,24 @@ HTML is the format models are most fluent in, so one tool covers what would othe
 
 **Canvas craft.** Snapping to edges, centres and equal-spacing runs, with guides drawn live and ⌘
 to suspend it. Option-hover measures the distance from the selection to whatever is under the
-cursor. Align and distribute for multi-selections — disabled with an explanation when a parent's
-flex layout owns the position, rather than silently doing nothing. Right-click menu, and shortcuts
-that follow Figma (press `?` for the sheet).
+cursor. Right-click menu, and shortcuts that follow Figma (press `?` for the sheet).
+
+**Alignment.** A 3×3 pad aligns a container's contents, because the intent is spatial and the CSS is
+not: "top-left" means `justify-content` in a row and `align-items` in a column, and both invert under
+`row-reverse`. Getting that backwards is the classic flexbox papercut, so the panel maps it and the
+`stretch` default lights up the whole row it spans rather than showing nothing selected.
+
+Aligning a *selection* is two different operations wearing one word. Artboards and absolutely
+positioned layers move. Children in flex or grid flow cannot — the engine owns their position — so
+the honest reading of "align these left" is "make their container align its contents left", and that
+is what the bar does, saying which container it changed. Only a block parent has no answer; there the
+buttons are disabled and say why.
+
+**Numeric fields.** Three ways to change a value, because different edits want different gestures:
+type it, hold ↑/↓ to walk it, or drag the handle to scrub. Shift steps by ten and Alt by a tenth
+throughout. Typing `+8`, `-4`, `*2` or `/2` applies to what the field already holds, and the unit is
+preserved — stepping `2rem` gives `3rem`, not `3px`. A whole gesture folds into one undo step, so a
+two-second scrub does not bury everything before it under ninety entries.
 
 **Prompt cards.** Sticky notes that live next to the thing they are about. Write what you want
 changed, attach the layers it concerns, and hand it to an agent: it claims the card, does the work,

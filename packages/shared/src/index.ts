@@ -12,3 +12,5 @@ export * from './lint.ts';
 export * from './tokens.ts';
 export * from './code-components.ts';
 export * from './sanitize.ts';
+export * from './numeric.ts';
+export * from './align.ts';

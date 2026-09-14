@@ -18,6 +18,7 @@ import { Field, NumberInput, Row, Section, SegmentedControl, Select, TextInput, 
 import { ArrangeBar } from '../ui/ArrangeBar.tsx';
 import { GradientEditor } from '../ui/GradientEditor.tsx';
 import { Icon } from '../ui/Icon.tsx';
+import { AlignPad } from '../ui/AlignPad.tsx';
 
 const MIXED = '—'; // em dash: "these nodes disagree"
 
@@ -83,13 +84,14 @@ export function Properties() {
     return values.size === 1 ? [...values][0]! : MIXED;
   };
 
-  const write = (styles: StyleMap) => {
+  const write = (styles: StyleMap, opts?: { coalesce?: string }) => {
     // Routed through the key layer so an edit inside a component instance
     // becomes an override rather than a change to every instance at once.
-    useCanvas.getState().setNodeStyles(selection, styles, activeVariant ?? undefined);
+    useCanvas.getState().setNodeStyles(selection, styles, activeVariant ?? undefined, opts);
   };
 
-  const set = (prop: string) => (value: string) => write({ [prop]: value === MIXED ? '' : value });
+  const set = (prop: string) => (value: string, opts?: { coalesce?: string }) =>
+    write({ [prop]: value === MIXED ? '' : value }, opts);
 
   const first = nodes[0]!;
   const allText = nodes.every((n) => n.type === 'text');
@@ -293,6 +295,25 @@ export function Properties() {
             </Field>
           </Row>
 
+          {(isFlex || display === 'grid') && nodes.length === 1 && (
+            <Row>
+              <Field label="Align contents" prop="justify-content / align-items" wide>
+                <AlignPad
+                  // Base merged with the variant being edited: a variant that
+                  // only overrides alignment still needs the base's direction
+                  // to know which CSS property that alignment lands on.
+                  styles={{
+                    ...first.styles,
+                    ...(activeVariant
+                      ? first.variants.find((v) => v.selector === activeVariant)?.styles ?? {}
+                      : {}),
+                  }}
+                  onChange={(styles) => write(styles)}
+                />
+              </Field>
+            </Row>
+          )}
+
           {isFlex && (
             <>
               <Row>
@@ -411,12 +432,12 @@ export function Properties() {
               />
             </Field>
             <Field label="Clamp" prop="-webkit-line-clamp">
-              <NumberInput value={read('-webkit-line-clamp')} onCommit={(v) => write({
+              <NumberInput value={read('-webkit-line-clamp')} onCommit={(v, o) => write({
                 '-webkit-line-clamp': v,
                 display: v ? '-webkit-box' : '',
                 '-webkit-box-orient': v ? 'vertical' : '',
                 overflow: v ? 'hidden' : '',
-              })} suffix="" />
+              }, o)} suffix="" />
             </Field>
           </Row>
         </Section>
@@ -459,7 +480,7 @@ export function Properties() {
         </Row>
         <Row>
           <Field label="Width" prop="border-width">
-            <NumberInput value={read('border-width')} onCommit={(v) => write({ 'border-width': v, 'border-style': v ? (read('border-style') || 'solid') : '' })} />
+            <NumberInput value={read('border-width')} onCommit={(v, o) => write({ 'border-width': v, 'border-style': v ? (read('border-style') || 'solid') : '' }, o)} />
           </Field>
           <Field label="Style" prop="border-style">
             <Select
@@ -486,13 +507,13 @@ export function Properties() {
           <Field label="Blur" prop="filter">
             <NumberInput
               value={extractBlur(read('filter'))}
-              onCommit={(v) => write({ filter: v ? `blur(${v})` : '' })}
+              onCommit={(v, o) => write({ filter: v ? `blur(${v})` : '' }, o)}
             />
           </Field>
           <Field label="Backdrop" prop="backdrop-filter">
             <NumberInput
               value={extractBlur(read('backdrop-filter'))}
-              onCommit={(v) => write({ 'backdrop-filter': v ? `blur(${v})` : '' })}
+              onCommit={(v, o) => write({ 'backdrop-filter': v ? `blur(${v})` : '' }, o)}
             />
           </Field>
         </Row>

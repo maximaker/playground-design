@@ -18,19 +18,24 @@ interface ConnectionRow {
 
 interface SetupInfo {
   claudeCode: string;
+  codex: string;
   claudeDesktop: unknown;
   cursor: unknown;
   vscode: unknown;
 }
 
-type Client = 'claudeCode' | 'claudeDesktop' | 'cursor' | 'vscode';
+type Client = 'claudeCode' | 'codex' | 'claudeDesktop' | 'cursor' | 'vscode';
 
 const CLIENT_LABELS: Record<Client, string> = {
   claudeCode: 'Claude Code',
+  codex: 'Codex',
   claudeDesktop: 'Claude Desktop',
   cursor: 'Cursor',
   vscode: 'VS Code / Copilot',
 };
+
+/** Clients configured from a terminal rather than by editing a JSON file. */
+const TERMINAL_CLIENTS: Client[] = ['claudeCode', 'codex'];
 
 export function ConnectAgent({ onClose }: { onClose: () => void }) {
   const docId = useCanvas((s) => s.docId);
@@ -130,8 +135,8 @@ export function ConnectAgent({ onClose }: { onClose: () => void }) {
               </div>
 
               <p className="panel-hint">
-                {client === 'claudeCode'
-                  ? 'Run that in your terminal, then ask the agent to "describe what is on the Canvas artboard".'
+                {TERMINAL_CLIENTS.includes(client)
+                  ? 'Run that in your terminal, then ask the agent to "describe what is on the Playground artboard".'
                   : 'Add that to your MCP configuration, restart the client, then ask it to describe the artboard.'}
               </p>
 
@@ -190,6 +195,7 @@ export function ConnectAgent({ onClose }: { onClose: () => void }) {
 
 function snippetFor(client: Client, setup: SetupInfo): string {
   if (client === 'claudeCode') return setup.claudeCode;
+  if (client === 'codex') return setup.codex;
   const value = client === 'claudeDesktop' ? setup.claudeDesktop : client === 'cursor' ? setup.cursor : setup.vscode;
   return JSON.stringify(value, null, 2);
 }

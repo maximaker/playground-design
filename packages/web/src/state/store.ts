@@ -34,7 +34,22 @@ export interface AgentActivity {
 
 export interface Toast { id: string; message: string; tone: 'info' | 'error' | 'success' }
 
-interface UndoEntry { ops: Op[]; selection: NodeId[] }
+interface UndoEntry {
+  ops: Op[];
+  selection: NodeId[];
+  /**
+   * Set when the edit is one step of a continuous gesture — a scrub, a held
+   * arrow key. Consecutive steps sharing a key fold into the entry that is
+   * already on the stack, because that entry's inverse already restores the
+   * value the gesture started from. Without this a two-second drag leaves
+   * ninety undo steps and Cmd-Z stops meaning anything.
+   */
+  coalesceKey?: string;
+  at?: number;
+}
+
+/** How long a gesture can pause before the next step starts a new undo entry. */
+const COALESCE_WINDOW_MS = 900;
 
 interface CanvasState {
   docId: string | null;
@@ -104,7 +119,7 @@ interface CanvasActions {
   setSend(fn: CanvasState['send']): void;
 
   /** Applies ops locally, pushes undo, and sends them to the server. */
-  dispatch(ops: Op[], opts?: { batch?: string; skipUndo?: boolean }): void;
+  dispatch(ops: Op[], opts?: { batch?: string; skipUndo?: boolean; coalesce?: string }): void;
   /** Applies ops received from the server or an agent without touching undo. */
   applyRemote(ops: { op: Op; rev: number }[]): void;
   /**
@@ -127,7 +142,12 @@ interface CanvasActions {
   /** Writes text to a node or, for a key inside an instance, to its override. */
   setNodeText(key: string, text: string): void;
   /** Writes styles, routing each key to a node or an instance override. */
-  setNodeStyles(keys: string[], styles: Record<string, string>, selector?: string): void;
+  setNodeStyles(
+    keys: string[],
+    styles: Record<string, string>,
+    selector?: string,
+    opts?: { coalesce?: string },
+  ): void;
 
   setViewport(v: Partial<Viewport>): void;
   setTool(t: Tool): void;
@@ -194,6 +214,23 @@ function trackChanges(
   }
 
   return { nodeVersions: next, structureBump, styleBump };
+}
+
+/**
+ * Adds an entry to the undo stack, folding it into the previous one when both
+ * belong to the same continuous gesture. The older entry is kept: its inverse
+ * restores the state the gesture began from, which is what one Cmd-Z should do.
+ */
+function pushEntry(stack: UndoEntry[], entry: UndoEntry): UndoEntry[] {
+  const last = stack[stack.length - 1];
+  if (
+    entry.coalesceKey &&
+    last?.coalesceKey === entry.coalesceKey &&
+    entry.at! - (last.at ?? 0) < COALESCE_WINDOW_MS
+  ) {
+    return [...stack.slice(0, -1), { ...last, at: entry.at }];
+  }
+  return [...stack, entry].slice(-MAX_UNDO);
 }
 
 export const useCanvas = create<CanvasState & CanvasActions>((set, get) => ({
@@ -265,7 +302,9 @@ export const useCanvas = create<CanvasState & CanvasActions>((set, get) => ({
       structureVersion: get().structureVersion + tracked.structureBump,
       styleEpoch: get().styleEpoch + tracked.styleBump,
       rev: doc.rev,
-      undoStack: opts?.skipUndo ? undoStack : [...undoStack, { ops: inverses, selection }].slice(-MAX_UNDO),
+      undoStack: opts?.skipUndo ? undoStack : pushEntry(undoStack, {
+        ops: inverses, selection, coalesceKey: opts?.coalesce, at: Date.now(),
+      }),
       redoStack: opts?.skipUndo ? get().redoStack : [],
     });
 
@@ -385,9 +424,9 @@ export const useCanvas = create<CanvasState & CanvasActions>((set, get) => ({
     if (ops.length) get().dispatch(ops);
   },
 
-  setNodeStyles(keys, styles, selector) {
+  setNodeStyles(keys, styles, selector, opts) {
     const ops = styleOps(get().doc, keys, styles, selector, get().editingVariant);
-    if (ops.length) get().dispatch(ops);
+    if (ops.length) get().dispatch(ops, opts);
   },
 
   setViewport(v) { set({ viewport: { ...get().viewport, ...v } }); },

@@ -307,7 +307,18 @@ api.post('/documents/:id/connections', async (c) => {
     connection: conn,
     url,
     setup: {
-      claudeCode: `claude mcp add canvas --transport http ${url}`,
+      claudeCode: `claude mcp add playground --transport http ${url}`,
+      // Codex reads ~/.codex/config.toml. `mcp-remote` bridges the hosted
+      // streamable-HTTP endpoint to the stdio transport every version speaks,
+      // so this works whether or not the installed build has HTTP support.
+      codex: [
+        'codex mcp add playground -- npx -y mcp-remote ' + url,
+        '',
+        '# or, by hand, in ~/.codex/config.toml:',
+        '[mcp_servers.playground]',
+        'command = "npx"',
+        `args = ["-y", "mcp-remote", "${url}"]`,
+      ].join('\n'),
       claudeDesktop: {
         mcpServers: { canvas: { command: 'npx', args: ['-y', 'mcp-remote', url] } },
       },
