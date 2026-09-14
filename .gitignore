@@ -8,3 +8,4 @@ packages/*/dist
 .vercel
 .vercel
 api/
+.env*.local
