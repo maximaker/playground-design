@@ -215,6 +215,12 @@ a second, a selection changes on a click, and the overlay measures a rect per se
 forces an artboard iframe to lay out. Letting cursor churn invalidate the selection slice would put
 the editor into permanent layout thrash the moment a second person joined.
 
+**Dropping images.** Drag a file onto the canvas. Where it lands follows the pointer, not the
+selection — dropping something *there* is a statement about where you want it. Onto a frame it goes
+inside; onto empty canvas it gets an artboard of its own, sized to the image and named after the
+file, because dropping a screenshot to work from is why people drag an image in at all and making
+them create a frame first is a step in the way of the obvious intent.
+
 **Comments.** Threads pinned to the design, with `C` to place one. Deliberately not a prompt card: a
 card is work you are handing to an agent and it has a lifecycle, a comment is something a person said
 and what it needs is a reply and a way to mark it settled. The pin keeps its own coordinates as well

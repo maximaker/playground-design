@@ -15,6 +15,7 @@ import { Artboard } from './Artboard.tsx';
 import { NoteCard } from './NoteCard.tsx';
 import { Overlay } from './Overlay.tsx';
 import { PeerCursors } from './PeerCursors.tsx';
+import { imageSize, insertImages } from '../hooks/useClipboard.ts';
 import { CommentPin, CommentComposer, authorName } from './CommentPin.tsx';
 import { hitTest, nodeRect } from './registry.ts';
 import {
@@ -71,6 +72,7 @@ export function Canvas({ onContextMenu }: CanvasProps) {
   // they belong to is recorded so the overlay can convert them to the screen.
   const [guides, setGuides] = useState<{ guides: SnapGuide[]; space: 'canvas' | NodeId } | null>(null);
   const [dragging, setDragging] = useState(false);
+  const [dropping, setDropping] = useState(false);
   // Hover hit-testing reads layout inside an iframe, so it runs at most once a
   // frame rather than once per pointermove event.
   const hoverRaf = useRef(0);
@@ -639,6 +641,62 @@ export function Canvas({ onContextMenu }: CanvasProps) {
     }
   }, [dispatch, page, selection]);
 
+  /**
+   * Files dropped onto the canvas.
+   *
+   * Where it lands follows the pointer, not the selection: dropping something
+   * *there* is a statement about where you want it. On empty canvas that means
+   * a new artboard sized to the image, because dropping a screenshot to work
+   * from is the reason people drag an image in at all, and making them create
+   * a frame first is a step in the way of the obvious intent.
+   */
+  const onDrop = useCallback(async (e: React.DragEvent) => {
+    setDropping(false);
+    const files = [...(e.dataTransfer?.files ?? [])].filter((f) => f.type.startsWith('image/'));
+    if (!files.length) return;
+    e.preventDefault();
+
+    const store = useCanvas.getState();
+    if (store.readOnly) {
+      store.toast('This is a view-only link. You can comment, but not change the design.', 'info');
+      return;
+    }
+
+    const page = currentPage();
+    if (!page) return;
+
+    // A container under the pointer takes the image; text, images and vectors
+    // cannot hold children, so walk up until something can.
+    const hit = hitTest(e.clientX, e.clientY);
+    let container = hit ? getDoc()?.nodes[hit.nodeId] : undefined;
+    while (container && (container.type === 'text' || container.type === 'image' || container.type === 'vector' || container.type === 'code')) {
+      container = container.parent ? getDoc()!.nodes[container.parent] : undefined;
+    }
+
+    if (container) { await insertImages(files, container.id); return; }
+
+    // Empty canvas: one artboard per dropped image, at its natural size, placed
+    // where it was dropped.
+    const at = toCanvasSpace(e.clientX, e.clientY, useCanvas.getState().viewport);
+    let offset = 0;
+    for (const file of files) {
+      const size = await imageSize(file);
+      const artboard = makeNode({
+        type: 'artboard',
+        name: file.name.replace(/\.[^.]+$/, ''),
+        styles: {
+          ...DEFAULT_ARTBOARD_STYLES,
+          width: `${size.width}px`,
+          height: `${size.height}px`,
+        },
+        attrs: { 'data-x': String(Math.round(at.x + offset)), 'data-y': String(Math.round(at.y)) },
+      });
+      dispatch([{ t: 'insert', nodes: [artboard], parent: null, index: page.artboards.length }]);
+      await insertImages([file], artboard.id);
+      offset += size.width + 48;
+    }
+  }, [dispatch]);
+
   // --- Drawing new nodes -------------------------------------------------
 
   const handleDraw = useCallback((d: Extract<Drag, { kind: 'draw' }>, e: React.PointerEvent) => {
@@ -744,6 +802,21 @@ export function Canvas({ onContextMenu }: CanvasProps) {
         onContextMenu({ x: e.clientX, y: e.clientY, nodeId: hit?.nodeId ?? null });
       }}
       onDoubleClick={onDoubleClick as unknown as React.MouseEventHandler}
+      onDragOver={(e) => {
+        // Only claim a drag that actually carries files. Without this the canvas
+        // swallows in-app drags — a layer being reordered, text being moved —
+        // and they stop working.
+        if (!e.dataTransfer.types.includes('Files')) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'copy';
+        setDropping(true);
+      }}
+      onDragLeave={(e) => {
+        // dragleave fires for every child crossed on the way in, so ignore any
+        // that is not the canvas itself losing the pointer.
+        if (e.currentTarget === e.target) setDropping(false);
+      }}
+      onDrop={onDrop}
     >
       <div
         className="canvas-grid"
@@ -767,6 +840,12 @@ export function Canvas({ onContextMenu }: CanvasProps) {
       <Overlay version={structureVersion} dropTarget={dropTarget} guides={guides} live={dragging} />
 
       <div className="peer-cursors"><PeerCursors /></div>
+
+      {dropping && (
+        <div className="canvas-dropzone">
+          <span>Drop to place — on a frame to put it inside, anywhere else for a new artboard</span>
+        </div>
+      )}
 
       {marquee && <div className="marquee" style={marquee} />}
       {drawPreview && <div className="draw-preview" style={drawPreview} />}

@@ -57,7 +57,7 @@ export function useClipboard(): void {
         .map((i) => i.getAsFile())
         .filter((f): f is File => !!f);
 
-      if (files.length) { e.preventDefault(); void pasteImages(files); return; }
+      if (files.length) { e.preventDefault(); void insertImages(files); return; }
 
       const html = e.clipboardData?.getData('text/html');
       const plain = e.clipboardData?.getData('text/plain');
@@ -125,11 +125,18 @@ function resolvePasteTarget(): NodeId | null {
   return page.artboards[0] ?? null;
 }
 
-async function pasteImages(files: File[]): Promise<void> {
+/**
+ * Uploads images and puts them in the document.
+ *
+ * Shared by paste and by drag-and-drop, which differ only in where the result
+ * lands: paste follows the selection, a drop follows the pointer.
+ */
+export async function insertImages(files: File[], target?: NodeId | null): Promise<void> {
   const { docId, dispatch, select, toast } = useCanvas.getState();
   const doc = getDoc();
-  const target = resolvePasteTarget();
-  if (!docId || !doc || !target) return;
+  if (!docId || !doc) return;
+  target = target ?? resolvePasteTarget();
+  if (!target) return;
 
   const ids: NodeId[] = [];
   for (const file of files) {
@@ -156,6 +163,9 @@ async function pasteImages(files: File[]): Promise<void> {
   }
   if (ids.length) { select(ids); toast(`Added ${ids.length} image${ids.length === 1 ? '' : 's'}`, 'success'); }
 }
+
+/** The natural size of an image file, so the node starts at the right shape. */
+export { imageSize };
 
 function imageSize(file: File): Promise<{ width: number; height: number }> {
   return new Promise((resolve) => {
