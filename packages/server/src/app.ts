@@ -41,32 +41,6 @@ const app = new Hono();
 
 app.use('*', cors({ origin: (o) => o ?? '*', credentials: true }));
 
-/**
- * On Vercel every route reaches the function under `/api`, because that is the
- * only path that maps to a serverless function. Strip the prefix for the routes
- * that are not part of the API, so their URLs stay the same in both shapes.
- */
-if (!SERVE_CLIENT) {
-  app.use('*', async (c, next) => {
-    const url = new URL(c.req.url);
-    const alias = url.pathname.startsWith('/api/mcp/')
-      ? url.pathname.slice(4)
-      : url.pathname.startsWith('/api/assets/')
-        ? url.pathname.slice(4)
-        : null;
-    if (!alias) return next();
-    return app.fetch(new Request(new URL(alias + url.search, url.origin), c.req.raw));
-  });
-}
-
-app.onError((err, c) => {
-  if (err instanceof ImportError) return c.json({ error: err.message }, 422);
-  if (err instanceof StoreError) return c.json({ error: err.message }, 409);
-  if (err instanceof AssetError) return c.json({ error: err.message }, 413);
-  console.error('[canvas]', err);
-  return c.json({ error: err instanceof Error ? err.message : 'internal error' }, 500);
-});
-
 // ---------------------------------------------------------------------------
 // Documents
 // ---------------------------------------------------------------------------

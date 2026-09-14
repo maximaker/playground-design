@@ -1,11 +1,15 @@
 /**
  * Vercel entry point.
  *
- * Bundled to `api/[...path].js` at build time by `scripts/build-api.mjs`:
- * Vercel's Node builder transpiles the entry file but will not follow `.ts`
- * imports into a workspace package, so the whole server has to arrive as one
- * file. The catch-all name matters too — a rewrite to a plain `api/index` hands
- * the function the destination path, losing the route the client asked for.
+ * Bundled to `api/index.js` at build time by `scripts/build-api.mjs`: Vercel's
+ * Node builder transpiles the entry file but will not follow `.ts` imports into
+ * a workspace package, so the whole server has to arrive as one file.
+ *
+ * Routing is explicit. A rewrite to a function replaces the request path with
+ * the destination, and Vercel's catch-all convention only matched the first
+ * path segment here — so `vercel.json` carries the original path in `__path`
+ * and this handler puts it back. It is more literal than relying on framework
+ * conventions, and it is verifiable.
  *
  * The same Hono app runs here and in the long-lived Node server; only what is
  * underneath it changes. On Vercel there is no filesystem, so persistence goes
@@ -53,10 +57,20 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
   }
 }
 
+/** Query parameter carrying the original path through the rewrite. */
+const PATH_PARAM = '__path';
+
 async function toRequest(req: IncomingMessage): Promise<Request> {
   const host = (req.headers['x-forwarded-host'] as string) ?? req.headers.host ?? 'localhost';
   const proto = (req.headers['x-forwarded-proto'] as string) ?? 'https';
   const url = new URL(req.url ?? '/', `${proto}://${host}`);
+
+  const original = url.searchParams.get(PATH_PARAM);
+  if (original) {
+    url.searchParams.delete(PATH_PARAM);
+    // Keep the rest of the query string, which Vercel appends after ours.
+    url.pathname = original.startsWith('/') ? original : `/${original}`;
+  }
 
   const headers = new Headers();
   for (const [key, value] of Object.entries(req.headers)) {
