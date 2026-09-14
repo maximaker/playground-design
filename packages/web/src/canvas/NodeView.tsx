@@ -7,8 +7,8 @@
  */
 
 import { createElement, memo, useCallback, useEffect, useRef } from 'react';
-import type { NodeId } from '@canvas/shared';
-import { useCanvas, getNodeById } from '../state/store.ts';
+import { type ExpandedNode, type NodeId, expandNode } from '@canvas/shared';
+import { useCanvas, getDoc, getNodeById } from '../state/store.ts';
 import { toReactStyle } from './styles.ts';
 
 const VOID_TAGS = new Set(['img', 'br', 'hr', 'input', 'source', 'track', 'wbr']);
@@ -18,17 +18,28 @@ interface Props { id: NodeId; isRoot?: boolean }
 export const NodeView = memo(function NodeView({ id, isRoot }: Props) {
   // `version` is what makes this re-render: the document is mutated in place.
   useCanvas((s) => s.version);
-  const editingText = useCanvas((s) => s.editingText);
+  const doc = getDoc();
   const node = getNodeById(id);
+  if (!doc || !node || !node.visible) return null;
 
-  if (!node || !node.visible) return null;
+  // Expansion resolves component instances, slots and overrides, so the canvas
+  // renders exactly what export emits.
+  const expanded = expandNode(doc, node);
+  if (!expanded) return null;
+  return <ExpandedView expanded={expanded} isRoot={isRoot} />;
+});
+
+const ExpandedView = memo(function ExpandedView({ expanded, isRoot }: { expanded: ExpandedNode; isRoot?: boolean }) {
+  const editingText = useCanvas((s) => s.editingText);
+  const node = expanded.node;
 
   const style = toReactStyle(node.styles);
   const props: Record<string, unknown> = {
     ...sanitizedAttrs(node.attrs),
-    'data-node-id': id,
+    // The key is the editor-facing identity: for a node inside an instance it
+    // addresses the override, not the shared definition node.
+    'data-node-id': expanded.key,
     style: isRoot ? { ...style, width: '100%', height: '100%' } : style,
-    key: id,
   };
 
   if (node.type === 'vector') {
@@ -40,14 +51,16 @@ export const NodeView = memo(function NodeView({ id, isRoot }: Props) {
   }
 
   if (node.type === 'text') {
-    if (editingText === id) return <EditableText id={id} tag={node.tag} style={props.style as object} attrs={props} />;
+    if (editingText === expanded.key) {
+      return <EditableText nodeKey={expanded.key} tag={node.tag} text={node.text ?? ''} attrs={props} />;
+    }
     return createElement(node.tag, props, node.text ?? '');
   }
 
   return createElement(
     node.tag,
     props,
-    node.children.map((childId) => <NodeView key={childId} id={childId} />),
+    expanded.children.map((child) => <ExpandedView key={child.key} expanded={child} />),
   );
 });
 
@@ -74,11 +87,13 @@ function sanitizedAttrs(attrs: Record<string, string>): Record<string, string> {
  * edit whenever focus moves without a focusout on this element, which is exactly
  * what happens when the user clicks elsewhere on the canvas.
  */
-function EditableText({ id, tag, attrs }: { id: NodeId; tag: string; style: object; attrs: Record<string, unknown> }) {
+function EditableText({ nodeKey, tag, text, attrs }: {
+  nodeKey: string; tag: string; text: string; attrs: Record<string, unknown>;
+}) {
   const ref = useRef<HTMLElement | null>(null);
-  const dispatch = useCanvas((s) => s.dispatch);
+  const setText = useCanvas((s) => s.setNodeText);
   const setEditingText = useCanvas((s) => s.setEditingText);
-  const original = useRef<string>(getNodeById(id)?.text ?? '');
+  const original = useRef<string>(text);
   const committed = useRef(false);
   // Tracked as it is typed. Reading the DOM at commit time is not safe: by the
   // time an unmount cleanup runs, the element can already be detached, and
@@ -89,9 +104,11 @@ function EditableText({ id, tag, attrs }: { id: NodeId; tag: string; style: obje
     if (committed.current) return;
     committed.current = true;
     const live = ref.current;
-    const text = live?.isConnected ? (live.textContent ?? latest.current) : latest.current;
-    if (text !== original.current) dispatch([{ t: 'text', updates: [{ id, text }] }]);
-  }, [dispatch, id]);
+    const next = live?.isConnected ? (live.textContent ?? latest.current) : latest.current;
+    // setNodeText routes to a text op or an instance override depending on what
+    // this key addresses, so editing inside a component does the right thing.
+    if (next !== original.current) setText(nodeKey, next);
+  }, [setText, nodeKey]);
 
   useEffect(() => {
     const el = ref.current;

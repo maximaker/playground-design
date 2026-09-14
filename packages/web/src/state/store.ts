@@ -12,6 +12,7 @@ import {
   type CanvasDocument, type CanvasNode, type NodeId, type Op, type OpEnvelope, type Page,
   applyOp, artboardOf, batchId, descendants,
 } from '@canvas/shared';
+import { styleOps, textOps, treeNodeId } from './keys.ts';
 
 export type Tool = 'move' | 'frame' | 'text' | 'rect' | 'ellipse' | 'image' | 'hand' | 'note';
 
@@ -99,6 +100,10 @@ interface CanvasActions {
   selectNote(id: string | null): void;
   setEditingText(id: NodeId | null): void;
   setActiveVariant(v: string | null): void;
+  /** Writes text to a node or, for a key inside an instance, to its override. */
+  setNodeText(key: string, text: string): void;
+  /** Writes styles, routing each key to a node or an instance override. */
+  setNodeStyles(keys: string[], styles: Record<string, string>, selector?: string): void;
 
   setViewport(v: Partial<Viewport>): void;
   setTool(t: Tool): void;
@@ -266,6 +271,16 @@ export const useCanvas = create<CanvasState & CanvasActions>((set, get) => ({
   setEditingText(editingText) { set({ editingText }); },
   setActiveVariant(activeVariant) { set({ activeVariant }); },
 
+  setNodeText(key, text) {
+    const ops = textOps(get().doc, key, text);
+    if (ops.length) get().dispatch(ops);
+  },
+
+  setNodeStyles(keys, styles, selector) {
+    const ops = styleOps(get().doc, keys, styles, selector);
+    if (ops.length) get().dispatch(ops);
+  },
+
   setViewport(v) { set({ viewport: { ...get().viewport, ...v } }); },
   setTool(tool) { set({ tool }); },
   setSpacePanning(spacePanning) { set({ spacePanning }); },
@@ -300,8 +315,14 @@ export function currentPage(): Page | undefined {
 }
 
 /** Drops nodes whose ancestor is also selected — what "move the selection" means. */
-export function topLevelSelection(ids: NodeId[]): NodeId[] {
+/**
+ * Reduces a selection to the nodes that actually live in the tree, dropping any
+ * whose ancestor is also selected. Keys inside a component instance collapse to
+ * the instance itself — that is the thing that can be moved or deleted.
+ */
+export function topLevelSelection(keys: string[]): NodeId[] {
   const doc = getDoc();
+  const ids = [...new Set(keys.map(treeNodeId))];
   if (!doc) return ids;
   const set = new Set(ids);
   return ids.filter((id) => {

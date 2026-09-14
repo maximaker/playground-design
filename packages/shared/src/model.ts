@@ -49,6 +49,45 @@ export interface CanvasNode {
   visible: boolean;
   /** For `instance` nodes: the id of the component definition. */
   componentRef?: string;
+  /**
+   * For `instance` nodes: per-definition-node changes.
+   *
+   * Keyed by the *definition's* node id rather than a positional path, so an
+   * override survives the definition being reordered or having nodes inserted
+   * above the one it targets.
+   */
+  overrides?: Record<NodeId, InstanceOverride>;
+}
+
+export interface InstanceOverride {
+  text?: string;
+  styles?: StyleMap;
+  attrs?: Record<string, string>;
+  hidden?: boolean;
+}
+
+/**
+ * A reusable component.
+ *
+ * The definition's nodes live in `doc.nodes` like any others — they are simply
+ * not attached to a page, so every existing op, style and selection mechanism
+ * works on them unchanged.
+ */
+export interface ComponentDef {
+  id: string;
+  name: string;
+  description?: string;
+  /** Root node of the definition subtree. */
+  root: NodeId;
+  createdAt: number;
+}
+
+/** A node in a definition marked `data-slot` renders the instance's children. */
+export const SLOT_ATTR = 'data-slot';
+
+export function slotNameOf(node: CanvasNode): string | null {
+  const value = node.attrs[SLOT_ATTR];
+  return value === undefined ? null : (value || 'default');
 }
 
 export interface Page {
@@ -146,6 +185,8 @@ export interface CanvasDocument {
   nodes: Record<NodeId, CanvasNode>;
   tokens: Token[];
   themes: string[];
+  /** Component definitions, keyed by id. */
+  components?: Record<string, ComponentDef>;
   /** Monotonic, bumped on every applied op. Used for reconnect/catch-up. */
   rev: number;
 }
@@ -298,6 +339,22 @@ export function artboardOf(doc: CanvasDocument, id: NodeId): NodeId | null {
   return null;
 }
 
+export function componentsOf(doc: CanvasDocument): ComponentDef[] {
+  return Object.values(doc.components ?? {}).sort((a, b) => a.name.localeCompare(b.name));
+}
+
+export function componentOfInstance(doc: CanvasDocument, node: CanvasNode): ComponentDef | undefined {
+  return node.componentRef ? doc.components?.[node.componentRef] : undefined;
+}
+
+/** True when `id` belongs to a component definition rather than a page. */
+export function isDefinitionNode(doc: CanvasDocument, id: NodeId): boolean {
+  const roots = new Set(componentsOf(doc).map((c) => c.root));
+  if (roots.has(id)) return true;
+  for (const ancestor of ancestors(doc, id)) if (roots.has(ancestor)) return true;
+  return false;
+}
+
 export function pageOfArtboard(doc: CanvasDocument, artboardId: NodeId): Page | undefined {
   return doc.pages.find((p) => p.artboards.includes(artboardId));
 }
@@ -342,6 +399,7 @@ export function createEmptyDocument(name = 'Untitled'): CanvasDocument {
     nodes: { [artboard.id]: artboard },
     tokens: [...DEFAULT_TOKENS],
     themes: ['default', 'dark'],
+    components: {},
     rev: 0,
   };
 }

@@ -9,6 +9,11 @@ const TYPE_ICON: Record<string, string> = {
   artboard: '▢', frame: '▣', text: 'T', image: '🖼', vector: '✎', shape: '◼', embed: '⧉', instance: '◈',
 };
 
+/** Instances show their component name, and their contents are not editable here. */
+function labelFor(node: { type: string; name: string }, componentName?: string): string {
+  return node.type === 'instance' ? componentName ?? node.name : node.name;
+}
+
 export function Layers() {
   const version = useCanvas((s) => s.version);
   const page = currentPage();
@@ -60,7 +65,7 @@ function LayerRow({ id, depth, collapsed, toggle, dropHint, setDropHint }: RowPr
   const node = getNodeById(id);
   if (!node) return null;
 
-  const isSelected = selection.includes(id);
+  const isSelected = selection.includes(id) || selection.some((k) => k.startsWith(`${id}::`));
   const isCollapsed = collapsed.has(id);
   const hasChildren = node.children.length > 0;
 
@@ -154,7 +159,9 @@ function LayerRow({ id, depth, collapsed, toggle, dropHint, setDropHint }: RowPr
             }}
           />
         ) : (
-          <span className="layer-name" title={node.name}>{node.name}</span>
+          <span className="layer-name" title={node.name}>
+          {labelFor(node, getDoc()?.components?.[node.componentRef ?? '']?.name)}
+        </span>
         )}
 
         <button

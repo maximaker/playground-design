@@ -9,14 +9,16 @@ import { Canvas } from './canvas/Canvas.tsx';
 import { Layers } from './panels/Layers.tsx';
 import { Properties } from './panels/Properties.tsx';
 import { Tokens } from './panels/Tokens.tsx';
+import { Components } from './panels/Components.tsx';
 import { History } from './panels/History.tsx';
 import { ConnectAgent } from './panels/ConnectAgent.tsx';
 import { Export } from './panels/Export.tsx';
+import { Import } from './panels/Import.tsx';
 import { Toolbar } from './ui/Toolbar.tsx';
 import { ContextMenu, type ContextMenuState } from './ui/ContextMenu.tsx';
 import { Home } from './Home.tsx';
 
-type LeftTab = 'layers' | 'pages' | 'tokens' | 'history';
+type LeftTab = 'layers' | 'pages' | 'components' | 'tokens' | 'history';
 
 export function App() {
   const [docId, setDocId] = useState<string | null>(() => docIdFromLocation());
@@ -50,7 +52,7 @@ function Editor({ docId, onHome }: { docId: string; onHome: () => void }) {
   const dispatch = useCanvas((s) => s.dispatch);
 
   const [leftTab, setLeftTab] = useState<LeftTab>('layers');
-  const [modal, setModal] = useState<'connect' | 'export' | null>(null);
+  const [modal, setModal] = useState<'connect' | 'export' | 'import' | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
 
   useKeyboard(() => setModal('export'));
@@ -111,6 +113,9 @@ function Editor({ docId, onHome }: { docId: string; onHome: () => void }) {
           {connection === 'open' ? 'Live' : connection === 'connecting' ? 'Connecting' : 'Offline'}
         </span>
 
+        <button className="button" onClick={() => setModal('import')} title="Bring a live webpage onto the canvas">
+          Import
+        </button>
         <button className="button" onClick={() => setModal('export')}>Export</button>
         <button className="button primary" onClick={() => setModal('connect')}>Connect agent</button>
       </header>
@@ -126,7 +131,7 @@ function Editor({ docId, onHome }: { docId: string; onHome: () => void }) {
       <div className="workspace">
         <aside className="rail rail-left">
           <nav className="rail-tabs">
-            {(['layers', 'pages', 'tokens', 'history'] as LeftTab[]).map((t) => (
+            {(['layers', 'pages', 'components', 'tokens', 'history'] as LeftTab[]).map((t) => (
               <button key={t} className={leftTab === t ? 'is-active' : ''} onClick={() => setLeftTab(t)}>
                 {t}
               </button>
@@ -158,6 +163,7 @@ function Editor({ docId, onHome }: { docId: string; onHome: () => void }) {
                 >+ New page</button>
               </div>
             )}
+            {leftTab === 'components' && <Components />}
             {leftTab === 'tokens' && <Tokens />}
             {leftTab === 'history' && <History />}
           </div>
@@ -183,6 +189,7 @@ function Editor({ docId, onHome }: { docId: string; onHome: () => void }) {
 
       {modal === 'connect' && <ConnectAgent onClose={() => setModal(null)} />}
       {modal === 'export' && <Export onClose={() => setModal(null)} />}
+      {modal === 'import' && <Import onClose={() => setModal(null)} />}
 
       <Toasts />
     </div>

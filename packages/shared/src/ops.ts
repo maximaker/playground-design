@@ -12,7 +12,8 @@
 
 import {
   type CanvasDocument, type CanvasNode, type NodeId, type StyleMap, type Page,
-  type Token, type Note, descendants, isAncestorOf, makeNote, newId,
+  type Token, type Note, type ComponentDef, type InstanceOverride,
+  descendants, isAncestorOf, makeNote, newId,
 } from './model.ts';
 
 export type Op =
@@ -28,7 +29,23 @@ export type Op =
   | { t: 'doc'; name?: string }
   | { t: 'tokens'; tokens: Token[] }
   | { t: 'page'; action: 'add' | 'remove' | 'rename'; page: Page }
-  | { t: 'note'; action: 'add' | 'update' | 'remove'; pageId: string; note: Partial<Note> & { id: string } };
+  | { t: 'note'; action: 'add' | 'update' | 'remove'; pageId: string; note: Partial<Note> & { id: string } }
+  | { t: 'component'; action: 'add' | 'update' | 'remove'; component: Partial<ComponentDef> & { id: string } }
+  | {
+      t: 'override';
+      updates: {
+        id: NodeId;
+        defId: NodeId;
+        override: InstanceOverride | null;
+        /**
+         * `merge` (the default) layers onto the existing override, which is what
+         * editing one property should do. `set` replaces it outright — used by
+         * inverses, which must restore an exact prior state rather than merging
+         * back over the change they are undoing.
+         */
+        mode?: 'merge' | 'set';
+      }[];
+    };
 
 export interface OpEnvelope {
   op: Op;
@@ -41,6 +58,9 @@ export interface OpEnvelope {
 }
 
 export class OpError extends Error {}
+
+/** Pseudo-page id marking nodes that belong to a component definition. */
+export const DEFINITIONS_PAGE = '__definitions__';
 
 /** Applies `op` to `doc` in place and returns the op that reverses it. */
 export function applyOp(doc: CanvasDocument, op: Op): Op {
@@ -58,6 +78,8 @@ export function applyOp(doc: CanvasDocument, op: Op): Op {
     case 'tokens': return applyTokens(doc, op);
     case 'page': return applyPage(doc, op);
     case 'note': return applyNote(doc, op);
+    case 'component': return applyComponent(doc, op);
+    case 'override': return applyOverride(doc, op);
   }
 }
 
@@ -73,6 +95,12 @@ function applyInsert(doc: CanvasDocument, op: Extract<Op, { t: 'insert' }>): Op 
   }
 
   if (op.parent === null) {
+    // Component definitions are parented to nothing and belong to no page, so
+    // they never render on the canvas or export on their own.
+    if (op.page === DEFINITIONS_PAGE) {
+      for (const id of roots) doc.nodes[id]!.parent = null;
+      return { t: 'remove', ids: roots };
+    }
     const page = doc.pages.find((p) => p.id === op.page) ?? doc.pages[0];
     if (!page) throw new OpError('no page to insert into');
     const idx = clamp(op.index, 0, page.artboards.length);
@@ -98,7 +126,8 @@ function applyRemove(doc: CanvasDocument, op: Extract<Op, { t: 'remove' }>): Op 
   const first = doc.nodes[ids[0]!]!;
   const parentId = first.parent;
   const page = parentId === null ? doc.pages.find((p) => p.artboards.includes(ids[0]!)) : undefined;
-  const siblings = parentId === null ? page!.artboards : doc.nodes[parentId]!.children;
+  // A root with no page is a component definition; it has no sibling list.
+  const siblings = parentId === null ? page?.artboards ?? [] : doc.nodes[parentId]!.children;
   const index = siblings.indexOf(ids[0]!);
 
   const captured: CanvasNode[] = [];
@@ -119,7 +148,10 @@ function applyRemove(doc: CanvasDocument, op: Extract<Op, { t: 'remove' }>): Op 
     for (const nid of [id, ...descendants(doc, id)]) delete doc.nodes[nid];
   }
 
-  return { t: 'insert', nodes: captured, parent: parentId, index, page: page?.id };
+  return {
+    t: 'insert', nodes: captured, parent: parentId, index,
+    page: parentId === null ? page?.id ?? DEFINITIONS_PAGE : undefined,
+  };
 }
 
 function applyStyles(doc: CanvasDocument, op: Extract<Op, { t: 'styles' }>): Op {
@@ -306,6 +338,80 @@ function applyNote(doc: CanvasDocument, op: Extract<Op, { t: 'note' }>): Op {
   }
   page.notes[index] = { ...current, ...op.note, updatedAt: Date.now() };
   return { t: 'note', action: 'update', pageId: op.pageId, note: before };
+}
+
+function applyComponent(doc: CanvasDocument, op: Extract<Op, { t: 'component' }>): Op {
+  if (!doc.components) doc.components = {};
+  const current = doc.components[op.component.id];
+
+  if (op.action === 'add') {
+    if (current) throw new OpError(`component ${op.component.id} already exists`);
+    if (!op.component.root || !op.component.name) throw new OpError('a component needs a name and a root node');
+    doc.components[op.component.id] = {
+      id: op.component.id,
+      name: op.component.name,
+      description: op.component.description,
+      root: op.component.root,
+      createdAt: op.component.createdAt ?? Date.now(),
+    };
+    return { t: 'component', action: 'remove', component: { id: op.component.id } };
+  }
+
+  if (op.action === 'remove') {
+    if (!current) throw new OpError(`component ${op.component.id} not found`);
+    delete doc.components[op.component.id];
+    // The definition's nodes stay in the document; removing the component
+    // without them would orphan any instance mid-render. Callers that want the
+    // nodes gone issue a `remove` op for the root as well.
+    return { t: 'component', action: 'add', component: current };
+  }
+
+  if (!current) throw new OpError(`component ${op.component.id} not found`);
+  const before: Partial<ComponentDef> & { id: string } = { id: current.id };
+  for (const key of Object.keys(op.component) as (keyof ComponentDef)[]) {
+    if (key === 'id') continue;
+    (before as Record<string, unknown>)[key] = current[key];
+  }
+  doc.components[op.component.id] = { ...current, ...op.component };
+  return { t: 'component', action: 'update', component: before };
+}
+
+function applyOverride(doc: CanvasDocument, op: Extract<Op, { t: 'override' }>): Op {
+  const inverse: Extract<Op, { t: 'override' }>['updates'] = [];
+
+  for (const u of op.updates) {
+    const node = doc.nodes[u.id];
+    if (!node) continue;
+    if (!node.overrides) node.overrides = {};
+
+    const previous = node.overrides[u.defId] ?? null;
+    // Inverses always replace, so undo restores exactly what was there.
+    inverse.push({
+      id: u.id, defId: u.defId, mode: 'set',
+      override: previous ? structuredClone(previous) : null,
+    });
+
+    if (u.override === null) {
+      delete node.overrides[u.defId];
+      continue;
+    }
+
+    if (u.mode === 'set') {
+      node.overrides[u.defId] = structuredClone(u.override);
+      continue;
+    }
+
+    // Merge by default: setting a style should not drop a text override the
+    // user set a moment earlier on the same node.
+    node.overrides[u.defId] = {
+      ...previous,
+      ...u.override,
+      styles: u.override.styles ? { ...previous?.styles, ...u.override.styles } : previous?.styles,
+      attrs: u.override.attrs ? { ...previous?.attrs, ...u.override.attrs } : previous?.attrs,
+    };
+  }
+
+  return { t: 'override', updates: inverse };
 }
 
 function clamp(n: number, lo: number, hi: number): number {

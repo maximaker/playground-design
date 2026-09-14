@@ -207,6 +207,8 @@ function describeOp(op: Op): string {
     case 'tokens': return 'Updated tokens';
     case 'page': return `${op.action === 'add' ? 'Added' : op.action === 'remove' ? 'Removed' : 'Renamed'} page`;
     case 'note': return `${op.action === 'add' ? 'Added' : op.action === 'remove' ? 'Removed' : 'Updated'} a note`;
+    case 'component': return `${op.action === 'add' ? 'Created' : op.action === 'remove' ? 'Deleted' : 'Updated'} a component`;
+    case 'override': return `Overrode ${op.updates.length} component ${op.updates.length === 1 ? 'layer' : 'layers'}`;
   }
 }
 

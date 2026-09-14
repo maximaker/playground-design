@@ -14,13 +14,16 @@ import {
   type CanvasDocument, type CanvasNode, type NodeId, type Op, type OpEnvelope, type StyleMap,
   applyOp, artboardOf, basicInfo, cloneSubtree, descendants, emitHtml, emitJsx, getNode,
   makeNode, makeNote, newId, parseHtml, treeSummary, describeNode, getArtboardPosition, getArtboardSize,
-  batchId, tokenToCssVar, DEFAULT_ARTBOARD_STYLES,
+  batchId, tokenToCssVar, DEFAULT_ARTBOARD_STYLES, DEFINITIONS_PAGE,
+  componentsOf, collectSlots, detachedNodes, expandInstance, instancesOf,
 } from '@canvas/shared';
 import { applyOps, getDocument, StoreError, createSnapshot } from './store.ts';
 import { callTab, notifyTabs, selectionOf, hasLiveTab, NoTabError } from './realtime.ts';
 import { renderNode } from './render.ts';
 import { storeAsset } from './assets.ts';
 import { GUIDES, guideList } from './guides.ts';
+import { importUrl } from './import.ts';
+import { getTemplate, templateSummaries } from './templates.ts';
 import { touchConnection, type Connection } from './connections.ts';
 
 // ---------------------------------------------------------------------------
@@ -100,6 +103,8 @@ export function buildMcpServer(ctx: McpContext): McpServer {
         `you cannot tell whether a layout is right without looking at it.\n\n` +
         `Call get_guide("layout") before building anything substantial; it describes what makes ` +
         `output a designer will keep rather than discard.\n\n` +
+        `Reuse rather than rebuild: call list_components first, and create_component the moment you ` +
+        `would otherwise build the same thing twice.\n\n` +
         `The canvas also carries prompt cards — sticky notes the human writes next to the thing ` +
         `they are about. If get_basic_info reports queued notes, call list_notes and work through ` +
         `them: claim_note, do the work, then respond_to_note. That is usually why you were called.`,
@@ -109,6 +114,7 @@ export function buildMcpServer(ctx: McpContext): McpServer {
   registerReadTools(server, ctx);
   registerWriteTools(server, ctx);
   registerNoteTools(server, ctx);
+  registerComponentTools(server, ctx);
   registerSessionTools(server, ctx);
   return server;
 }
@@ -510,6 +516,111 @@ function registerWriteTools(server: McpServer, ctx: McpContext): void {
     return json({ id: artboard.id, name: artboard.name, width, height, x: px, y: py });
   }));
 
+  server.registerTool('list_templates', {
+    title: 'List starter design systems',
+    description:
+      'Built-in kits, each a token set plus a foundations artboard. Applying one before building gives ' +
+      'you tokens to reference instead of inventing hex codes.',
+    inputSchema: {},
+    annotations: { readOnlyHint: true },
+  }, async () => guard(() => json({ templates: templateSummaries() })));
+
+  server.registerTool('apply_template', {
+    title: 'Apply a starter design system',
+    description:
+      'Merges a kit’s tokens into the document and adds its foundations artboard. Tokens that already ' +
+      'exist are left alone, so this never overwrites work.',
+    inputSchema: {
+      template: z.string().describe('Template id from list_templates.'),
+      replaceTokens: z.boolean().optional().default(false)
+        .describe('Overwrite tokens whose names already exist. Off by default so a kit never clobbers existing work.'),
+    },
+  }, async ({ template, replaceTokens }) => guard(() => {
+    const doc = requireDoc(ctx);
+    const kit = getTemplate(template);
+    if (!kit) return fail(`No template "${template}". Available: ${templateSummaries().map((t) => t.id).join(', ')}`);
+
+    const page = doc.pages[0]!;
+    const existing = new Map(doc.tokens.map((t) => [t.name, t]));
+    const added: typeof kit.tokens = [];
+    const skipped: string[] = [];
+
+    for (const token of kit.tokens) {
+      if (existing.has(token.name) && !replaceTokens) { skipped.push(token.name); continue; }
+      existing.set(token.name, token);
+      added.push(token);
+    }
+
+    const ops: Op[] = [{ t: 'tokens', tokens: [...existing.values()] }];
+    const created: string[] = [];
+
+    for (const spec of kit.artboards) {
+      const artboard = makeNode({
+        type: 'artboard',
+        name: `${kit.name} — ${spec.name}`,
+        styles: { ...DEFAULT_ARTBOARD_STYLES, ...spec.styles, width: `${spec.width}px`, height: `${spec.height}px` },
+        attrs: { 'data-x': String(rightmostEdge(doc, page.artboards) + 120), 'data-y': '0' },
+      });
+      const parsed = parseHtml(spec.html);
+      ops.push({ t: 'insert', nodes: [artboard], parent: null, index: page.artboards.length, page: page.id });
+      ops.push({ t: 'insert', nodes: parsed.nodes, parent: artboard.id, index: 0 });
+      created.push(artboard.id);
+    }
+
+    commit(ctx, ops);
+    return json({
+      applied: kit.id,
+      tokensAdded: added.map((t) => `var(${tokenToCssVar(t.name)})`),
+      ...(skipped.length
+        ? {
+            tokensSkipped: skipped,
+            note: `${skipped.length} token${skipped.length === 1 ? '' : 's'} already existed and were kept. ` +
+              `Pass replaceTokens:true to take the kit's values instead — otherwise this kit will render in the document's existing palette.`,
+          }
+        : {}),
+      artboards: created,
+      next: 'Call get_tokens, then use those variables instead of literal colours.',
+    });
+  }));
+
+  server.registerTool('import_url', {
+    title: 'Import a webpage onto the canvas',
+    description:
+      'Fetches a public webpage and turns its markup and stylesheets into editable layers on a new ' +
+      'artboard. Use it to bring in a reference, a competitor page, or an existing page you are ' +
+      'redesigning. It is a static snapshot: scripts and client-rendered content are not included.',
+    inputSchema: {
+      url: z.string().describe('Absolute http(s) URL.'),
+      artboardId: z.string().optional().describe('Import into this artboard instead of creating one.'),
+    },
+  }, async ({ url, artboardId }) => guard(async () => {
+    const doc = requireDoc(ctx);
+    const result = await importUrl(url);
+    const page = doc.pages[0]!;
+
+    let target = artboardId;
+    if (target) node(doc, target);
+    else {
+      const artboard = makeNode({
+        type: 'artboard',
+        name: result.title.slice(0, 40),
+        styles: { ...DEFAULT_ARTBOARD_STYLES, width: '1440px', height: '1200px' },
+        attrs: { 'data-x': String(rightmostEdge(doc, page.artboards) + 120), 'data-y': '0' },
+      });
+      commit(ctx, [{ t: 'insert', nodes: [artboard], parent: null, index: page.artboards.length, page: page.id }]);
+      target = artboard.id;
+    }
+
+    commit(ctx, [{ t: 'insert', nodes: result.nodes, parent: target, index: 0 }]);
+    return json({
+      artboardId: target,
+      nodeCount: result.nodes.length,
+      title: result.title,
+      warnings: result.warnings,
+      next: 'Call get_screenshot on the artboard, then get_tree_summary — imports are usually deeper than they need to be.',
+    });
+  }));
+
   server.registerTool('write_html', {
     title: 'Write HTML into the document',
     description:
@@ -807,6 +918,16 @@ function registerWriteTools(server: McpServer, ctx: McpContext): void {
   }));
 }
 
+function rightmostEdge(doc: CanvasDocument, artboards: NodeId[]): number {
+  let max = 0;
+  for (const id of artboards) {
+    const n = getNode(doc, id);
+    if (!n) continue;
+    max = Math.max(max, getArtboardPosition(n).x + getArtboardSize(n).width);
+  }
+  return max;
+}
+
 function slug(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'export';
 }
@@ -988,6 +1109,212 @@ function nearestArtboard(
     if (!best || distance < best.distance) best = { id, name: node.name, distance };
   }
   return best;
+}
+
+
+// ---------------------------------------------------------------------------
+// Components
+// ---------------------------------------------------------------------------
+
+function registerComponentTools(server: McpServer, ctx: McpContext): void {
+  server.registerTool('list_components', {
+    title: 'List components',
+    description:
+      'Reusable components in this document, with their instance counts and slots. Before building ' +
+      'something that already exists here, use the component instead — it is what keeps repeated ' +
+      'elements from drifting apart.',
+    inputSchema: {},
+    annotations: { readOnlyHint: true },
+  }, async () => guard(() => {
+    const doc = requireDoc(ctx);
+    const components = componentsOf(doc);
+    if (!components.length) {
+      return text('This document has no components yet. create_component turns a subtree into one.');
+    }
+    return json({
+      components: components.map((c) => {
+        const root = getNode(doc, c.root);
+        return {
+          id: c.id,
+          name: c.name,
+          description: c.description ?? null,
+          root: c.root,
+          instances: instancesOf(doc, c.id).length,
+          slots: root ? collectSlots(doc, root) : [],
+          structure: root ? treeSummary(doc, c.root, { depth: 3 }) : null,
+        };
+      }),
+    });
+  }));
+
+  server.registerTool('create_component', {
+    title: 'Create a component',
+    description:
+      'Turns an existing subtree into a reusable component and replaces it with an instance. Use this ' +
+      'as soon as you find yourself about to build the same thing twice.',
+    inputSchema: {
+      id: z.string().describe('Node to turn into a component.'),
+      name: z.string().min(1).max(60),
+      description: z.string().max(280).optional(),
+    },
+  }, async ({ id, name, description }) => guard(() => {
+    const doc = requireDoc(ctx);
+    const source = node(doc, id);
+    if (source.type === 'artboard') return fail('Artboards cannot be components. Pick a layer inside one.');
+    if (source.type === 'instance') return fail(`${id} is already a component instance.`);
+    if (!source.parent) return fail(`${id} has no parent, so there is nothing to replace with an instance.`);
+
+    const parent = source.parent;
+    const index = doc.nodes[parent]!.children.indexOf(id);
+
+    const { nodes: definition } = cloneSubtree(doc, id);
+    const root = definition[0]!;
+    root.parent = null;
+    root.name = name;
+
+    const componentId = newId('cmp');
+    const instance = makeNode({ type: 'instance', name, componentRef: componentId });
+
+    commit(ctx, [
+      { t: 'insert', nodes: definition, parent: null, index: 0, page: DEFINITIONS_PAGE },
+      { t: 'component', action: 'add', component: { id: componentId, name, description, root: root.id } },
+      { t: 'remove', ids: [id] },
+      { t: 'insert', nodes: [instance], parent, index },
+    ]);
+
+    return json({
+      componentId,
+      definitionRoot: root.id,
+      instanceId: instance.id,
+      next: 'Insert more with insert_instance. Mark a layer in the definition with data-slot to let instances supply their own content.',
+    });
+  }));
+
+  server.registerTool('insert_instance', {
+    title: 'Insert a component instance',
+    description: 'Places an instance of a component. Override its contents afterwards with set_override.',
+    inputSchema: {
+      componentId: z.string(),
+      parentId: z.string().describe('Where to put it.'),
+      index: z.number().int().optional(),
+      count: z.number().int().min(1).max(50).optional().default(1),
+    },
+  }, async ({ componentId, parentId, index, count }) => guard(() => {
+    const doc = requireDoc(ctx);
+    const def = doc.components?.[componentId];
+    if (!def) return fail(`No component "${componentId}". Call list_components.`);
+    const parent = node(doc, parentId);
+
+    const instances = Array.from({ length: count }, () =>
+      makeNode({ type: 'instance', name: def.name, componentRef: componentId }));
+
+    commit(ctx, [{
+      t: 'insert', nodes: instances, parent: parentId,
+      index: index ?? parent.children.length,
+    }]);
+    return json({ created: instances.map((i) => i.id) });
+  }));
+
+  server.registerTool('set_override', {
+    title: 'Override part of an instance',
+    description:
+      'Changes one instance without touching the component or its other instances. Address the part ' +
+      'you want by its id in the *definition* — get_instance shows the mapping. Pass null to reset.',
+    inputSchema: {
+      updates: z.array(z.object({
+        instanceId: z.string(),
+        defId: z.string().describe('Id of the node inside the component definition.'),
+        text: z.string().optional(),
+        styles: StyleRecord.optional(),
+        attrs: z.record(z.string(), z.string()).optional(),
+        hidden: z.boolean().optional(),
+        reset: z.boolean().optional().describe('Clear every override on this part.'),
+      })).min(1).max(100),
+    },
+  }, async ({ updates }) => guard(() => {
+    const doc = requireDoc(ctx);
+    for (const u of updates) {
+      const instance = node(doc, u.instanceId);
+      if (instance.type !== 'instance') return fail(`${u.instanceId} is not a component instance.`);
+      if (!doc.nodes[u.defId]) {
+        return fail(`No node "${u.defId}" in the definition. Call get_instance on ${u.instanceId} to see what can be overridden.`);
+      }
+    }
+
+    commit(ctx, [{
+      t: 'override',
+      updates: updates.map((u) => ({
+        id: u.instanceId,
+        defId: u.defId,
+        mode: u.reset ? ('set' as const) : ('merge' as const),
+        override: u.reset ? null : {
+          ...(u.text !== undefined ? { text: u.text } : {}),
+          ...(u.styles ? { styles: u.styles } : {}),
+          ...(u.attrs ? { attrs: u.attrs } : {}),
+          ...(u.hidden !== undefined ? { hidden: u.hidden } : {}),
+        },
+      })),
+    }]);
+    return json({ updated: updates.length });
+  }));
+
+  server.registerTool('get_instance', {
+    title: 'Inspect a component instance',
+    description:
+      'What an instance renders, and which definition ids can be overridden. Call this before ' +
+      'set_override — the ids you need come from the definition, not from the canvas.',
+    inputSchema: { id: z.string() },
+    annotations: { readOnlyHint: true },
+  }, async ({ id }) => guard(() => {
+    const doc = requireDoc(ctx);
+    const instance = node(doc, id);
+    if (instance.type !== 'instance') return fail(`${id} is not a component instance.`);
+
+    const def = doc.components?.[instance.componentRef ?? ''];
+    const expanded = expandInstance(doc, instance);
+    if (!def || !expanded) return fail(`Instance ${id} points at a component that no longer exists.`);
+
+    const parts: { defId: string; name: string; type: string; text?: string; overridden: boolean }[] = [];
+    const walk = (exp: NonNullable<typeof expanded>) => {
+      if (exp.defId) {
+        parts.push({
+          defId: exp.defId,
+          name: exp.node.name,
+          type: exp.node.type,
+          ...(exp.node.type === 'text' ? { text: exp.node.text ?? '' } : {}),
+          overridden: !!instance.overrides?.[exp.defId],
+        });
+      }
+      for (const child of exp.children) walk(child);
+    };
+    walk(expanded);
+
+    return json({ instanceId: id, component: { id: def.id, name: def.name }, overridableParts: parts });
+  }));
+
+  server.registerTool('detach_instance', {
+    title: 'Detach an instance',
+    description:
+      'Converts an instance into ordinary layers, baking in its overrides. Use it when one instance ' +
+      'needs to diverge further than overrides allow.',
+    inputSchema: { id: z.string() },
+  }, async ({ id }) => guard(() => {
+    const doc = requireDoc(ctx);
+    const instance = node(doc, id);
+    if (instance.type !== 'instance') return fail(`${id} is not a component instance.`);
+    if (!instance.parent) return fail(`${id} has no parent.`);
+
+    const nodes = detachedNodes(doc, instance, () => newId());
+    if (!nodes.length) return fail(`Could not expand ${id}.`);
+    const root = nodes.find((n) => n.parent === instance.parent)!;
+    const index = doc.nodes[instance.parent]!.children.indexOf(id);
+
+    commit(ctx, [
+      { t: 'remove', ids: [id] },
+      { t: 'insert', nodes, parent: instance.parent, index },
+    ]);
+    return json({ detached: id, newRoot: root.id, nodeCount: nodes.length });
+  }));
 }
 
 // ---------------------------------------------------------------------------

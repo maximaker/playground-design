@@ -2,13 +2,15 @@
  * The infinite canvas: pan, zoom, selection, dragging, resizing and drawing.
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   type Box, type NodeId, type Op, type SnapGuide,
   makeNode, boxOf, getArtboardPosition, getArtboardSize,
   DEFAULT_ARTBOARD_STYLES, defaultStylesFor, makeNote, notesOf,
 } from '@canvas/shared';
 import { useCanvas, getDoc, currentPage, topLevelSelection, getNodeById } from '../state/store.ts';
+import { resolveKey, treeNodeId } from '../state/keys.ts';
+import { artboardOf } from '@canvas/shared';
 import { Artboard } from './Artboard.tsx';
 import { NoteCard } from './NoteCard.tsx';
 import { Overlay } from './Overlay.tsx';
@@ -67,6 +69,45 @@ export function Canvas({ onContextMenu }: CanvasProps) {
   const [guides, setGuides] = useState<{ guides: SnapGuide[]; space: 'canvas' | NodeId } | null>(null);
 
   const page = currentPage();
+
+  // Only artboards near the viewport get a live iframe. Each one is a real
+  // document with its own layout and style engine, so a page with dozens of
+  // them would otherwise cost hundreds of megabytes and stall panning. This is
+  // the mitigation the PRD calls for against the iframe-per-artboard risk.
+  const visibleArtboards = useMemo(() => {
+    const doc = getDoc();
+    if (!doc || !page) return new Set<NodeId>();
+
+    const stage = containerRef.current?.getBoundingClientRect();
+    if (!stage) return new Set(page.artboards);
+
+    // A generous margin so panning does not reveal blank frames.
+    const margin = Math.max(stage.width, stage.height);
+    const left = (stage.left - viewport.x - margin) / viewport.zoom;
+    const top = (stage.top - viewport.y - margin) / viewport.zoom;
+    const right = (stage.right - viewport.x + margin) / viewport.zoom;
+    const bottom = (stage.bottom - viewport.y + margin) / viewport.zoom;
+
+    const near = new Set<NodeId>();
+    for (const id of page.artboards) {
+      const node = doc.nodes[id];
+      if (!node) continue;
+      const pos = getArtboardPosition(node);
+      const size = getArtboardSize(node);
+      if (pos.x + size.width < left || pos.x > right) continue;
+      if (pos.y + size.height < top || pos.y > bottom) continue;
+      near.add(id);
+    }
+
+    // Never unmount an artboard that holds the selection: measuring it drives
+    // the overlay, and it must stay live even if the user pans it off screen.
+    for (const id of selection) {
+      const artboard = artboardOf(doc, id);
+      if (artboard) near.add(artboard);
+    }
+    return near;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page, viewport.x, viewport.y, viewport.zoom, version, selection]);
 
   useEffect(() => {
     const el = containerRef.current;
@@ -199,8 +240,14 @@ export function Canvas({ onContextMenu }: CanvasProps) {
 
     // A plain click targets the outermost element inside the artboard; ⌘-click
     // reaches the deepest one, matching how every other design tool behaves.
+    // Inside a component instance the outermost thing is the instance itself,
+    // so a plain click selects that and ⌘-click reaches the part to override.
     let targetId = hit.nodeId;
     if (!e.metaKey && !e.ctrlKey) {
+      const instanceId = treeNodeId(targetId);
+      if (instanceId !== targetId) {
+        targetId = instanceId;
+      }
       let node = doc.nodes[targetId];
       while (node?.parent && node.parent !== hit.artboardId && !selection.includes(node.id)) {
         node = doc.nodes[node.parent];
@@ -470,6 +517,45 @@ export function Canvas({ onContextMenu }: CanvasProps) {
   const handleDraw = useCallback((d: Extract<Drag, { kind: 'draw' }>, e: React.PointerEvent) => {
     const doc = getDoc();
     const page = currentPage();
+
+  // Only artboards near the viewport get a live iframe. Each one is a real
+  // document with its own layout and style engine, so a page with dozens of
+  // them would otherwise cost hundreds of megabytes and stall panning. This is
+  // the mitigation the PRD calls for against the iframe-per-artboard risk.
+  const visibleArtboards = useMemo(() => {
+    const doc = getDoc();
+    if (!doc || !page) return new Set<NodeId>();
+
+    const stage = containerRef.current?.getBoundingClientRect();
+    if (!stage) return new Set(page.artboards);
+
+    // A generous margin so panning does not reveal blank frames.
+    const margin = Math.max(stage.width, stage.height);
+    const left = (stage.left - viewport.x - margin) / viewport.zoom;
+    const top = (stage.top - viewport.y - margin) / viewport.zoom;
+    const right = (stage.right - viewport.x + margin) / viewport.zoom;
+    const bottom = (stage.bottom - viewport.y + margin) / viewport.zoom;
+
+    const near = new Set<NodeId>();
+    for (const id of page.artboards) {
+      const node = doc.nodes[id];
+      if (!node) continue;
+      const pos = getArtboardPosition(node);
+      const size = getArtboardSize(node);
+      if (pos.x + size.width < left || pos.x > right) continue;
+      if (pos.y + size.height < top || pos.y > bottom) continue;
+      near.add(id);
+    }
+
+    // Never unmount an artboard that holds the selection: measuring it drives
+    // the overlay, and it must stay live even if the user pans it off screen.
+    for (const id of selection) {
+      const artboard = artboardOf(doc, id);
+      if (artboard) near.add(artboard);
+    }
+    return near;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page, viewport.x, viewport.y, viewport.zoom, version, selection]);
     if (!doc || !page) return;
 
     const vp = useCanvas.getState().viewport;
@@ -530,13 +616,12 @@ export function Canvas({ onContextMenu }: CanvasProps) {
   const onDoubleClick = useCallback((e: React.PointerEvent) => {
     const hit = hitTest(e.clientX, e.clientY);
     if (!hit) return;
-    const node = getNodeById(hit.nodeId);
-    if (node?.type === 'text') {
-      select([hit.nodeId]);
-      setEditingText(hit.nodeId);
-    } else if (node) {
-      select([hit.nodeId]);
-    }
+    // The hit id may be a composite key pointing inside a component instance,
+    // so it has to be resolved rather than looked up directly.
+    const resolved = resolveKey(getDoc(), hit.nodeId);
+    if (!resolved?.node) return;
+    select([hit.nodeId]);
+    if (resolved.node.type === 'text') setEditingText(hit.nodeId);
   }, [select, setEditingText]);
 
   if (!page) return <div className="canvas-empty">No page</div>;
@@ -570,7 +655,9 @@ export function Canvas({ onContextMenu }: CanvasProps) {
         className="canvas-world"
         style={{ transform: `translate(${viewport.x - origin.x}px, ${viewport.y - origin.y}px)` }}
       >
-        {page.artboards.map((id) => <Artboard key={id} id={id} />)}
+        {page.artboards.map((id) => (
+          <Artboard key={id} id={id} live={visibleArtboards.has(id)} />
+        ))}
         {notesOf(page).map((note) => <NoteCard key={note.id} note={note} />)}
       </div>
 
@@ -582,12 +669,14 @@ export function Canvas({ onContextMenu }: CanvasProps) {
   );
 }
 
-function resolveContainer(id: NodeId): NodeId {
-  let node = getNodeById(id);
-  while (node && (node.type === 'text' || node.type === 'image' || node.type === 'vector')) {
+function resolveContainer(key: string): NodeId {
+  // Drawing inside a component instance is not meaningful — the instance is a
+  // single node in the tree — so climb out to the nearest real container.
+  let node = getNodeById(treeNodeId(key));
+  while (node && (node.type === 'text' || node.type === 'image' || node.type === 'vector' || node.type === 'instance')) {
     node = getNodeById(node.parent ?? undefined);
   }
-  return node?.id ?? id;
+  return node?.id ?? treeNodeId(key);
 }
 
 function nodeSpecFor(tool: string, width: number, height: number) {

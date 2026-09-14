@@ -24,9 +24,16 @@ body { overflow: hidden; }
 [contenteditable] { outline: 2px solid #3b82f6; outline-offset: 1px; }
 `;
 
-interface Props { id: NodeId }
+interface Props {
+  id: NodeId;
+  /**
+   * Whether this artboard is near enough the viewport to render for real.
+   * Offscreen artboards keep their footprint and label but drop their iframe.
+   */
+  live: boolean;
+}
 
-export const Artboard = memo(function Artboard({ id }: Props) {
+export const Artboard = memo(function Artboard({ id, live }: Props) {
   const version = useCanvas((s) => s.version);
   const zoom = useCanvas((s) => s.viewport.zoom);
   const agentActivity = useCanvas((s) => s.agentActivity);
@@ -56,7 +63,7 @@ export const Artboard = memo(function Artboard({ id }: Props) {
   // Set up the iframe document once it exists, then portal the node tree in.
   useEffect(() => {
     const frame = frameRef.current;
-    if (!frame) return;
+    if (!frame) { setBody(null); return; }
     registerFrame(id, frame);
 
     const init = () => {
@@ -174,18 +181,27 @@ export const Artboard = memo(function Artboard({ id }: Props) {
           transformOrigin: 'top left',
         }}
       >
-        <iframe
-          ref={frameRef}
-          title={node.name}
-          width={width}
-          height={height}
-          // The iframe holds only document content, never third-party pages, and
-          // must stay same-origin so the editor can measure and hit-test it.
-          sandbox="allow-same-origin"
-          scrolling="no"
-          style={{ border: 0, display: 'block', width, height, background: '#fff' }}
-        />
-        {body && createPortal(<NodeView id={id} isRoot />, body)}
+        {live ? (
+          <>
+            <iframe
+              ref={frameRef}
+              title={node.name}
+              width={width}
+              height={height}
+              // The iframe holds only document content, never third-party pages,
+              // and must stay same-origin so the editor can measure and hit-test it.
+              sandbox="allow-same-origin"
+              scrolling="no"
+              style={{ border: 0, display: 'block', width, height, background: '#fff' }}
+            />
+            {body && createPortal(<NodeView id={id} isRoot />, body)}
+          </>
+        ) : (
+          <div
+            className="artboard-placeholder"
+            style={{ width, height, background: node.styles['background-color'] ?? '#fff' }}
+          />
+        )}
       </div>
     </div>
   );

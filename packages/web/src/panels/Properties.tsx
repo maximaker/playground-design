@@ -8,7 +8,8 @@
 
 import { useMemo } from 'react';
 import type { CanvasNode, NodeId, StyleMap } from '@canvas/shared';
-import { useCanvas, getDoc, getNodeById } from '../state/store.ts';
+import { useCanvas, getDoc } from '../state/store.ts';
+import { attrOps, resolveKey, resetOverrideOps } from '../state/keys.ts';
 import { Field, NumberInput, Row, Section, SegmentedControl, Select, TextInput, ColorInput } from '../ui/controls.tsx';
 import { ArrangeBar } from '../ui/ArrangeBar.tsx';
 
@@ -22,11 +23,16 @@ export function Properties() {
   const dispatch = useCanvas((s) => s.dispatch);
   const doc = getDoc();
 
-  const nodes = useMemo(
-    () => selection.map((id) => getNodeById(id)).filter((n): n is CanvasNode => !!n),
+  // Each selected key resolves to the node as rendered — with instance
+  // overrides already applied — plus where an edit to it should be written.
+  const resolved = useMemo(
+    () => selection.map((key) => ({ key, ...(resolveKey(doc, key) ?? {}) }))
+      .filter((r): r is { key: string } & NonNullable<ReturnType<typeof resolveKey>> => !!r.node),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [selection, version],
+    [selection, version, doc],
   );
+  const nodes = resolved.map((r) => r.node).filter((n): n is CanvasNode => !!n);
+  const insideInstance = resolved.some((r) => r.defId !== null);
 
   const tokens = useMemo(() => (doc?.tokens ?? [])
     .filter((t) => t.group === 'color')
@@ -60,10 +66,9 @@ export function Properties() {
   };
 
   const write = (styles: StyleMap) => {
-    dispatch([{
-      t: 'styles',
-      updates: nodes.map((n) => ({ id: n.id, styles, selector: activeVariant ?? undefined })),
-    }]);
+    // Routed through the key layer so an edit inside a component instance
+    // becomes an override rather than a change to every instance at once.
+    useCanvas.getState().setNodeStyles(selection, styles, activeVariant ?? undefined);
   };
 
   const set = (prop: string) => (value: string) => write({ [prop]: value === MIXED ? '' : value });
@@ -74,7 +79,7 @@ export function Properties() {
   const display = read('display');
   const isFlex = display.includes('flex');
   const isRow = (read('flex-direction') || 'row').startsWith('row');
-  const parent = first.parent ? getNodeById(first.parent) : undefined;
+  const parent = first.parent ? doc?.nodes[first.parent] : undefined;
   const parentIsFlex = (parent?.styles.display ?? '').includes('flex');
 
   const knownVariants = [...new Set(nodes.flatMap((n) => n.variants.map((v) => v.selector)))];
@@ -87,6 +92,21 @@ export function Properties() {
           <span className="prop-type">{nodes.length === 1 ? `${first.type} · ${first.tag}` : 'multiple'}</span>
         </div>
       </div>
+
+      {insideInstance && (
+        <div className="instance-banner">
+          <span>
+            Inside a component. Changes here apply to <strong>this instance only</strong>.
+          </span>
+          <button
+            className="button subtle"
+            onClick={() => {
+              const ops = resetOverrideOps(doc, selection);
+              if (ops.length) dispatch(ops);
+            }}
+          >Reset to component</button>
+        </div>
+      )}
 
       {nodes.length > 1 && <ArrangeBar ids={nodes.map((n) => n.id)} />}
 
@@ -134,7 +154,7 @@ export function Properties() {
               <Select
                 value={first.tag}
                 options={TAG_OPTIONS}
-                onCommit={(tag) => dispatch([{ t: 'tag', updates: [{ id: first.id, tag }] }])}
+                onCommit={(tag) => dispatch([{ t: 'tag', updates: [{ id: resolved[0]!.targetId, tag }] }])}
               />
             </Field>
           </Row>
@@ -145,7 +165,7 @@ export function Properties() {
                   <TextInput
                     value={first.attrs.src ?? ''}
                     placeholder="https://… or /assets/…"
-                    onCommit={(src) => dispatch([{ t: 'attrs', updates: [{ id: first.id, attrs: { src } }] }])}
+                    onCommit={(src) => dispatch(attrOps(doc, selection[0]!, { src }))}
                   />
                 </Field>
               </Row>
@@ -154,7 +174,7 @@ export function Properties() {
                   <TextInput
                     value={first.attrs.alt ?? ''}
                     placeholder="Describe the image"
-                    onCommit={(alt) => dispatch([{ t: 'attrs', updates: [{ id: first.id, attrs: { alt } }] }])}
+                    onCommit={(alt) => dispatch(attrOps(doc, selection[0]!, { alt }))}
                   />
                 </Field>
               </Row>
@@ -448,7 +468,7 @@ export function Properties() {
         </Row>
       </Section>
 
-      <RawCss nodes={nodes} activeVariant={activeVariant} />
+      <RawCss nodes={nodes} keys={selection} activeVariant={activeVariant} />
     </div>
   );
 }
@@ -462,8 +482,7 @@ function extractBlur(filter: string): string {
  * The escape hatch. Every property the panel does not expose is editable here,
  * which is what keeps the curated UI from becoming a cage.
  */
-function RawCss({ nodes, activeVariant }: { nodes: CanvasNode[]; activeVariant: string | null }) {
-  const dispatch = useCanvas((s) => s.dispatch);
+function RawCss({ nodes, keys, activeVariant }: { nodes: CanvasNode[]; keys: string[]; activeVariant: string | null }) {
   const version = useCanvas((s) => s.version);
   const single = nodes.length === 1 ? nodes[0]! : null;
 
@@ -499,7 +518,7 @@ function RawCss({ nodes, activeVariant }: { nodes: CanvasNode[]; activeVariant: 
           // Send removals explicitly, otherwise deleting a line would do nothing.
           const styles: StyleMap = { ...next };
           for (const key of Object.keys(prev)) if (!(key in next)) styles[key] = '';
-          dispatch([{ t: 'styles', updates: [{ id: single.id, styles, selector: activeVariant ?? undefined }] }]);
+          useCanvas.getState().setNodeStyles(keys, styles, activeVariant ?? undefined);
         }}
         onKeyDown={(e) => e.stopPropagation()}
       />

@@ -350,3 +350,129 @@ test('screenshot explains itself when no backend is available', async () => {
     assert.equal(content[0]!.type, 'image');
   }
 });
+
+// ---------------------------------------------------------------------------
+// Components
+// ---------------------------------------------------------------------------
+
+test('create_component replaces the source with an instance', async () => {
+  const doc = getDocument(docId)!;
+  const artboard = doc.pages[0]!.artboards[0]!;
+
+  const built = jsonOf<{ roots: { id: string }[] }>(await client.callTool({
+    name: 'write_html',
+    arguments: {
+      targetId: artboard,
+      html: `<div style="display:flex;padding:12px;background:#eee"><span>Reusable</span></div>`,
+    },
+  }));
+  const source = built.roots[0]!.id;
+
+  const created = jsonOf<{ componentId: string; instanceId: string; definitionRoot: string }>(
+    await client.callTool({ name: 'create_component', arguments: { id: source, name: 'Chip' } }),
+  );
+
+  const after = getDocument(docId)!;
+  assert.equal(after.nodes[source], undefined, 'the original subtree is replaced');
+  assert.equal(after.nodes[created.instanceId]!.type, 'instance');
+  assert.equal(after.components![created.componentId]!.name, 'Chip');
+  // The definition lives in the document but on no page, so it is not on canvas.
+  assert.ok(after.nodes[created.definitionRoot]);
+  assert.ok(!after.pages[0]!.artboards.includes(created.definitionRoot));
+});
+
+test('list_components reports instances and structure', async () => {
+  const out = jsonOf<{ components: { name: string; instances: number; structure: string }[] }>(
+    await client.callTool({ name: 'list_components', arguments: {} }),
+  );
+  const chip = out.components.find((c) => c.name === 'Chip')!;
+  assert.equal(chip.instances, 1);
+  assert.match(chip.structure, /frame#/);
+});
+
+test('insert_instance and get_instance round-trip', async () => {
+  const doc = getDocument(docId)!;
+  const artboard = doc.pages[0]!.artboards[0]!;
+  const list = jsonOf<{ components: { id: string }[] }>(await client.callTool({ name: 'list_components', arguments: {} }));
+  const componentId = list.components[0]!.id;
+
+  const inserted = jsonOf<{ created: string[] }>(await client.callTool({
+    name: 'insert_instance', arguments: { componentId, parentId: artboard, count: 2 },
+  }));
+  assert.equal(inserted.created.length, 2);
+
+  const info = jsonOf<{ overridableParts: { defId: string; type: string; text?: string }[] }>(
+    await client.callTool({ name: 'get_instance', arguments: { id: inserted.created[0]! } }),
+  );
+  assert.ok(info.overridableParts.some((p) => p.type === 'text' && p.text === 'Reusable'));
+});
+
+test('set_override changes one instance only', async () => {
+  const list = jsonOf<{ components: { id: string }[] }>(await client.callTool({ name: 'list_components', arguments: {} }));
+  const componentId = list.components[0]!.id;
+  const doc = getDocument(docId)!;
+  const instances = Object.values(doc.nodes).filter((n) => n.componentRef === componentId);
+  assert.ok(instances.length >= 2);
+
+  const info = jsonOf<{ overridableParts: { defId: string; type: string }[] }>(
+    await client.callTool({ name: 'get_instance', arguments: { id: instances[0]!.id } }),
+  );
+  const textPart = info.overridableParts.find((p) => p.type === 'text')!;
+
+  await client.callTool({
+    name: 'set_override',
+    arguments: { updates: [{ instanceId: instances[0]!.id, defId: textPart.defId, text: 'Only this one' }] },
+  });
+
+  const first = jsonOf<{ overridableParts: { defId: string; text?: string }[] }>(
+    await client.callTool({ name: 'get_instance', arguments: { id: instances[0]!.id } }),
+  );
+  const second = jsonOf<{ overridableParts: { defId: string; text?: string }[] }>(
+    await client.callTool({ name: 'get_instance', arguments: { id: instances[1]!.id } }),
+  );
+  assert.equal(first.overridableParts.find((p) => p.defId === textPart.defId)!.text, 'Only this one');
+  assert.equal(second.overridableParts.find((p) => p.defId === textPart.defId)!.text, 'Reusable');
+});
+
+test('set_override rejects a defId that is not in the definition', async () => {
+  const doc = getDocument(docId)!;
+  const instance = Object.values(doc.nodes).find((n) => n.type === 'instance')!;
+  const res = await client.callTool({
+    name: 'set_override',
+    arguments: { updates: [{ instanceId: instance.id, defId: 'n_nope', text: 'x' }] },
+  });
+  assert.ok(isError(res));
+  assert.match(textOf(res), /get_instance/);
+});
+
+test('editing the component updates every instance', async () => {
+  const list = jsonOf<{ components: { id: string; root: string }[] }>(
+    await client.callTool({ name: 'list_components', arguments: {} }),
+  );
+  const def = list.components[0]!;
+
+  await client.callTool({
+    name: 'update_styles',
+    arguments: { updates: [{ id: def.root, styles: { 'border-radius': '999px' } }] },
+  });
+
+  const doc = getDocument(docId)!;
+  const instance = Object.values(doc.nodes).find((n) => n.componentRef === def.id)!;
+  const { html } = await import('@canvas/shared').then((m) => m.emitHtml(doc, instance.id, { mode: 'inline' }));
+  assert.match(html, /border-radius:999px/);
+});
+
+test('detach_instance bakes in overrides and drops the link', async () => {
+  const doc = getDocument(docId)!;
+  const instance = Object.values(doc.nodes).find((n) => n.type === 'instance' && n.overrides && Object.keys(n.overrides).length)!;
+  const res = jsonOf<{ newRoot: string; nodeCount: number }>(
+    await client.callTool({ name: 'detach_instance', arguments: { id: instance.id } }),
+  );
+
+  const after = getDocument(docId)!;
+  assert.equal(after.nodes[instance.id], undefined);
+  const root = after.nodes[res.newRoot]!;
+  assert.equal(root.componentRef, undefined);
+  const text = Object.values(after.nodes).find((n) => n.text === 'Only this one');
+  assert.ok(text, 'the override survived detaching');
+});

@@ -7,7 +7,7 @@
 
 import {
   type NodeId, type Op, type StyleMap,
-  cloneSubtree, makeNode, defaultStylesFor, getArtboardPosition,
+  cloneSubtree, makeNode, defaultStylesFor, detachedNodes, getArtboardPosition, newId,
 } from '@canvas/shared';
 import { useCanvas, getDoc, currentPage, topLevelSelection } from '../state/store.ts';
 import { nodeRect } from '../canvas/registry.ts';
@@ -186,6 +186,88 @@ function fitBox(x: number, y: number, width: number, height: number): void {
   });
 }
 
+
+// ---------------------------------------------------------------------------
+// Components
+// ---------------------------------------------------------------------------
+
+/**
+ * Turns the selection into a component and replaces it with an instance.
+ *
+ * The definition's nodes are moved out of the page rather than copied, so the
+ * thing on screen is the thing that was just made reusable — no silent divergence
+ * between "the component" and "what I selected".
+ */
+export function createComponentFromSelection(): void {
+  const doc = getDoc();
+  const { selection, dispatch, select, toast } = useCanvas.getState();
+  if (!doc || !selection.length) return;
+
+  const ids = topLevelSelection(selection);
+  if (ids.length !== 1) { toast('Select a single layer to turn into a component', 'error'); return; }
+
+  const source = doc.nodes[ids[0]!];
+  if (!source) return;
+  if (source.type === 'artboard') { toast('Artboards cannot be components — select something inside one', 'error'); return; }
+  if (source.type === 'instance') { toast('That is already a component instance', 'error'); return; }
+  if (!source.parent) { toast('Select a layer inside an artboard', 'error'); return; }
+
+  const name = window.prompt('Component name', source.name)?.trim();
+  if (!name) return;
+
+  const parent = source.parent;
+  const index = doc.nodes[parent]!.children.indexOf(source.id);
+
+  // The definition is a copy; the original is replaced by an instance so the
+  // canvas keeps rendering the same pixels.
+  const { nodes: definition } = cloneSubtree(doc, source.id);
+  const root = definition[0]!;
+  root.parent = null;
+  root.name = name;
+
+  const componentId = newId('cmp');
+  const instance = makeNode({ type: 'instance', name, componentRef: componentId });
+
+  dispatch([
+    // Definition nodes live in the document but on no page, so they are not
+    // drawn on the canvas and are not exported unless an instance uses them.
+    { t: 'insert', nodes: definition, parent: null, index: 0, page: '__definitions__' },
+    { t: 'component', action: 'add', component: { id: componentId, name, root: root.id } },
+    { t: 'remove', ids: [source.id] },
+    { t: 'insert', nodes: [instance], parent, index },
+  ]);
+  select([instance.id]);
+  toast(`Created component "${name}"`, 'success');
+}
+
+/** Converts instances back into ordinary layers, baking in their overrides. */
+export function detachSelection(): void {
+  const doc = getDoc();
+  const { selection, dispatch, select, toast } = useCanvas.getState();
+  if (!doc) return;
+
+  const ops: Op[] = [];
+  const newRoots: NodeId[] = [];
+
+  for (const id of topLevelSelection(selection)) {
+    const instance = doc.nodes[id];
+    if (instance?.type !== 'instance' || !instance.parent) continue;
+
+    const nodes = detachedNodes(doc, instance, () => newId());
+    if (!nodes.length) continue;
+    const root = nodes.find((n) => n.parent === instance.parent)!;
+    const index = doc.nodes[instance.parent]!.children.indexOf(id);
+
+    ops.push({ t: 'remove', ids: [id] });
+    ops.push({ t: 'insert', nodes, parent: instance.parent, index });
+    newRoots.push(root.id);
+  }
+
+  if (!ops.length) { toast('Select a component instance to detach', 'error'); return; }
+  dispatch(ops);
+  select(newRoots);
+  toast('Detached from component', 'success');
+}
 
 // ---------------------------------------------------------------------------
 // Style clipboard

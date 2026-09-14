@@ -9,6 +9,7 @@
  */
 
 import type { CanvasDocument, CanvasNode, NodeId, StyleMap } from './model.ts';
+import { type ExpandedNode, expandNode } from './components.ts';
 
 export type JsxFormat = 'tailwind' | 'inline';
 
@@ -30,9 +31,9 @@ const ATTR_MAP: Record<string, string> = {
 export function emitJsx(doc: CanvasDocument, rootId: NodeId, opts: JsxOptions = {}): string {
   const format = opts.format ?? 'tailwind';
 
-  const render = (id: NodeId, depth: number): string => {
-    const node = doc.nodes[id];
-    if (!node || !node.visible) return '';
+  const render = (expanded: ExpandedNode | null, depth: number): string => {
+    if (!expanded) return '';
+    const node = expanded.node;
     const pad = '  '.repeat(depth);
     const props = propsFor(node, format);
     const tag = node.tag;
@@ -47,12 +48,13 @@ export function emitJsx(doc: CanvasDocument, rootId: NodeId, opts: JsxOptions = 
       return `${pad}<${tag}${props}>${escapeJsxText(node.text ?? '')}</${tag}>`;
     }
 
-    const kids = node.children.map((c) => render(c, depth + 1)).filter(Boolean);
+    const kids = expanded.children.map((c) => render(c, depth + 1)).filter(Boolean);
     if (!kids.length) return `${pad}<${tag}${props} />`;
     return `${pad}<${tag}${props}>\n${kids.join('\n')}\n${pad}</${tag}>`;
   };
 
-  const body = render(rootId, opts.componentName ? 2 : 0);
+  const root = doc.nodes[rootId];
+  const body = root ? render(expandNode(doc, root), opts.componentName ? 2 : 0) : '';
   if (!opts.componentName) return body;
   return `export function ${opts.componentName}() {\n  return (\n${body}\n  );\n}\n`;
 }
@@ -62,6 +64,8 @@ function propsFor(node: CanvasNode, format: JsxFormat): string {
 
   for (const [k, v] of Object.entries(node.attrs)) {
     if (k.startsWith('data-x') || k.startsWith('data-y')) continue;
+    // Slot markers are authoring metadata, not output.
+    if (k === 'data-slot' || k === 'data-slot-target') continue;
     const name = ATTR_MAP[k] ?? k;
     props.push(`${name}={${JSON.stringify(v)}}`);
   }

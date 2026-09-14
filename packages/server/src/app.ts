@@ -12,8 +12,8 @@ import { existsSync } from 'node:fs';
 import { relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  emitHtml, emitJsx, emitStandalone, parseHtml,
-  type CanvasDocument, getNode,
+  emitHtml, emitJsx, emitStandalone, parseHtml, makeNode,
+  DEFAULT_ARTBOARD_STYLES, type CanvasDocument, getNode,
 } from '@canvas/shared';
 import {
   applyOps, createDocument, deleteDocument, getDocument, history, listDocuments,
@@ -23,6 +23,8 @@ import { peersOf, hasLiveTab } from './realtime.ts';
 import { createConnection, listConnections, resolveConnection, revokeConnection } from './connections.ts';
 import { handleMcpRequest } from './mcp.ts';
 import { getAsset, storeAsset, AssetError, MAX_ASSET_BYTES } from './assets.ts';
+import { importUrl, ImportError } from './import.ts';
+import { getTemplate, templateSummaries, type Template } from './templates.ts';
 import { renderNode } from './render.ts';
 
 const PORT = Number(process.env.PORT ?? 4000);
@@ -33,6 +35,7 @@ const app = new Hono();
 app.use('*', cors({ origin: (o) => o ?? '*', credentials: true }));
 
 app.onError((err, c) => {
+  if (err instanceof ImportError) return c.json({ error: err.message }, 422);
   if (err instanceof StoreError) return c.json({ error: err.message }, 409);
   if (err instanceof AssetError) return c.json({ error: err.message }, 413);
   console.error('[canvas]', err);
@@ -49,9 +52,23 @@ api.get('/health', (c) => c.json({ ok: true, version: '0.1.0' }));
 
 api.get('/documents', (c) => c.json({ documents: listDocuments() }));
 
+api.get('/templates', (c) => c.json({ templates: templateSummaries() }));
+
 api.post('/documents', async (c) => {
-  const body = await c.req.json<{ name?: string; html?: string }>().catch(() => ({} as { name?: string; html?: string }));
-  const doc = createDocument(body.name?.trim() || 'Untitled');
+  const body = await c.req
+    .json<{ name?: string; html?: string; template?: string }>()
+    .catch(() => ({} as { name?: string; html?: string; template?: string }));
+
+  const template = body.template ? getTemplate(body.template) : undefined;
+  if (body.template && !template) {
+    return c.json({ error: `No template "${body.template}". Available: ${templateSummaries().map((t) => t.id).join(', ')}` }, 400);
+  }
+
+  const doc = createDocument(body.name?.trim() || template?.name || 'Untitled');
+  // A brand new document has only the seeded defaults, and the kit is the whole
+  // point of choosing it — so it replaces them outright rather than losing every
+  // colour to a name collision.
+  if (template) applyTemplate(doc.id, template, { replaceTokens: true });
 
   // Seeding from HTML at creation time is what makes fully headless agent
   // sessions practical: create a document with content in one call.
@@ -67,6 +84,66 @@ api.post('/documents', async (c) => {
   }
   return c.json({ document: getDocument(doc.id), url: `${PUBLIC_URL}/d/${doc.id}` }, 201);
 });
+
+api.post('/documents/:id/template', async (c) => {
+  const doc = requireDocument(c.req.param('id'));
+  const body = await c.req.json<{ template: string; replaceTokens?: boolean }>();
+  const template = getTemplate(body.template);
+  if (!template) return c.json({ error: `No template "${body.template}"` }, 400);
+  const result = applyTemplate(doc.id, template, { replaceTokens: body.replaceTokens === true });
+  return c.json({ applied: template.id, ...result }, 201);
+});
+
+/**
+ * Applies a starter kit.
+ *
+ * `replaceTokens` decides who wins a name collision. On a new document the kit
+ * should win, or every colour it defines is shadowed by the seeded defaults and
+ * the kit renders in the wrong palette. On an existing document the document
+ * wins, because its tokens are real work.
+ */
+function applyTemplate(
+  docId: string,
+  template: Template,
+  opts: { replaceTokens?: boolean } = {},
+): { artboards: string[]; tokensAdded: string[]; tokensSkipped: string[] } {
+  const doc = getDocument(docId)!;
+  const page = doc.pages[0]!;
+
+  const existing = new Map(doc.tokens.map((t) => [t.name, t]));
+  const tokensAdded: string[] = [];
+  const tokensSkipped: string[] = [];
+
+  for (const token of template.tokens) {
+    if (existing.has(token.name) && !opts.replaceTokens) { tokensSkipped.push(token.name); continue; }
+    existing.set(token.name, token);
+    tokensAdded.push(token.name);
+  }
+
+  applyOps(docId, [{ op: { t: 'tokens', tokens: [...existing.values()] }, origin: { kind: 'system', id: 'template' } }]);
+
+  const created: string[] = [];
+  for (const spec of template.artboards) {
+    const artboard = makeNode({
+      type: 'artboard',
+      name: `${template.name} — ${spec.name}`,
+      styles: { ...DEFAULT_ARTBOARD_STYLES, ...spec.styles, width: `${spec.width}px`, height: `${spec.height}px` },
+      attrs: { 'data-x': String(nextX(getDocument(docId)!, page.artboards)), 'data-y': '0' },
+    });
+    applyOps(docId, [{
+      op: { t: 'insert', nodes: [artboard], parent: null, index: page.artboards.length, page: page.id },
+      origin: { kind: 'system', id: 'template' },
+    }]);
+
+    const parsed = parseHtml(spec.html);
+    applyOps(docId, [{
+      op: { t: 'insert', nodes: parsed.nodes, parent: artboard.id, index: 0 },
+      origin: { kind: 'system', id: 'template', label: `${template.name} kit` },
+    }]);
+    created.push(artboard.id);
+  }
+  return { artboards: created, tokensAdded, tokensSkipped };
+}
 
 api.get('/documents/:id', (c) => {
   const doc = getDocument(c.req.param('id'));
@@ -137,6 +214,53 @@ api.get('/documents/:id/export/:nodeId', async (c) => {
     'Content-Disposition': `attachment; filename="${name}.${format}"`,
   });
 });
+
+api.post('/documents/:id/import', async (c) => {
+  const doc = requireDocument(c.req.param('id'));
+  const body = await c.req.json<{ url: string; artboardId?: string; pageId?: string }>();
+  const result = await importUrl(body.url);
+
+  const page = doc.pages.find((p) => p.id === body.pageId) ?? doc.pages[0]!;
+  let artboardId = body.artboardId;
+
+  if (!artboardId) {
+    // A fresh artboard, sized to a desktop viewport, keeps the import from
+    // landing inside unrelated work.
+    const artboard = makeNode({
+      type: 'artboard',
+      name: result.title.slice(0, 40),
+      styles: { ...DEFAULT_ARTBOARD_STYLES, width: '1440px', height: '1200px', overflow: 'hidden' },
+      attrs: { 'data-x': String(nextX(doc, page.artboards)), 'data-y': '0' },
+    });
+    applyOps(doc.id, [{
+      op: { t: 'insert', nodes: [artboard], parent: null, index: page.artboards.length, page: page.id },
+      origin: { kind: 'system', id: 'import' },
+    }]);
+    artboardId = artboard.id;
+  }
+
+  applyOps(doc.id, [{
+    op: { t: 'insert', nodes: result.nodes, parent: artboardId, index: 0 },
+    origin: { kind: 'system', id: 'import', label: `Import ${result.url}` },
+  }]);
+
+  return c.json({
+    artboardId,
+    nodeCount: result.nodes.length,
+    title: result.title,
+    warnings: result.warnings,
+  }, 201);
+});
+
+function nextX(doc: CanvasDocument, artboards: string[]): number {
+  let maxRight = 0;
+  for (const id of artboards) {
+    const node = doc.nodes[id];
+    if (!node) continue;
+    maxRight = Math.max(maxRight, Number(node.attrs['data-x'] ?? 0) + (parseFloat(node.styles.width ?? '1440') || 1440));
+  }
+  return artboards.length ? maxRight + 120 : 0;
+}
 
 // ---------------------------------------------------------------------------
 // Agent connections

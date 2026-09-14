@@ -11,6 +11,7 @@ import {
   type CanvasDocument, type CanvasNode, type NodeId, type NodeType, type StyleMap,
   makeNode, newId, defaultStylesFor,
 } from './model.ts';
+import { type ExpandedNode, expandNode } from './components.ts';
 import {
   parseDeclarations, inlineDeclarations, serializeDeclarations, parseStylesheet,
   specificity, tokenToCssVar,
@@ -19,15 +20,41 @@ import {
 const VOID_TAGS = new Set(['img', 'br', 'hr', 'input', 'source', 'track', 'wbr', 'meta', 'link']);
 
 const TEXTUAL_TAGS = new Set([
-  'p', 'span', 'a', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'li', 'label',
-  'strong', 'em', 'b', 'i', 'small', 'code', 'blockquote', 'figcaption', 'td', 'th',
+  'p', 'span', 'a', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'li',
+  'strong', 'em', 'b', 'i', 'small', 'code', 'blockquote', 'figcaption',
 ]);
 
 /** Tags we keep verbatim as containers even though they are not <div>. */
 const CONTAINER_TAGS = new Set([
   'div', 'section', 'main', 'header', 'footer', 'nav', 'aside', 'article', 'ul', 'ol',
-  'form', 'button', 'table', 'thead', 'tbody', 'tr', 'figure', 'video', 'canvas', 'details', 'summary',
+  'form', 'button', 'table', 'thead', 'tbody', 'tfoot', 'tr', 'figure', 'video', 'canvas',
+  'details', 'summary', 'picture', 'label', 'fieldset', 'colgroup',
 ]);
+
+/**
+ * The display value a tag has by default in a browser.
+ *
+ * Without this, forcing `display: block` on every container destroys table
+ * layouts — and a great deal of the real web, especially older pages, is laid
+ * out with tables. Only applied when the author set no display of their own.
+ */
+const DEFAULT_DISPLAY: Record<string, string> = {
+  table: 'table',
+  thead: 'table-header-group',
+  tbody: 'table-row-group',
+  tfoot: 'table-footer-group',
+  tr: 'table-row',
+  td: 'table-cell',
+  th: 'table-cell',
+  colgroup: 'table-column-group',
+  col: 'table-column',
+  caption: 'table-caption',
+  li: 'list-item',
+  button: 'inline-block',
+  label: 'inline',
+  picture: 'inline',
+  summary: 'list-item',
+};
 
 export function nodeTypeForTag(tag: string, hasElementChildren: boolean): NodeType {
   const t = tag.toLowerCase();
@@ -69,11 +96,13 @@ export function emitHtml(doc: CanvasDocument, rootId: NodeId, opts: EmitOptions 
     if (vars) cssBlocks.push(vars);
   }
 
-  const emitNode = (id: NodeId, depth: number): string => {
-    const node = doc.nodes[id];
-    if (!node || !node.visible) return '';
+  const emitNode = (expanded: ExpandedNode | null, depth: number): string => {
+    if (!expanded) return '';
+    const node = expanded.node;
     const pad = pretty ? '  '.repeat(depth) : '';
-    const cls = `c-${node.id.replace(/[^a-z0-9_-]/gi, '')}`;
+    // Definition nodes share ids across instances, so class names are derived
+    // from the expanded key to keep per-instance variants distinct.
+    const cls = `c-${expanded.key.replace(/[^a-z0-9_-]/gi, '-')}`;
 
     const attrs: string[] = [];
     for (const [k, v] of Object.entries(node.attrs)) {
@@ -101,13 +130,17 @@ export function emitHtml(doc: CanvasDocument, rootId: NodeId, opts: EmitOptions 
     if (node.type === 'vector') return `${pad}<${tag}${attrStr}>${node.text ?? ''}</${tag}>`;
     if (node.type === 'text') return `${pad}<${tag}${attrStr}>${escapeText(node.text ?? '')}</${tag}>`;
 
-    const kids = node.children.map((c) => emitNode(c, depth + 1)).filter(Boolean);
+    const kids = expanded.children.map((c) => emitNode(c, depth + 1)).filter(Boolean);
     if (kids.length === 0) return `${pad}<${tag}${attrStr}></${tag}>`;
     const sep = pretty ? '\n' : '';
     return `${pad}<${tag}${attrStr}>${sep}${kids.join(sep)}${sep}${pad}</${tag}>`;
   };
 
-  return { html: emitNode(rootId, 0), css: cssBlocks.join('\n\n') };
+  const root = doc.nodes[rootId];
+  return {
+    html: root ? emitNode(expandNode(doc, root), 0) : '',
+    css: cssBlocks.join('\n\n'),
+  };
 }
 
 export function tokenCss(doc: CanvasDocument, theme = 'default'): string {
@@ -223,8 +256,13 @@ export function parseHtml(html: string, opts: ParseOptions = {}): ParseResult {
     const { base, variants } = resolveStyles(el, rules);
     const styles: StyleMap = { ...(parent === null ? opts.baseStyles ?? {} : {}), ...base };
 
-    // Frames get a sane default display so pasted markup does not collapse.
-    if (type === 'frame' && !styles.display && CONTAINER_TAGS.has(tag)) styles.display = 'block';
+    // Give containers the display they would have in a browser, so pasted or
+    // imported markup lays out the way it did on the page it came from.
+    if (type === 'frame' && !styles.display) {
+      const fallback = DEFAULT_DISPLAY[tag];
+      if (fallback) styles.display = fallback;
+      else if (CONTAINER_TAGS.has(tag)) styles.display = 'block';
+    }
 
     const node = makeNode({
       id: newId(),
