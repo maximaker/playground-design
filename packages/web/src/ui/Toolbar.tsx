@@ -10,6 +10,7 @@ const TOOLS: { tool: Tool; label: string; key: string; title: string }[] = [
   { tool: 'rect', label: '◼', key: 'R', title: 'Rectangle' },
   { tool: 'ellipse', label: '⬤', key: 'O', title: 'Ellipse' },
   { tool: 'image', label: '🖼', key: 'I', title: 'Image' },
+  { tool: 'note', label: '🗒', key: 'N', title: 'Prompt card — leave a note or ask an agent' },
 ];
 
 export function Toolbar() {

@@ -56,6 +56,77 @@ export interface Page {
   name: string;
   /** Root-level artboard node ids, in stacking order. */
   artboards: NodeId[];
+  /** Canvas annotations. Not part of the design tree, so they never export. */
+  notes?: Note[];
+}
+
+/**
+ * A prompt card: a sticky note on the canvas that can be handed to an agent.
+ *
+ * This is what turns the canvas into a workspace rather than a design file with
+ * a chat box bolted on. A note sits next to the thing it is about, carries the
+ * nodes it refers to, and has a lifecycle an agent can pick up and answer.
+ */
+export interface Note {
+  id: string;
+  /** Canvas-space position and size. */
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  text: string;
+  color: NoteColor;
+  /**
+   * `idle` is a plain note. `queued` means a human asked for an agent to act on
+   * it; an agent claims it (`running`) and finishes it (`done`).
+   */
+  status: NoteStatus;
+  /** Nodes the note is about — an agent should read these first. */
+  targets: NodeId[];
+  author?: string;
+  /** Set by the agent when it finishes. */
+  response?: string;
+  /** Label of the agent that claimed it, for the UI. */
+  claimedBy?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export type NoteStatus = 'idle' | 'queued' | 'running' | 'done';
+export type NoteColor = 'yellow' | 'blue' | 'green' | 'pink' | 'purple';
+
+export const NOTE_COLORS: Record<NoteColor, { bg: string; border: string; fg: string }> = {
+  yellow: { bg: '#fef3c7', border: '#fcd34d', fg: '#78350f' },
+  blue: { bg: '#dbeafe', border: '#93c5fd', fg: '#1e3a8a' },
+  green: { bg: '#dcfce7', border: '#86efac', fg: '#14532d' },
+  pink: { bg: '#fce7f3', border: '#f9a8d4', fg: '#831843' },
+  purple: { bg: '#ede9fe', border: '#c4b5fd', fg: '#4c1d95' },
+};
+
+export const DEFAULT_NOTE_SIZE = { width: 260, height: 160 };
+
+export function makeNote(partial: Partial<Note> = {}): Note {
+  const now = Date.now();
+  return {
+    id: partial.id ?? newId('note'),
+    x: partial.x ?? 0,
+    y: partial.y ?? 0,
+    width: partial.width ?? DEFAULT_NOTE_SIZE.width,
+    height: partial.height ?? DEFAULT_NOTE_SIZE.height,
+    text: partial.text ?? '',
+    color: partial.color ?? 'yellow',
+    status: partial.status ?? 'idle',
+    targets: partial.targets ?? [],
+    author: partial.author,
+    response: partial.response,
+    claimedBy: partial.claimedBy,
+    createdAt: partial.createdAt ?? now,
+    updatedAt: partial.updatedAt ?? now,
+  };
+}
+
+export function notesOf(page: Page | undefined): Note[] {
+  return page?.notes ?? [];
 }
 
 export type TokenGroup = 'color' | 'space' | 'radius' | 'font' | 'shadow' | 'duration';

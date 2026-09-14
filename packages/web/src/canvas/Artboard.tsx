@@ -31,7 +31,6 @@ export const Artboard = memo(function Artboard({ id }: Props) {
   const zoom = useCanvas((s) => s.viewport.zoom);
   const agentActivity = useCanvas((s) => s.agentActivity);
   const selection = useCanvas((s) => s.selection);
-  const select = useCanvas((s) => s.select);
   const dispatch = useCanvas((s) => s.dispatch);
 
   const frameRef = useRef<HTMLIFrameElement | null>(null);
@@ -130,17 +129,25 @@ export const Artboard = memo(function Artboard({ id }: Props) {
     >
       <div
         className="artboard-label"
+        // The canvas handles pointerdown here (see `data-artboard-label`) so the
+        // label is a drag handle for the whole artboard, the way it is in every
+        // other design tool.
+        data-artboard-label={id}
         style={{ color: isSelected ? '#3b82f6' : undefined }}
-        onPointerDown={(e) => { e.stopPropagation(); select([id], e.shiftKey); }}
         onDoubleClick={(e) => {
+          e.stopPropagation();
           const el = e.currentTarget;
           el.contentEditable = 'true';
           el.focus();
-          document.execCommand('selectAll');
+          const range = document.createRange();
+          range.selectNodeContents(el);
+          const sel = window.getSelection();
+          sel?.removeAllRanges();
+          sel?.addRange(range);
         }}
         onBlur={(e) => {
           e.currentTarget.contentEditable = 'false';
-          rename(e.currentTarget.textContent ?? '');
+          rename(e.currentTarget.textContent?.replace(/\s*\d+\s*×\s*\d+\s*$/, '') ?? '');
         }}
         onKeyDown={(e) => {
           if (e.key === 'Enter') { e.preventDefault(); e.currentTarget.blur(); }
@@ -148,7 +155,7 @@ export const Artboard = memo(function Artboard({ id }: Props) {
         }}
         suppressContentEditableWarning
       >
-        {node.name}
+        <span className="artboard-name">{node.name}</span>
         <span className="artboard-size">{Math.round(width)} × {Math.round(height)}</span>
       </div>
 

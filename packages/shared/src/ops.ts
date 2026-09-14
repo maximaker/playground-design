@@ -12,7 +12,7 @@
 
 import {
   type CanvasDocument, type CanvasNode, type NodeId, type StyleMap, type Page,
-  type Token, descendants, isAncestorOf, newId,
+  type Token, type Note, descendants, isAncestorOf, makeNote, newId,
 } from './model.ts';
 
 export type Op =
@@ -27,7 +27,8 @@ export type Op =
   | { t: 'tag'; updates: { id: NodeId; tag: string }[] }
   | { t: 'doc'; name?: string }
   | { t: 'tokens'; tokens: Token[] }
-  | { t: 'page'; action: 'add' | 'remove' | 'rename'; page: Page };
+  | { t: 'page'; action: 'add' | 'remove' | 'rename'; page: Page }
+  | { t: 'note'; action: 'add' | 'update' | 'remove'; pageId: string; note: Partial<Note> & { id: string } };
 
 export interface OpEnvelope {
   op: Op;
@@ -56,6 +57,7 @@ export function applyOp(doc: CanvasDocument, op: Op): Op {
     case 'doc': return applyDocMeta(doc, op);
     case 'tokens': return applyTokens(doc, op);
     case 'page': return applyPage(doc, op);
+    case 'note': return applyNote(doc, op);
   }
 }
 
@@ -272,6 +274,38 @@ function applyPage(doc: CanvasDocument, op: Extract<Op, { t: 'page' }>): Op {
   const before = { ...page };
   page.name = op.page.name;
   return { t: 'page', action: 'rename', page: before };
+}
+
+function applyNote(doc: CanvasDocument, op: Extract<Op, { t: 'note' }>): Op {
+  const page = doc.pages.find((p) => p.id === op.pageId);
+  if (!page) throw new OpError(`page ${op.pageId} not found`);
+  if (!page.notes) page.notes = [];
+
+  const index = page.notes.findIndex((n) => n.id === op.note.id);
+
+  if (op.action === 'add') {
+    if (index >= 0) throw new OpError(`note ${op.note.id} already exists`);
+    page.notes.push(makeNote(op.note));
+    return { t: 'note', action: 'remove', pageId: op.pageId, note: { id: op.note.id } };
+  }
+
+  if (op.action === 'remove') {
+    if (index < 0) throw new OpError(`note ${op.note.id} not found`);
+    const [removed] = page.notes.splice(index, 1);
+    return { t: 'note', action: 'add', pageId: op.pageId, note: removed! };
+  }
+
+  if (index < 0) throw new OpError(`note ${op.note.id} not found`);
+  const current = page.notes[index]!;
+  // The inverse restores exactly the fields this update touched, so undoing a
+  // text edit does not also revert a position set by someone else.
+  const before: Partial<Note> & { id: string } = { id: current.id };
+  for (const key of Object.keys(op.note) as (keyof Note)[]) {
+    if (key === 'id') continue;
+    (before as Record<string, unknown>)[key] = current[key];
+  }
+  page.notes[index] = { ...current, ...op.note, updatedAt: Date.now() };
+  return { t: 'note', action: 'update', pageId: op.pageId, note: before };
 }
 
 function clamp(n: number, lo: number, hi: number): number {

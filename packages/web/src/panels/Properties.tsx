@@ -10,6 +10,7 @@ import { useMemo } from 'react';
 import type { CanvasNode, NodeId, StyleMap } from '@canvas/shared';
 import { useCanvas, getDoc, getNodeById } from '../state/store.ts';
 import { Field, NumberInput, Row, Section, SegmentedControl, Select, TextInput, ColorInput } from '../ui/controls.tsx';
+import { ArrangeBar } from '../ui/ArrangeBar.tsx';
 
 const MIXED = '—'; // em dash: "these nodes disagree"
 
@@ -86,6 +87,8 @@ export function Properties() {
           <span className="prop-type">{nodes.length === 1 ? `${first.type} · ${first.tag}` : 'multiple'}</span>
         </div>
       </div>
+
+      {nodes.length > 1 && <ArrangeBar ids={nodes.map((n) => n.id)} />}
 
       <div className="variant-bar" title="Which state or breakpoint you are editing">
         <button className={!activeVariant ? 'is-active' : ''} onClick={() => setActiveVariant(null)}>Base</button>

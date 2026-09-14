@@ -13,7 +13,7 @@ import { z } from 'zod';
 import {
   type CanvasDocument, type CanvasNode, type NodeId, type Op, type OpEnvelope, type StyleMap,
   applyOp, artboardOf, basicInfo, cloneSubtree, descendants, emitHtml, emitJsx, getNode,
-  makeNode, newId, parseHtml, treeSummary, describeNode, getArtboardPosition, getArtboardSize,
+  makeNode, makeNote, newId, parseHtml, treeSummary, describeNode, getArtboardPosition, getArtboardSize,
   batchId, tokenToCssVar, DEFAULT_ARTBOARD_STYLES,
 } from '@canvas/shared';
 import { applyOps, getDocument, StoreError, createSnapshot } from './store.ts';
@@ -99,12 +99,16 @@ export function buildMcpServer(ctx: McpContext): McpServer {
         `Create with write_html. After any visual change, call get_screenshot to check your work — ` +
         `you cannot tell whether a layout is right without looking at it.\n\n` +
         `Call get_guide("layout") before building anything substantial; it describes what makes ` +
-        `output a designer will keep rather than discard.`,
+        `output a designer will keep rather than discard.\n\n` +
+        `The canvas also carries prompt cards — sticky notes the human writes next to the thing ` +
+        `they are about. If get_basic_info reports queued notes, call list_notes and work through ` +
+        `them: claim_note, do the work, then respond_to_note. That is usually why you were called.`,
     },
   );
 
   registerReadTools(server, ctx);
   registerWriteTools(server, ctx);
+  registerNoteTools(server, ctx);
   registerSessionTools(server, ctx);
   return server;
 }
@@ -122,7 +126,21 @@ function registerReadTools(server: McpServer, ctx: McpContext): void {
     annotations: { readOnlyHint: true },
   }, async ({ pageId }) => guard(() => {
     const doc = requireDoc(ctx);
-    return json({ ...basicInfo(doc, pageId), liveTabConnected: hasLiveTab(doc.id), rev: doc.rev });
+    const page = doc.pages.find((p) => p.id === pageId) ?? doc.pages[0];
+    const notes = page?.notes ?? [];
+    const queued = notes.filter((n) => n.status === 'queued');
+    return json({
+      ...basicInfo(doc, pageId),
+      liveTabConnected: hasLiveTab(doc.id),
+      rev: doc.rev,
+      notes: {
+        total: notes.length,
+        queued: queued.length,
+        ...(queued.length
+          ? { hint: `${queued.length} prompt card${queued.length === 1 ? '' : 's'} waiting for an agent — call list_notes.` }
+          : {}),
+      },
+    });
   }));
 
   server.registerTool('get_selection', {
@@ -791,6 +809,185 @@ function registerWriteTools(server: McpServer, ctx: McpContext): void {
 
 function slug(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'export';
+}
+
+
+// ---------------------------------------------------------------------------
+// Prompt cards
+// ---------------------------------------------------------------------------
+
+function registerNoteTools(server: McpServer, ctx: McpContext): void {
+  server.registerTool('list_notes', {
+    title: 'List prompt cards',
+    description:
+      'Prompt cards on the canvas — sticky notes the human placed next to the thing they are about. ' +
+      'A card with status "queued" is a request for an agent. Each carries the node ids it refers to; ' +
+      'read those before acting.',
+    inputSchema: {
+      status: z.enum(['idle', 'queued', 'running', 'done', 'all']).optional().default('queued'),
+      pageId: z.string().optional(),
+    },
+    annotations: { readOnlyHint: true },
+  }, async ({ status, pageId }) => guard(() => {
+    const doc = requireDoc(ctx);
+    const page = doc.pages.find((p) => p.id === pageId) ?? doc.pages[0]!;
+    const notes = (page.notes ?? []).filter((n) => status === 'all' || n.status === status);
+
+    if (!notes.length) {
+      return text(
+        status === 'queued'
+          ? 'No prompt cards are waiting for an agent. Use status:"all" to see every card.'
+          : `No prompt cards with status "${status}".`,
+      );
+    }
+
+    return json({
+      pageId: page.id,
+      notes: notes.map((n) => ({
+        id: n.id,
+        text: n.text,
+        status: n.status,
+        claimedBy: n.claimedBy ?? null,
+        position: { x: n.x, y: n.y },
+        targets: n.targets.map((id) => {
+          const node = getNode(doc, id);
+          return node
+            ? { id, name: node.name, type: node.type, artboard: artboardOf(doc, id) }
+            : { id, missing: true };
+        }),
+        // A card with no explicit targets is about whatever it sits next to.
+        nearestArtboard: n.targets.length ? undefined : nearestArtboard(doc, page, n.x, n.y),
+        response: n.response ?? null,
+      })),
+    });
+  }));
+
+  server.registerTool('claim_note', {
+    title: 'Claim a prompt card',
+    description:
+      'Marks a card as being worked on by you, so a second agent does not duplicate the work and the ' +
+      'human can see it was picked up. Claim before you start.',
+    inputSchema: { id: z.string(), pageId: z.string().optional() },
+  }, async ({ id, pageId }) => guard(() => {
+    const doc = requireDoc(ctx);
+    const page = doc.pages.find((p) => p.id === pageId) ?? doc.pages[0]!;
+    const note = (page.notes ?? []).find((n) => n.id === id);
+    if (!note) return fail(`No prompt card with id "${id}". Call list_notes for current ids.`);
+    if (note.status === 'running' && note.claimedBy && note.claimedBy !== (ctx.connection.label ?? 'Agent')) {
+      return fail(`"${note.claimedBy}" is already working on this card. Pick another, or ask the human.`);
+    }
+
+    commit(ctx, [{
+      t: 'note', action: 'update', pageId: page.id,
+      note: { id, status: 'running', claimedBy: ctx.connection.label ?? 'Agent' },
+    }]);
+
+    return json({
+      claimed: id,
+      text: note.text,
+      targets: note.targets,
+      next: note.targets.length
+        ? 'Read the target nodes with get_tree_summary, then do the work and call respond_to_note.'
+        : 'This card has no explicit targets; use nearestArtboard from list_notes, or ask the human.',
+    });
+  }));
+
+  server.registerTool('respond_to_note', {
+    title: 'Answer a prompt card',
+    description:
+      'Records what you did and closes the card. Keep the response short and concrete — it is shown ' +
+      'on the card on the canvas, not in a chat log.',
+    inputSchema: {
+      id: z.string(),
+      response: z.string().max(2000).describe('One or two sentences on what you changed.'),
+      status: z.enum(['done', 'queued']).optional().default('done')
+        .describe('Use "queued" to hand the card back if you could not complete it.'),
+      pageId: z.string().optional(),
+    },
+  }, async ({ id, response, status, pageId }) => guard(() => {
+    const doc = requireDoc(ctx);
+    const page = doc.pages.find((p) => p.id === pageId) ?? doc.pages[0]!;
+    const note = (page.notes ?? []).find((n) => n.id === id);
+    if (!note) return fail(`No prompt card with id "${id}".`);
+
+    commit(ctx, [{
+      t: 'note', action: 'update', pageId: page.id,
+      note: { id, status, response, claimedBy: status === 'done' ? ctx.connection.label ?? 'Agent' : undefined },
+    }]);
+    notifyTabs(doc.id, {
+      kind: 'note-answered',
+      agent: ctx.connection.label ?? 'Agent',
+      noteId: id,
+      response,
+    });
+    return json({ id, status });
+  }));
+
+  server.registerTool('create_note', {
+    title: 'Leave a note on the canvas',
+    description:
+      'Places a sticky note on the canvas. Use it to flag something for the human, ask a question you ' +
+      'cannot resolve, or leave a decision you made where they will see it next to the design.',
+    inputSchema: {
+      text: z.string().min(1).max(2000),
+      targets: z.array(z.string()).optional().describe('Node ids the note is about; it is placed beside them.'),
+      x: z.number().optional(),
+      y: z.number().optional(),
+      color: z.enum(['yellow', 'blue', 'green', 'pink', 'purple']).optional().default('blue'),
+      pageId: z.string().optional(),
+    },
+  }, async ({ text: body, targets, x, y, color, pageId }) => guard(() => {
+    const doc = requireDoc(ctx);
+    const page = doc.pages.find((p) => p.id === pageId) ?? doc.pages[0]!;
+
+    let px = x;
+    let py = y;
+    if (px === undefined || py === undefined) {
+      // Place it just right of the artboard the targets live in, so it reads as
+      // a margin note rather than landing on top of the design.
+      const anchorId = targets?.[0] ? artboardOf(doc, targets[0]) : page.artboards[0];
+      const anchor = anchorId ? getNode(doc, anchorId) : undefined;
+      if (anchor) {
+        const pos = getArtboardPosition(anchor);
+        const size = getArtboardSize(anchor);
+        px = px ?? pos.x + size.width + 40;
+        py = py ?? pos.y + (page.notes?.length ?? 0) * 180;
+      }
+    }
+
+    const note = makeNote({
+      text: body,
+      targets: targets ?? [],
+      color,
+      x: px ?? 0,
+      y: py ?? 0,
+      author: ctx.connection.label ?? 'Agent',
+    });
+
+    commit(ctx, [{ t: 'note', action: 'add', pageId: page.id, note }]);
+    return json({ id: note.id, x: note.x, y: note.y });
+  }));
+}
+
+function nearestArtboard(
+  doc: CanvasDocument,
+  page: { artboards: NodeId[] },
+  x: number,
+  y: number,
+): { id: NodeId; name: string; distance: number } | null {
+  let best: { id: NodeId; name: string; distance: number } | null = null;
+  for (const id of page.artboards) {
+    const node = getNode(doc, id);
+    if (!node) continue;
+    const pos = getArtboardPosition(node);
+    const size = getArtboardSize(node);
+    // Distance to the artboard's box, zero when the point is inside it.
+    const dx = Math.max(pos.x - x, 0, x - (pos.x + size.width));
+    const dy = Math.max(pos.y - y, 0, y - (pos.y + size.height));
+    const distance = Math.round(Math.hypot(dx, dy));
+    if (!best || distance < best.distance) best = { id, name: node.name, distance };
+  }
+  return best;
 }
 
 // ---------------------------------------------------------------------------

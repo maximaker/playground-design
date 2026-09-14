@@ -4,3 +4,4 @@ export * from './css.ts';
 export * from './html.ts';
 export * from './jsx.ts';
 export * from './summary.ts';
+export * from './snap.ts';

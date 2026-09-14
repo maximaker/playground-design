@@ -13,6 +13,7 @@ import { History } from './panels/History.tsx';
 import { ConnectAgent } from './panels/ConnectAgent.tsx';
 import { Export } from './panels/Export.tsx';
 import { Toolbar } from './ui/Toolbar.tsx';
+import { ContextMenu, type ContextMenuState } from './ui/ContextMenu.tsx';
 import { Home } from './Home.tsx';
 
 type LeftTab = 'layers' | 'pages' | 'tokens' | 'history';
@@ -50,8 +51,9 @@ function Editor({ docId, onHome }: { docId: string; onHome: () => void }) {
 
   const [leftTab, setLeftTab] = useState<LeftTab>('layers');
   const [modal, setModal] = useState<'connect' | 'export' | null>(null);
+  const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
 
-  useKeyboard();
+  useKeyboard(() => setModal('export'));
   useClipboard();
 
   useEffect(() => {
@@ -162,7 +164,7 @@ function Editor({ docId, onHome }: { docId: string; onHome: () => void }) {
         </aside>
 
         <main className="stage">
-          <Canvas />
+          <Canvas onContextMenu={setContextMenu} />
           <Toolbar />
         </main>
 
@@ -170,6 +172,14 @@ function Editor({ docId, onHome }: { docId: string; onHome: () => void }) {
           <Properties />
         </aside>
       </div>
+
+      {contextMenu && (
+        <ContextMenu
+          state={contextMenu}
+          onClose={() => setContextMenu(null)}
+          onExport={() => setModal('export')}
+        />
+      )}
 
       {modal === 'connect' && <ConnectAgent onClose={() => setModal(null)} />}
       {modal === 'export' && <Export onClose={() => setModal(null)} />}

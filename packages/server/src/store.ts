@@ -206,6 +206,7 @@ function describeOp(op: Op): string {
     case 'doc': return 'Renamed document';
     case 'tokens': return 'Updated tokens';
     case 'page': return `${op.action === 'add' ? 'Added' : op.action === 'remove' ? 'Removed' : 'Renamed'} page`;
+    case 'note': return `${op.action === 'add' ? 'Added' : op.action === 'remove' ? 'Removed' : 'Updated'} a note`;
   }
 }
 

@@ -8,14 +8,21 @@
  */
 
 import { memo, useEffect, useRef, useState } from 'react';
-import type { NodeId } from '@canvas/shared';
-import { useCanvas, getNodeById } from '../state/store.ts';
-import { allFrames, nodeRect } from './registry.ts';
+import type { NodeId, SnapGuide } from '@canvas/shared';
+import { useCanvas, getNodeById, getDoc } from '../state/store.ts';
+import { allFrames, nodeRect, nodeInnerRect } from './registry.ts';
 import { HANDLES, type DropTarget } from './interactions.ts';
 
 interface Rects { selection: Record<NodeId, DOMRect>; hovered: DOMRect | null; peers: { color: string; rect: DOMRect }[] }
 
-export const Overlay = memo(function Overlay({ version, dropTarget }: { version: number; dropTarget: DropTarget | null }) {
+interface OverlayProps {
+  version: number;
+  dropTarget: DropTarget | null;
+  /** Snap guides, in the working space named by `space`. */
+  guides: { guides: SnapGuide[]; space: 'canvas' | NodeId } | null;
+}
+
+export const Overlay = memo(function Overlay({ version, dropTarget, guides }: OverlayProps) {
   const selection = useCanvas((s) => s.selection);
   const hovered = useCanvas((s) => s.hovered);
   const editingText = useCanvas((s) => s.editingText);
@@ -51,6 +58,7 @@ export const Overlay = memo(function Overlay({ version, dropTarget }: { version:
     return () => { running = false; cancelAnimationFrame(raf.current); };
   }, [selection, hovered, peers, version, viewport]);
 
+  const measureTo = useCanvas((s) => s.measureTo);
   const single = selection.length === 1 ? selection[0]! : null;
   const singleRect = single ? rects.selection[single] : null;
   const singleNode = single ? getNodeById(single) : undefined;
@@ -86,6 +94,12 @@ export const Overlay = memo(function Overlay({ version, dropTarget }: { version:
         </>
       )}
 
+      {guides && <SnapGuides guides={guides.guides} space={guides.space} viewport={viewport} />}
+
+      {measureTo && selection.length === 1 && (
+        <Measurements fromId={selection[0]!} toId={measureTo} />
+      )}
+
       {dropTarget?.indicator && (
         <div
           className="overlay-drop"
@@ -99,6 +113,102 @@ export const Overlay = memo(function Overlay({ version, dropTarget }: { version:
     </div>
   );
 });
+
+/**
+ * Draws snap guides. Canvas-space guides (artboards) convert through the
+ * viewport transform; parent-local guides convert through the parent's rendered
+ * rect, which already includes the zoom.
+ */
+function SnapGuides({ guides, space, viewport }: {
+  guides: SnapGuide[];
+  space: 'canvas' | NodeId;
+  viewport: { x: number; y: number; zoom: number };
+}) {
+  let originX = viewport.x;
+  let originY = viewport.y;
+  const scale = viewport.zoom;
+
+  if (space !== 'canvas') {
+    const parent = nodeRect(space);
+    if (!parent) return null;
+    originX = parent.left;
+    originY = parent.top;
+  }
+
+  return (
+    <>
+      {guides.map((g, i) => {
+        const pos = (g.axis === 'x' ? originX : originY) + g.position * scale;
+        const from = (g.axis === 'x' ? originY : originX) + g.from * scale;
+        const to = (g.axis === 'x' ? originY : originX) + g.to * scale;
+
+        if (g.kind === 'spacing') {
+          // Spacing guides mark the gap itself, along the axis, not an alignment.
+          const start = (g.axis === 'x' ? originX : originY) + g.from * scale;
+          const end = (g.axis === 'x' ? originX : originY) + g.to * scale;
+          const cross = (g.axis === 'x' ? originY : originX) + g.from * scale;
+          return (
+            <div
+              key={`s${i}`}
+              className="guide guide-spacing"
+              style={g.axis === 'x'
+                ? { left: start, top: cross, width: Math.max(1, end - start), height: 2 }
+                : { left: cross, top: start, width: 2, height: Math.max(1, end - start) }}
+              data-label={g.label}
+            />
+          );
+        }
+
+        return (
+          <div
+            key={`g${i}`}
+            className={`guide guide-${g.kind}`}
+            style={g.axis === 'x'
+              ? { left: pos, top: Math.min(from, to) - 20, width: 1, height: Math.abs(to - from) + 40 }
+              : { left: Math.min(from, to) - 20, top: pos, width: Math.abs(to - from) + 40, height: 1 }}
+          />
+        );
+      })}
+    </>
+  );
+}
+
+/**
+ * Distance readouts between the selection and a hovered node — the Option-hover
+ * measurement every design tool has, and the fastest way to check spacing
+ * without opening a panel.
+ */
+function Measurements({ fromId, toId }: { fromId: NodeId; toId: NodeId }) {
+  const a = nodeRect(fromId);
+  const b = nodeRect(toId);
+  if (!a || !b || fromId === toId) return null;
+
+  const spans: { left: number; top: number; width: number; height: number; label: string; axis: 'x' | 'y' }[] = [];
+
+  // Horizontal gap, measured between facing edges when the boxes do not overlap.
+  const midY = Math.max(Math.min(a.top + a.height / 2, b.bottom), b.top);
+  if (b.left > a.right) spans.push({ left: a.right, top: midY, width: b.left - a.right, height: 0, label: `${Math.round(b.left - a.right)}`, axis: 'x' });
+  else if (a.left > b.right) spans.push({ left: b.right, top: midY, width: a.left - b.right, height: 0, label: `${Math.round(a.left - b.right)}`, axis: 'x' });
+
+  const midX = Math.max(Math.min(a.left + a.width / 2, b.right), b.left);
+  if (b.top > a.bottom) spans.push({ left: midX, top: a.bottom, width: 0, height: b.top - a.bottom, label: `${Math.round(b.top - a.bottom)}`, axis: 'y' });
+  else if (a.top > b.bottom) spans.push({ left: midX, top: b.bottom, width: 0, height: a.top - b.bottom, label: `${Math.round(a.top - b.bottom)}`, axis: 'y' });
+
+  return (
+    <>
+      <div className="measure-target" style={{ left: b.left, top: b.top, width: b.width, height: b.height }} />
+      {spans.map((s, i) => (
+        <div
+          key={i}
+          className={`measure measure-${s.axis}`}
+          style={{ left: s.left, top: s.top, width: Math.max(s.width, 1), height: Math.max(s.height, 1) }}
+        >
+          <span className="measure-label">{s.label}</span>
+        </div>
+      ))}
+    </>
+  );
+}
 
 function boxStyle(rect: DOMRect, color?: string): React.CSSProperties {
   return {

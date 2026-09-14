@@ -13,7 +13,7 @@ import {
   applyOp, artboardOf, batchId, descendants,
 } from '@canvas/shared';
 
-export type Tool = 'move' | 'frame' | 'text' | 'rect' | 'ellipse' | 'image' | 'hand';
+export type Tool = 'move' | 'frame' | 'text' | 'rect' | 'ellipse' | 'image' | 'hand' | 'note';
 
 export interface Viewport { x: number; y: number; zoom: number }
 
@@ -50,6 +50,10 @@ interface CanvasState {
 
   selection: NodeId[];
   hovered: NodeId | null;
+  /** Node to show distance readouts to, set while Alt/Option is held. */
+  measureTo: NodeId | null;
+  /** Prompt cards are selected separately from design nodes. */
+  selectedNote: string | null;
   editingText: NodeId | null;
   /** Which style variant the properties panel is editing (`null` = base). */
   activeVariant: string | null;
@@ -91,6 +95,8 @@ interface CanvasActions {
   select(ids: NodeId[], additive?: boolean): void;
   toggleSelect(id: NodeId): void;
   setHovered(id: NodeId | null): void;
+  setMeasureTo(id: NodeId | null): void;
+  selectNote(id: string | null): void;
   setEditingText(id: NodeId | null): void;
   setActiveVariant(v: string | null): void;
 
@@ -118,6 +124,8 @@ export const useCanvas = create<CanvasState & CanvasActions>((set, get) => ({
   clientId: `c_${Math.random().toString(36).slice(2, 10)}`,
   selection: [],
   hovered: null,
+  measureTo: null,
+  selectedNote: null,
   editingText: null,
   activeVariant: null,
   viewport: { x: 80, y: 80, zoom: 0.55 },
@@ -244,7 +252,7 @@ export const useCanvas = create<CanvasState & CanvasActions>((set, get) => ({
     const current = get().selection;
     const next = additive ? [...new Set([...current, ...ids])] : ids;
     if (next.length === current.length && next.every((id, i) => id === current[i])) return;
-    set({ selection: next, editingText: null, activeVariant: null });
+    set({ selection: next, editingText: null, activeVariant: null, selectedNote: null });
   },
 
   toggleSelect(id) {
@@ -253,6 +261,8 @@ export const useCanvas = create<CanvasState & CanvasActions>((set, get) => ({
   },
 
   setHovered(hovered) { if (get().hovered !== hovered) set({ hovered }); },
+  setMeasureTo(measureTo) { if (get().measureTo !== measureTo) set({ measureTo }); },
+  selectNote(selectedNote) { set({ selectedNote, selection: selectedNote ? [] : get().selection }); },
   setEditingText(editingText) { set({ editingText }); },
   setActiveVariant(activeVariant) { set({ activeVariant }); },
 

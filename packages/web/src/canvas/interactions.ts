@@ -9,6 +9,10 @@ import {
 } from '@canvas/shared';
 import { nodeRect, nodeInnerRect, hitTest } from './registry.ts';
 import { parsePx } from './styles.ts';
+import { type Box, type SnapGuide, boxOf, computeSnap, snapResize } from '@canvas/shared';
+
+/** Snap strength in screen pixels; converted to working units by the caller. */
+export const SNAP_THRESHOLD_PX = 6;
 
 export interface Viewport { x: number; y: number; zoom: number }
 
@@ -24,6 +28,71 @@ export function toScreen(x: number, y: number, vp: Viewport): { x: number; y: nu
 
 export const HANDLES = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'] as const;
 export type Handle = (typeof HANDLES)[number];
+
+// ---------------------------------------------------------------------------
+// Snap candidate collection
+// ---------------------------------------------------------------------------
+
+/** Artboards on the page, in canvas space — what a dragged artboard snaps to. */
+export function artboardBoxes(doc: CanvasDocument, artboards: NodeId[], exclude: NodeId[] = []): Box[] {
+  return artboards.flatMap((id) => {
+    if (exclude.includes(id)) return [];
+    const node = doc.nodes[id];
+    if (!node) return [];
+    const pos = getArtboardPosition(node);
+    const size = getArtboardSize(node);
+    return [boxOf(id, pos.x, pos.y, size.width, size.height)];
+  });
+}
+
+/**
+ * Siblings of an absolutely-positioned node, in the parent's local CSS pixels.
+ * Measured from the rendered DOM rather than style values, because a hugging or
+ * wrapping element has no authored size at all.
+ */
+export function siblingBoxes(
+  doc: CanvasDocument,
+  nodeId: NodeId,
+  exclude: NodeId[],
+): { boxes: Box[]; container: Box | null } {
+  const node = doc.nodes[nodeId];
+  const parentId = node?.parent;
+  if (!parentId) return { boxes: [], container: null };
+
+  const parentRect = nodeInnerRect(parentId);
+  if (!parentRect) return { boxes: [], container: null };
+
+  const boxes = (doc.nodes[parentId]?.children ?? []).flatMap((childId) => {
+    if (exclude.includes(childId)) return [];
+    const rect = nodeInnerRect(childId);
+    if (!rect) return [];
+    return [boxOf(childId, rect.left - parentRect.left, rect.top - parentRect.top, rect.width, rect.height)];
+  });
+
+  return {
+    boxes,
+    container: boxOf(parentId, 0, 0, parentRect.width, parentRect.height),
+  };
+}
+
+export function snapMove(
+  moving: Box,
+  candidates: Box[],
+  zoom: number,
+  container: Box | null = null,
+): { dx: number; dy: number; guides: SnapGuide[] } {
+  return computeSnap(moving, candidates, SNAP_THRESHOLD_PX / zoom, { container });
+}
+
+export function snapResizeEdges(
+  moving: Box,
+  candidates: Box[],
+  handle: Handle,
+  zoom: number,
+  container: Box | null = null,
+): { dx: number; dy: number; guides: SnapGuide[] } {
+  return snapResize(moving, candidates, handle, SNAP_THRESHOLD_PX / zoom, container);
+}
 
 // ---------------------------------------------------------------------------
 // Drop targeting
@@ -137,9 +206,27 @@ export interface ResizeStart {
   handle: Handle;
   width: number;
   height: number;
+  /** Authored left/top, only meaningful when `absolute`. */
   left: number;
   top: number;
+  /** Rendered position in the parent's local space, used for snapping. */
+  originLeft: number;
+  originTop: number;
   absolute: boolean;
+}
+
+/** The box a resize would produce, before snapping, in working units. */
+export function resizeBox(start: ResizeStart, dx: number, dy: number): Box {
+  const h = start.handle;
+  let left = 0;
+  let top = 0;
+  let width = start.width;
+  let height = start.height;
+  if (h.includes('e')) width = start.width + dx;
+  if (h.includes('w')) { width = start.width - dx; left = dx; }
+  if (h.includes('s')) height = start.height + dy;
+  if (h.includes('n')) { height = start.height - dy; top = dy; }
+  return boxOf(start.id, start.originLeft + left, start.originTop + top, width, height);
 }
 
 export function beginResize(doc: CanvasDocument, id: NodeId, handle: Handle): ResizeStart | null {
@@ -150,10 +237,13 @@ export function beginResize(doc: CanvasDocument, id: NodeId, handle: Handle): Re
   const rect = nodeInnerRect(id);
   if (!node || !rect) return null;
   const absolute = node.styles.position === 'absolute' || node.styles.position === 'fixed';
+  const parentRect = node.parent ? nodeInnerRect(node.parent) : null;
   return {
     id, handle,
     width: rect.width, height: rect.height,
     left: parsePx(node.styles.left), top: parsePx(node.styles.top),
+    originLeft: parentRect ? rect.left - parentRect.left : 0,
+    originTop: parentRect ? rect.top - parentRect.top : 0,
     absolute,
   };
 }

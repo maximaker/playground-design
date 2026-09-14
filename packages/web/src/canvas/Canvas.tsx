@@ -4,17 +4,19 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  type NodeId, type Op, makeNode, getArtboardPosition, getArtboardSize,
-  DEFAULT_ARTBOARD_STYLES, defaultStylesFor,
+  type Box, type NodeId, type Op, type SnapGuide,
+  makeNode, boxOf, getArtboardPosition, getArtboardSize,
+  DEFAULT_ARTBOARD_STYLES, defaultStylesFor, makeNote, notesOf,
 } from '@canvas/shared';
 import { useCanvas, getDoc, currentPage, topLevelSelection, getNodeById } from '../state/store.ts';
 import { Artboard } from './Artboard.tsx';
+import { NoteCard } from './NoteCard.tsx';
 import { Overlay } from './Overlay.tsx';
 import { hitTest, nodeRect } from './registry.ts';
 import {
   type DropTarget, type Handle, type ResizeStart,
-  beginResize, buildMoveOps, computeDropTarget, nextArtboardPosition,
-  nodesInRect, resizeStyles, toCanvasSpace,
+  artboardBoxes, beginResize, buildMoveOps, computeDropTarget, nextArtboardPosition,
+  nodesInRect, resizeBox, resizeStyles, siblingBoxes, snapMove, snapResizeEdges, toCanvasSpace,
 } from './interactions.ts';
 import { parsePx } from './styles.ts';
 
@@ -24,14 +26,19 @@ type Drag =
   | { kind: 'marquee'; startX: number; startY: number; additive: boolean }
   | { kind: 'maybe-move'; ids: NodeId[]; startX: number; startY: number }
   | { kind: 'move-nodes'; ids: NodeId[]; startX: number; startY: number; batch: string }
-  | { kind: 'move-artboards'; ids: NodeId[]; startX: number; startY: number; origins: Record<NodeId, { x: number; y: number }>; batch: string; restore: Op }
-  | { kind: 'move-absolute'; ids: NodeId[]; startX: number; startY: number; origins: Record<NodeId, { left: number; top: number }>; batch: string; restore: Op }
-  | { kind: 'resize'; start: ResizeStart; startX: number; startY: number; batch: string; restore: Op }
-  | { kind: 'draw'; startX: number; startY: number; artboardId: NodeId | null };
+  | { kind: 'move-artboards'; ids: NodeId[]; startX: number; startY: number; origins: Record<NodeId, { x: number; y: number }>; batch: string; restore: Op; candidates: Box[]; size: { width: number; height: number } }
+  | { kind: 'move-absolute'; ids: NodeId[]; startX: number; startY: number; origins: Record<NodeId, { left: number; top: number }>; batch: string; restore: Op; candidates: Box[]; container: Box | null; size: { width: number; height: number } }
+  | { kind: 'resize'; start: ResizeStart; startX: number; startY: number; batch: string; restore: Op; candidates: Box[]; container: Box | null }
+  | { kind: 'draw'; startX: number; startY: number; artboardId: NodeId | null }
+  | { kind: 'move-note'; id: string; startX: number; startY: number; origin: { x: number; y: number }; batch: string; restore: Op };
 
 const DRAG_THRESHOLD = 4;
 
-export function Canvas() {
+interface CanvasProps {
+  onContextMenu: (state: { x: number; y: number; nodeId: NodeId | null }) => void;
+}
+
+export function Canvas({ onContextMenu }: CanvasProps) {
   const version = useCanvas((s) => s.version);
   const viewport = useCanvas((s) => s.viewport);
   const setViewport = useCanvas((s) => s.setViewport);
@@ -41,6 +48,7 @@ export function Canvas() {
   const selection = useCanvas((s) => s.selection);
   const select = useCanvas((s) => s.select);
   const setHovered = useCanvas((s) => s.setHovered);
+  const setMeasureTo = useCanvas((s) => s.setMeasureTo);
   const setEditingText = useCanvas((s) => s.setEditingText);
   const dispatch = useCanvas((s) => s.dispatch);
 
@@ -54,6 +62,9 @@ export function Canvas() {
   const [marquee, setMarquee] = useState<{ left: number; top: number; width: number; height: number } | null>(null);
   const [dropTarget, setDropTarget] = useState<DropTarget | null>(null);
   const [drawPreview, setDrawPreview] = useState<{ left: number; top: number; width: number; height: number } | null>(null);
+  // Guides live in the working space of whatever is being dragged; the space
+  // they belong to is recorded so the overlay can convert them to the screen.
+  const [guides, setGuides] = useState<{ guides: SnapGuide[]; space: 'canvas' | NodeId } | null>(null);
 
   const page = currentPage();
 
@@ -100,9 +111,39 @@ export function Canvas() {
     if (!doc || !page) return;
     (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
 
+    // A pointerdown inside a note is the note's own business, except for drags.
+    const noteEl = (e.target as HTMLElement).closest<HTMLElement>('[data-note-id]');
+    if (noteEl && tool === 'move' && !e.button) {
+      const id = noteEl.dataset.noteId!;
+      const note = notesOf(page).find((n) => n.id === id);
+      if (note) {
+        drag.current = {
+          kind: 'move-note', id, startX: e.clientX, startY: e.clientY,
+          origin: { x: note.x, y: note.y },
+          batch: `b_${Date.now()}`,
+          restore: { t: 'note', action: 'update', pageId: page.id, note: { id, x: note.x, y: note.y } },
+        };
+        return;
+      }
+    }
+
     const panning = spacePanning || tool === 'hand' || e.button === 1;
     if (panning) {
       drag.current = { kind: 'pan', startX: e.clientX, startY: e.clientY, originX: viewport.x, originY: viewport.y };
+      return;
+    }
+
+    if (tool === 'note') {
+      const at = toCanvasSpace(e.clientX, e.clientY, viewport);
+      const note = makeNote({
+        x: Math.round(at.x), y: Math.round(at.y),
+        // A card dropped while something is selected is about that selection.
+        targets: [...selection],
+        author: 'You',
+      });
+      dispatch([{ t: 'note', action: 'add', pageId: page.id, note }]);
+      useCanvas.getState().selectNote(note.id);
+      setTool('move');
       return;
     }
 
@@ -112,13 +153,28 @@ export function Canvas() {
       return;
     }
 
+    // Dragging an artboard's label moves the artboard.
+    const labelId = (e.target as HTMLElement).closest<HTMLElement>('[data-artboard-label]')?.dataset.artboardLabel;
+    if (labelId && doc.nodes[labelId]) {
+      const already = selection.includes(labelId);
+      if (e.shiftKey) useCanvas.getState().toggleSelect(labelId);
+      else if (!already) select([labelId]);
+      const ids = topLevelSelection(already || e.shiftKey ? useCanvas.getState().selection : [labelId])
+        .filter((id) => doc.nodes[id]?.parent === null);
+      drag.current = { kind: 'maybe-move', ids: ids.length ? ids : [labelId], startX: e.clientX, startY: e.clientY };
+      return;
+    }
+
     const handle = (e.target as HTMLElement).dataset.handle as Handle | undefined;
     if (handle && selection.length === 1) {
       const start = beginResize(doc, selection[0]!, handle);
       if (start) {
         const before = doc.nodes[start.id]!.styles;
+        const sib = siblingBoxes(doc, start.id, [start.id]);
         drag.current = {
           kind: 'resize', start, startX: e.clientX, startY: e.clientY, batch: `b_${Date.now()}`,
+          candidates: sib.boxes,
+          container: sib.container,
           restore: {
             t: 'styles',
             updates: [{
@@ -136,7 +192,7 @@ export function Canvas() {
 
     const hit = hitTest(e.clientX, e.clientY);
     if (!hit) {
-      if (!e.shiftKey) select([]);
+      if (!e.shiftKey) { select([]); useCanvas.getState().selectNote(null); }
       drag.current = { kind: 'marquee', startX: e.clientX, startY: e.clientY, additive: e.shiftKey };
       return;
     }
@@ -174,6 +230,8 @@ export function Canvas() {
     if (d.kind === 'none') {
       const hit = hitTest(e.clientX, e.clientY);
       setHovered(hit?.nodeId ?? null);
+      // Holding Alt over another node measures the distance to the selection.
+      setMeasureTo(e.altKey && hit ? hit.nodeId : null);
       return;
     }
 
@@ -202,6 +260,14 @@ export function Canvas() {
         return;
       }
 
+      case 'move-note': {
+        dispatch([{
+          t: 'note', action: 'update', pageId: page!.id,
+          note: { id: d.id, x: Math.round(d.origin.x + dx), y: Math.round(d.origin.y + dy) },
+        }], { batch: d.batch, skipUndo: true });
+        return;
+      }
+
       case 'draw': {
         setDrawPreview({
           left: Math.min(d.startX, e.clientX), top: Math.min(d.startY, e.clientY),
@@ -222,8 +288,11 @@ export function Canvas() {
             const n = doc.nodes[id];
             if (n) origins[id] = getArtboardPosition(n);
           }
+          const size = getArtboardSize(first);
           drag.current = {
             kind: 'move-artboards', ids: d.ids, startX: d.startX, startY: d.startY, origins, batch,
+            candidates: artboardBoxes(doc, page?.artboards ?? [], d.ids),
+            size,
             restore: {
               t: 'attrs',
               updates: d.ids.map((id) => ({
@@ -237,8 +306,17 @@ export function Canvas() {
             const n = doc.nodes[id];
             if (n) origins[id] = { left: parsePx(n.styles.left), top: parsePx(n.styles.top) };
           }
+          const rect = nodeRect(d.ids[0]!);
+          const vpNow = useCanvas.getState().viewport;
+          const sib = siblingBoxes(doc, d.ids[0]!, d.ids);
           drag.current = {
             kind: 'move-absolute', ids: d.ids, startX: d.startX, startY: d.startY, origins, batch,
+            candidates: sib.boxes,
+            container: sib.container,
+            size: {
+              width: (rect?.width ?? 0) / vpNow.zoom,
+              height: (rect?.height ?? 0) / vpNow.zoom,
+            },
             restore: {
               t: 'styles',
               updates: d.ids.map((id) => ({
@@ -257,13 +335,26 @@ export function Canvas() {
       }
 
       case 'move-artboards': {
+        const lead = d.ids[0]!;
+        const proposed = boxOf(
+          lead,
+          d.origins[lead]!.x + dx, d.origins[lead]!.y + dy,
+          d.size.width, d.size.height,
+        );
+        // Holding ⌘ suspends snapping, the standard escape hatch for placing
+        // something a few pixels off a guide on purpose.
+        const snap = e.metaKey || e.ctrlKey
+          ? { dx: 0, dy: 0, guides: [] }
+          : snapMove(proposed, d.candidates, vp.zoom);
+        setGuides(snap.guides.length ? { guides: snap.guides, space: 'canvas' } : null);
+
         dispatch([{
           t: 'attrs',
           updates: d.ids.map((id) => ({
             id,
             attrs: {
-              'data-x': String(Math.round(d.origins[id]!.x + dx)),
-              'data-y': String(Math.round(d.origins[id]!.y + dy)),
+              'data-x': String(Math.round(d.origins[id]!.x + dx + snap.dx)),
+              'data-y': String(Math.round(d.origins[id]!.y + dy + snap.dy)),
             },
           })),
         }], { batch: d.batch, skipUndo: true });
@@ -271,13 +362,25 @@ export function Canvas() {
       }
 
       case 'move-absolute': {
+        const lead = d.ids[0]!;
+        const proposed = boxOf(
+          lead,
+          d.origins[lead]!.left + dx, d.origins[lead]!.top + dy,
+          d.size.width, d.size.height,
+        );
+        const snap = e.metaKey || e.ctrlKey
+          ? { dx: 0, dy: 0, guides: [] }
+          : snapMove(proposed, d.candidates, vp.zoom, d.container);
+        const parentId = doc.nodes[lead]?.parent;
+        setGuides(snap.guides.length && parentId ? { guides: snap.guides, space: parentId } : null);
+
         dispatch([{
           t: 'styles',
           updates: d.ids.map((id) => ({
             id,
             styles: {
-              left: `${Math.round(d.origins[id]!.left + dx)}px`,
-              top: `${Math.round(d.origins[id]!.top + dy)}px`,
+              left: `${Math.round(d.origins[id]!.left + dx + snap.dx)}px`,
+              top: `${Math.round(d.origins[id]!.top + dy + snap.dy)}px`,
             },
           })),
         }], { batch: d.batch, skipUndo: true });
@@ -290,14 +393,21 @@ export function Canvas() {
       }
 
       case 'resize': {
+        const proposed = resizeBox(d.start, dx, dy);
+        const snap = e.metaKey || e.ctrlKey || e.shiftKey
+          ? { dx: 0, dy: 0, guides: [] }
+          : snapResizeEdges(proposed, d.candidates, d.start.handle, vp.zoom, d.container);
+        const parentId = doc.nodes[d.start.id]?.parent;
+        setGuides(snap.guides.length && parentId ? { guides: snap.guides, space: parentId } : null);
+
         dispatch([{
           t: 'styles',
-          updates: [{ id: d.start.id, styles: resizeStyles(d.start, dx, dy, e.shiftKey) }],
+          updates: [{ id: d.start.id, styles: resizeStyles(d.start, dx + snap.dx, dy + snap.dy, e.shiftKey) }],
         }], { batch: d.batch, skipUndo: true });
         return;
       }
     }
-  }, [dispatch, page, select, setHovered, setViewport]);
+  }, [dispatch, page, select, setHovered, setMeasureTo, setViewport]);
 
   // --- Pointer up --------------------------------------------------------
 
@@ -308,6 +418,7 @@ export function Canvas() {
     setMarquee(null);
     setDrawPreview(null);
     setDropTarget(null);
+    setGuides(null);
 
     if (!doc || !page) return;
 
@@ -343,7 +454,7 @@ export function Canvas() {
 
     // Intermediate frames of a drag were dispatched with skipUndo; record the
     // whole gesture as one undo entry now.
-    if (d.kind === 'move-artboards' || d.kind === 'move-absolute' || d.kind === 'resize') {
+    if (d.kind === 'move-artboards' || d.kind === 'move-absolute' || d.kind === 'resize' || d.kind === 'move-note') {
       useCanvas.getState().pushUndo([d.restore], selection);
       return;
     }
@@ -437,7 +548,15 @@ export function Canvas() {
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
-      onPointerLeave={() => setHovered(null)}
+      onPointerLeave={() => { setHovered(null); setMeasureTo(null); }}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        const hit = hitTest(e.clientX, e.clientY);
+        // Right-clicking outside the selection retargets it first, so the menu
+        // always acts on what the user pointed at.
+        if (hit && !useCanvas.getState().selection.includes(hit.nodeId)) select([hit.nodeId]);
+        onContextMenu({ x: e.clientX, y: e.clientY, nodeId: hit?.nodeId ?? null });
+      }}
       onDoubleClick={onDoubleClick as unknown as React.MouseEventHandler}
     >
       <div
@@ -452,9 +571,10 @@ export function Canvas() {
         style={{ transform: `translate(${viewport.x - origin.x}px, ${viewport.y - origin.y}px)` }}
       >
         {page.artboards.map((id) => <Artboard key={id} id={id} />)}
+        {notesOf(page).map((note) => <NoteCard key={note.id} note={note} />)}
       </div>
 
-      <Overlay version={version} dropTarget={dropTarget} />
+      <Overlay version={version} dropTarget={dropTarget} guides={guides} />
 
       {marquee && <div className="marquee" style={marquee} />}
       {drawPreview && <div className="draw-preview" style={drawPreview} />}
