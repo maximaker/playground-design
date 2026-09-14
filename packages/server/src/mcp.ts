@@ -18,6 +18,7 @@ import {
   componentsOf, collectSlots, detachedNodes, expandInstance, instancesOf,
   resolvedProps, variantMatrix, lintDocument, summarise, RULES,
   breakpointsOf, breakpointSelector,
+  parseTokensFromCss, parseTokensFromTailwind, serializeTokens, diffTokens, mergeTokens,
 } from '@playground/shared';
 import { applyOps, getDocument, StoreError, createSnapshot } from './store.ts';
 import { callTab, notifyTabs, selectionOf, hasLiveTab, NoTabError } from './realtime.ts';
@@ -929,6 +930,122 @@ function registerWriteTools(server: McpServer, ctx: McpContext): void {
     for (const id of ids) { node(doc, id); total += 1 + descendants(doc, id).length; }
     commit(ctx, [{ t: 'remove', ids }]);
     return json({ deleted: ids.length, totalNodesRemoved: total });
+  }));
+
+  server.registerTool('sync_tokens_from_code', {
+    title: 'Bring the codebase’s tokens in',
+    description:
+      'Reads design tokens out of the project and merges them into the document, so the design uses ' +
+      'the same values the code does. Playground cannot read the repository — you can. Pass the ' +
+      'contents of the stylesheet that declares the custom properties, or the theme object from ' +
+      'tailwind.config.\n\n' +
+      'Use dryRun first to see what would change.',
+    inputSchema: {
+      css: z.string().optional().describe('A stylesheet containing :root custom properties.'),
+      tailwindTheme: z.record(z.string(), z.unknown()).optional()
+        .describe('A Tailwind theme object, e.g. the value of theme.extend.'),
+      dryRun: z.boolean().optional().default(false).describe('Report the differences without applying them.'),
+      removeMissing: z.boolean().optional().default(false)
+        .describe('Also delete tokens the source does not mention. Off by default: a stylesheet is usually only part of a system.'),
+    },
+  }, async ({ css, tailwindTheme, dryRun, removeMissing }) => guard(() => {
+    const doc = requireDoc(ctx);
+    if (!css && !tailwindTheme) return fail('Pass either `css` or `tailwindTheme`.');
+
+    const parsed = css
+      ? parseTokensFromCss(css, doc.tokens.map((t) => t.name))
+      : parseTokensFromTailwind(tailwindTheme!);
+
+    if (!parsed.tokens.length) {
+      return fail(parsed.warnings[0] ?? 'No tokens found in that source.');
+    }
+
+    const diff = diffTokens(doc.tokens, parsed.tokens);
+
+    if (dryRun) {
+      return json({
+        dryRun: true,
+        wouldAdd: diff.added.map((t) => ({ name: t.name, value: t.values.default })),
+        wouldChange: diff.changed,
+        onlyInDesign: diff.removed.map((t) => t.name),
+        unchanged: diff.unchanged,
+        warnings: parsed.warnings,
+      });
+    }
+
+    const merged = mergeTokens(doc.tokens, parsed.tokens, { removeMissing });
+    commit(ctx, [{ t: 'tokens', tokens: merged }]);
+
+    return json({
+      added: diff.added.length,
+      changed: diff.changed.length,
+      removed: removeMissing ? diff.removed.length : 0,
+      unchanged: diff.unchanged,
+      ...(diff.removed.length && !removeMissing
+        ? { keptOnlyInDesign: diff.removed.map((t) => t.name) }
+        : {}),
+      warnings: parsed.warnings,
+      next: 'Call lint_design — literals that now duplicate a token will be reported.',
+    });
+  }));
+
+  server.registerTool('export_tokens', {
+    title: 'Write the design’s tokens out',
+    description:
+      'Returns the document’s tokens in the format the project uses, for you to write into the repo. ' +
+      'CSS emits custom properties with a block per theme; Tailwind emits a theme that references ' +
+      'those variables, so switching theme at runtime switches the utility classes too.',
+    inputSchema: {
+      format: z.enum(['css', 'tailwind', 'json']).optional().default('css'),
+    },
+    annotations: { readOnlyHint: true },
+  }, async ({ format }) => guard(() => {
+    const doc = requireDoc(ctx);
+    if (!doc.tokens.length) return fail('This document has no tokens yet.');
+    return text(serializeTokens(doc, format));
+  }));
+
+  server.registerTool('check_token_drift', {
+    title: 'Compare tokens with the codebase',
+    description:
+      'Reports where the design and the code disagree, without changing either. Run it when picking ' +
+      'a design back up: tokens drift the moment either side is edited alone.',
+    inputSchema: {
+      css: z.string().optional(),
+      tailwindTheme: z.record(z.string(), z.unknown()).optional(),
+    },
+    annotations: { readOnlyHint: true },
+  }, async ({ css, tailwindTheme }) => guard(() => {
+    const doc = requireDoc(ctx);
+    if (!css && !tailwindTheme) return fail('Pass either `css` or `tailwindTheme`.');
+
+    const parsed = css
+      ? parseTokensFromCss(css, doc.tokens.map((t) => t.name))
+      : parseTokensFromTailwind(tailwindTheme!);
+    const diff = diffTokens(doc.tokens, parsed.tokens);
+
+    // A design holding tokens the stylesheet does not mention is a superset,
+    // not drift — reporting it as out of sync makes a successful sync look
+    // like a failure. Drift is a value that differs, or a token only code has.
+    const drifted = diff.changed.length > 0 || diff.added.length > 0;
+
+    if (!drifted) {
+      return text(
+        `In sync: ${diff.unchanged} tokens match.` +
+        (diff.removed.length
+          ? ` ${diff.removed.length} more exist only in the design, which is fine — export_tokens writes them out if the code should have them.`
+          : ''),
+      );
+    }
+
+    return json({
+      inSync: false,
+      changed: diff.changed,
+      onlyInCode: diff.added.map((t) => ({ name: t.name, value: t.values.default })),
+      onlyInDesign: diff.removed.map((t) => t.name),
+      unchanged: diff.unchanged,
+      next: 'sync_tokens_from_code takes the code’s values; export_tokens writes the design’s values out.',
+    });
   }));
 
   server.registerTool('get_breakpoints', {

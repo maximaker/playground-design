@@ -39,6 +39,26 @@ so the human sees which artboards you are touching.
   \`width: 1440px\`.
 `.trim(),
 
+  tokens: `
+# Tokens and the codebase
+
+Playground cannot read the repository. You can, so you are the bridge.
+
+Picking up an existing project:
+1. \`check_token_drift\` with the project's stylesheet or Tailwind theme. It says
+   where the design and the code disagree without changing either.
+2. \`sync_tokens_from_code\` to take the code's values. Use \`dryRun\` first.
+3. \`lint_design\` afterwards — literals that now duplicate a token get reported.
+
+Handing work back:
+- \`export_tokens\` in the project's format and write it into the repo. The
+  Tailwind output references the CSS variables rather than inlining values, so
+  switching theme at runtime switches the utility classes too.
+
+Do not invent a token whose value already exists under another name. Call
+\`get_tokens\` first.
+`.trim(),
+
   styling: `
 # Styling
 

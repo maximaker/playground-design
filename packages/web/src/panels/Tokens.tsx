@@ -5,6 +5,7 @@ import type { Token, TokenGroup } from '@playground/shared';
 import { tokenToCssVar } from '@playground/shared';
 import { useCanvas, getDoc } from '../state/store.ts';
 import { Icon } from '../ui/Icon.tsx';
+import { TokenSync } from './TokenSync.tsx';
 
 const GROUPS: TokenGroup[] = ['color', 'space', 'radius', 'font', 'shadow', 'duration'];
 
@@ -90,6 +91,8 @@ export function Tokens() {
       {adding ? <AddToken onAdd={add} onCancel={() => setAdding(false)} /> : (
         <button className="button subtle full" onClick={() => setAdding(true)}>+ New token</button>
       )}
+
+      <TokenSync />
 
       <p className="panel-hint">
         Tokens become CSS custom properties. Reference one anywhere a value goes, as
