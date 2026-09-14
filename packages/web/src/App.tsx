@@ -26,6 +26,7 @@ import { Logo } from './ui/Logo.tsx';
 import { Settings } from './ui/Settings.tsx';
 import { OverflowMenu } from './ui/OverflowMenu.tsx';
 import { CommandPalette } from './ui/CommandPalette.tsx';
+import { AgentChangeBar } from './ui/AgentChangeBar.tsx';
 import { ScrollArea } from './ui/ScrollArea.tsx';
 import {
   type Appearance, applyAppearance, loadAppearance, saveAppearance, watchSystemTheme,
@@ -390,6 +391,7 @@ function Editor({ source, onHome, appearance, onAppearance }: {
 
         <main className="stage">
           <Canvas onContextMenu={setContextMenu} />
+          <AgentChangeBar />
           <Toolbar compact={mode === 'narrow'} />
         </main>
 

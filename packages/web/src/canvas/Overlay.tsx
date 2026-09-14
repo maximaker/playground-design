@@ -13,7 +13,13 @@ import { useCanvas, getNodeById, getDoc } from '../state/store.ts';
 import { allFrames, findElement, nodeRect } from './registry.ts';
 import { HANDLES, type DropTarget } from './interactions.ts';
 
-interface Rects { selection: Record<NodeId, DOMRect>; hovered: DOMRect | null; peers: { color: string; rect: DOMRect }[] }
+interface Rects {
+  selection: Record<NodeId, DOMRect>;
+  hovered: DOMRect | null;
+  peers: { color: string; rect: DOMRect }[];
+  /** Layers an agent just changed, outlined until the review bar is dismissed. */
+  changed: DOMRect[];
+}
 
 interface OverlayProps {
   version: number;
@@ -30,12 +36,15 @@ export const Overlay = memo(function Overlay({ version, dropTarget, guides, live
   const editingText = useCanvas((s) => s.editingText);
   const viewport = useCanvas((s) => s.viewport);
   const peers = useCanvas((s) => s.peers);
+  // The id list, not the whole change: it is stable for the life of a run, so
+  // this does not re-measure on every unrelated store update.
+  const changedIds = useCanvas((s) => s.agentChange?.nodeIds);
 
-  const [rects, setRects] = useState<Rects>({ selection: {}, hovered: null, peers: [] });
+  const [rects, setRects] = useState<Rects>({ selection: {}, hovered: null, peers: [], changed: [] });
   const raf = useRef<number>(0);
 
   const measure = useCallback(() => {
-    const next: Rects = { selection: {}, hovered: null, peers: [] };
+    const next: Rects = { selection: {}, hovered: null, peers: [], changed: [] };
     for (const id of selection) {
       const r = nodeRect(id);
       if (r) next.selection[id] = r;
@@ -47,8 +56,12 @@ export const Overlay = memo(function Overlay({ version, dropTarget, guides, live
         if (r) next.peers.push({ color: peer.color, rect: r });
       }
     }
+    for (const id of changedIds ?? []) {
+      const r = nodeRect(id);
+      if (r) next.changed.push(r);
+    }
     setRects((prev) => (sameRects(prev, next) ? prev : next));
-  }, [selection, hovered, peers]);
+  }, [selection, hovered, peers, changedIds]);
 
   /**
    * Measure on change, not on a loop.
@@ -94,6 +107,10 @@ export const Overlay = memo(function Overlay({ version, dropTarget, guides, live
 
   return (
     <div className="overlay">
+      {rects.changed.map((rect, i) => (
+        <div key={`changed-${i}`} className="overlay-changed" style={boxStyle(rect)} />
+      ))}
+
       {rects.peers.map((p, i) => (
         <div key={`peer-${i}`} className="overlay-peer" style={boxStyle(p.rect, p.color)} />
       ))}
@@ -266,6 +283,10 @@ function sameRects(a: Rects, b: Rects): boolean {
   if (a.peers.length !== b.peers.length) return false;
   for (let i = 0; i < a.peers.length; i++) {
     if (!sameRect(a.peers[i]!.rect, b.peers[i]!.rect)) return false;
+  }
+  if (a.changed.length !== b.changed.length) return false;
+  for (let i = 0; i < a.changed.length; i++) {
+    if (!sameRect(a.changed[i]!, b.changed[i]!)) return false;
   }
   return true;
 }

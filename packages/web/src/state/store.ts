@@ -43,6 +43,25 @@ function sameIdentity(a: PeerInfo[], b: PeerInfo[]): boolean {
   });
 }
 
+export interface AgentChange {
+  /** Who made it, for the review bar. */
+  agent: string;
+  at: number;
+  /** Layers that still exist and can be shown. */
+  nodeIds: NodeId[];
+  /** Layers that were deleted — countable, not highlightable. */
+  removed: number;
+  /**
+   * Inverses of the agent's ops, newest first, so the whole run can be taken
+   * back in one action. Collected as the ops are applied because that is the
+   * only moment the inverses exist — recomputing them later would mean
+   * reconstructing a document state that has already moved on.
+   */
+  inverses: Op[];
+  /** The op count, which is what the review bar counts. */
+  ops: number;
+}
+
 export interface AgentActivity {
   active: boolean;
   agent: string;
@@ -83,6 +102,12 @@ interface CanvasState {
   pointer: { x: number; y: number } | null;
   /** Peers again, but the fast-moving half — see `setPeers`. */
   peerCursors: PeerCursor[];
+  /**
+   * What an agent changed while you were watching, so it can be reviewed rather
+   * than taken on trust. History records that a change happened; this records
+   * *which layers*, which is the question you actually have.
+   */
+  agentChange: AgentChange | null;
   /** The comment thread currently expanded on the canvas. */
   openComment: string | null;
   showResolvedComments: boolean;
@@ -157,6 +182,8 @@ interface CanvasActions {
   setReadOnly(readOnly: boolean): void;
   setPeers(p: PeerInfo[]): void;
   setPointer(pointer: { x: number; y: number } | null): void;
+  dismissAgentChange(): void;
+  revertAgentChange(): void;
   setOpenComment(id: string | null): void;
   setDraftComment(comment: Comment | null): void;
   setShowResolvedComments(show: boolean): void;
@@ -165,7 +192,7 @@ interface CanvasActions {
   /** Applies ops locally, pushes undo, and sends them to the server. */
   dispatch(ops: Op[], opts?: { batch?: string; skipUndo?: boolean; coalesce?: string }): void;
   /** Applies ops received from the server or an agent without touching undo. */
-  applyRemote(ops: { op: Op; rev: number }[]): void;
+  applyRemote(ops: { op: Op; rev: number; origin?: { kind: string; id?: string; label?: string } }[]): void;
   /**
    * Records a single undo entry for a gesture whose intermediate frames were
    * dispatched with `skipUndo` — a drag or resize should be one undo step, not
@@ -278,6 +305,7 @@ function pushEntry(stack: UndoEntry[], entry: UndoEntry): UndoEntry[] {
 }
 
 export const useCanvas = create<CanvasState & CanvasActions>((set, get) => ({
+  agentChange: null,
   docId: null,
   readOnly: false,
   pointer: null,
@@ -353,6 +381,17 @@ export const useCanvas = create<CanvasState & CanvasActions>((set, get) => ({
    * meaningless to a peer — sending it would put their cursor somewhere else on
    * the design. World coordinates are the only shared frame of reference.
    */
+  dismissAgentChange() { set({ agentChange: null }); },
+
+  /** Takes back an agent's run, as a normal local edit so it is itself undoable. */
+  revertAgentChange() {
+    const change = get().agentChange;
+    if (!change?.inverses.length) return;
+    set({ agentChange: null });
+    get().dispatch(change.inverses);
+    get().toast(`Reverted ${change.ops} change${change.ops === 1 ? '' : 's'} from ${change.agent}`, 'success');
+  },
+
   setOpenComment(openComment) { set({ openComment, draftComment: null }); },
   setDraftComment(draftComment) { set({ draftComment, openComment: null }); },
   setShowResolvedComments(showResolvedComments) { set({ showResolvedComments }); },
@@ -412,11 +451,48 @@ export const useCanvas = create<CanvasState & CanvasActions>((set, get) => ({
     const { doc } = get();
     if (!doc) return;
     const applied: Op[] = [];
-    for (const { op, rev } of ops) {
+    const agentInverses: Op[] = [];
+    const agentTouched = new Set<NodeId>();
+    let agentLabel: string | null = null;
+    let agentRemoved = 0;
+
+    for (const { op, rev, origin } of ops) {
       // The server echoes our own ops back; skip anything we already applied.
       if (rev <= doc.rev) continue;
-      try { applyOp(doc, op); doc.rev = rev; applied.push(op); }
-      catch { /* a diverged op is recovered by the server's `rejected` resync */ }
+      try {
+        const inverse = applyOp(doc, op);
+        doc.rev = rev;
+        applied.push(op);
+
+        if (origin?.kind === 'agent') {
+          agentLabel = origin.label ?? agentLabel ?? 'An agent';
+          agentInverses.unshift(inverse);
+          const touched = touchedNodes(op);
+          for (const id of [...touched.nodes, ...touched.structure]) {
+            // Only nodes that survived: a deleted one has nothing to point at.
+            if (doc.nodes[id]) agentTouched.add(id);
+          }
+          if (op.t === 'remove') agentRemoved += op.ids.length;
+        }
+      } catch { /* a diverged op is recovered by the server's `rejected` resync */ }
+    }
+
+    if (agentLabel) {
+      const prev = get().agentChange;
+      // Runs from the same agent accumulate rather than replacing each other:
+      // an agent makes twenty calls to do one thing, and twenty review bars in
+      // a row would be noise you learn to dismiss without reading.
+      const sameRun = prev && prev.agent === agentLabel && Date.now() - prev.at < 60_000;
+      set({
+        agentChange: {
+          agent: agentLabel,
+          at: Date.now(),
+          nodeIds: [...new Set([...(sameRun ? prev!.nodeIds : []), ...agentTouched])],
+          removed: (sameRun ? prev!.removed : 0) + agentRemoved,
+          inverses: [...agentInverses, ...(sameRun ? prev!.inverses : [])],
+          ops: (sameRun ? prev!.ops : 0) + agentInverses.length,
+        },
+      });
     }
     if (applied.length) {
       const tracked = trackChanges(doc, applied, get().nodeVersions);

@@ -215,6 +215,18 @@ a second, a selection changes on a click, and the overlay measures a rect per se
 forces an artboard iframe to lay out. Letting cursor churn invalidate the selection slice would put
 the editor into permanent layout thrash the moment a second person joined.
 
+**Seeing what an agent changed.** History records that a change happened and who made it. The
+question you actually have when an agent finishes is *which layers*, and the only useful answer is on
+the canvas — a list of op names tells you nothing about whether the result is right. Changed layers
+are outlined where they are, a bar walks you through them one at a time, and the whole run goes back
+in one action, because the alternative is pressing undo an unknown number of times and hoping.
+
+The inverses are collected as the ops arrive, since that is the only moment they exist: recomputing
+them later would mean reconstructing a document state that has already moved on. Calls within a run
+accumulate rather than replacing each other — an agent makes twenty calls to do one thing, and twenty
+notifications in a row is something you learn to dismiss without reading. The reverting is itself an
+ordinary local edit, so it can be undone too.
+
 **Dropping images.** Drag a file onto the canvas. Where it lands follows the pointer, not the
 selection — dropping something *there* is a statement about where you want it. Onto a frame it goes
 inside; onto empty canvas it gets an artboard of its own, sized to the image and named after the
@@ -394,6 +406,20 @@ node scripts/share-check.mjs
 It attempts the write over the real socket rather than through the interface that hides the button,
 re-reads the document to confirm nothing moved, and asserts the document id appears nowhere in
 anything a viewer receives.
+
+The rest of the surface has its own scripts, each run the same way against localhost or a deployment:
+
+```bash
+node scripts/comment-check.mjs        # the whole loop, person → agent → resolved
+node scripts/cursor-check.mjs         # two tabs at different zooms
+node scripts/drop-check.mjs           # a real DataTransfer, both placements
+node scripts/agent-review-check.mjs   # a real MCP session, outlined and reverted
+```
+
+Two of them are honest about the deployment rather than failing on it: presence rides the WebSocket,
+and serverless cannot hold one open, so `cursor-check` reports that live cursors are unavailable on
+such a host and stops. `share-check` runs its socket half only where there is a socket and its HTTP
+half everywhere, since HTTP is the path production actually takes.
 
 The code-component check asserts the sandbox actually held (no same-origin access, scripts enabled only
 on the hosting artboard), that props reach the component rather than being

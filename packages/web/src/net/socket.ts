@@ -182,11 +182,9 @@ export function connectDocument(source: Source): Connection {
       case 'ops': {
         const ops = msg.ops as { op: Op; rev: number; origin: { kind: string; label?: string } }[];
         store.getState().applyRemote(ops);
-        const agentOps = ops.filter((o) => o.origin?.kind === 'agent');
-        if (agentOps.length) {
-          const label = agentOps[0]!.origin.label ?? 'An agent';
-          store.getState().toast(`${label} made ${agentOps.length} change${agentOps.length === 1 ? '' : 's'}`, 'info');
-        }
+        // No toast for agent ops: the review bar says the same thing and stays
+        // until it is dealt with. A toast per tool call stacked up three deep
+        // during a single run and taught you to ignore all of them.
         break;
       }
       case 'rejected': {
