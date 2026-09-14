@@ -13,7 +13,7 @@ import { createDocument, listDocuments, flushAll } from './store.ts';
 import { shutdownRenderer } from './render.ts';
 
 const server = serve({ fetch: app.fetch, port: PORT }, (info) => {
-  console.log(`\n  Canvas server  \u2192  http://localhost:${info.port}`);
+  console.log(`\n  Playground     \u2192  http://localhost:${info.port}`);
   console.log(`  MCP endpoint   \u2192  ${PUBLIC_URL}/mcp/<connection-code>`);
   console.log(`  Web client     \u2192  ${existsSync(WEB_DIST) ? PUBLIC_URL : 'http://localhost:5173 (vite dev)'}\n`);
 });

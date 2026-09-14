@@ -9,7 +9,7 @@
 
 export const GUIDES: Record<string, string> = {
   'getting-started': `
-# Working in Canvas
+# Working in Playground
 
 1. Call \`get_basic_info\` first. It gives you the artboards and their sizes.
 2. Call \`get_tree_summary\` on an artboard before changing anything inside it.
@@ -67,7 +67,7 @@ so the human sees which artboards you are touching.
   'figma-import': `
 # Bringing a Figma design in
 
-Canvas has no Figma API integration. The path is paste:
+Playground has no Figma API integration. The path is paste:
 
 1. In Figma, select the frame and copy it.
 2. In Canvas, paste onto the canvas. Frames become flex containers, auto-layout
@@ -83,13 +83,26 @@ If the human has not pasted anything yet, say so rather than inventing content.
   components: `
 # Repeated elements
 
-Canvas v1 has no component instances. For anything repeated:
+The moment you would build the same thing twice, make it a component.
 
-- Build one, then \`duplicate_nodes\` it — the returned id map tells you which new
-  node corresponds to which original, so you can restyle the copies precisely.
-- Keep the repeated structure identical so it maps cleanly to a real component
-  later. Name the root of each copy the same thing.
-- Put shared values in tokens so a change is one edit, not N.
+1. \`list_components\` — it may already exist.
+2. Build one well, then \`create_component\` on it. The original is replaced by an
+   instance, so the canvas keeps rendering the same pixels.
+3. \`insert_instance\` for the rest.
+
+Varying by size, tone or state is a variant, not a copy:
+
+- \`set_component_props\` declares what it varies by, e.g. size: sm | md | lg.
+- \`set_variant\` says what a combination looks like. A partial match applies
+  broadly — {tone: "danger"} applies at every size — and a more specific
+  combination refines it rather than replacing it.
+- \`set_instance_props\` switches an instance between them.
+
+Use \`set_override\` only for a genuine one-off; if two instances need the same
+change, that is a variant. \`detach_instance\` is the escape hatch when one
+instance has to diverge past what overrides can express.
+
+Put shared values in tokens so a change is one edit, not N.
 `.trim(),
 
   export: `

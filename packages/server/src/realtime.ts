@@ -206,7 +206,7 @@ export class NoTabError extends Error {
   constructor(method: string) {
     super(
       `"${method}" needs the document open in a browser tab, and none is connected. ` +
-      `Open the document in Canvas and retry, or use a tool that reads the stored document instead.`,
+      `Open the document in Playground and retry, or use a tool that reads the stored document instead.`,
     );
   }
 }

@@ -1,5 +1,5 @@
 /**
- * The MCP surface: how agents read and write a Canvas document.
+ * The MCP surface: how agents read and write a Playground document.
  *
  * Most tools run against the server's copy of the document, so they work with
  * no browser tab open (headless agent sessions). Only the tools that need a
@@ -94,11 +94,11 @@ function node(doc: CanvasDocument, id: NodeId): CanvasNode {
 
 export function buildMcpServer(ctx: McpContext): McpServer {
   const server = new McpServer(
-    { name: 'canvas', version: '0.1.0' },
+    { name: 'playground', version: '0.1.0' },
     {
       instructions:
-        `You are connected to a Canvas design document ("${ctx.connection.docName}"). ` +
-        `Canvas is a design tool whose documents are real HTML and CSS.\n\n` +
+        `You are connected to a Playground design document ("${ctx.connection.docName}"). ` +
+        `Playground is a design tool whose documents are real HTML and CSS.\n\n` +
         `Start with get_basic_info, then get_tree_summary on the artboard you care about. ` +
         `Create with write_html. After any visual change, call get_screenshot to check your work — ` +
         `you cannot tell whether a layout is right without looking at it.\n\n` +

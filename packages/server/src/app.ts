@@ -341,7 +341,7 @@ app.all('/mcp/:code', async (c) => {
   if (!connection) {
     // Deliberately does not distinguish unknown / revoked / expired.
     return c.json({
-      error: 'This connection code is not valid. Generate a new one from the Connect agent panel in Canvas.',
+      error: 'This connection code is not valid. Generate a new one from the Connect agent panel in Playground.',
     }, 401);
   }
   return handleMcpRequest(c.req.raw, connection, PUBLIC_URL);
@@ -369,7 +369,7 @@ if (SERVE_CLIENT && existsSync(WEB_DIST)) {
   app.notFound((c) => shell(c, async () => {}) as Response | Promise<Response>);
 } else {
   app.get('/', (c) =>
-    c.text('Canvas API is running. The web client is not built — run `npm run dev:web` (Vite serves it on :5173).'));
+    c.text('Playground API is running. The web client is not built — run `npm run dev:web` (Vite serves it on :5173).'));
 }
 
 /**

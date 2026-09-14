@@ -69,7 +69,7 @@ export async function renderNode(
     if (err instanceof NoTabError) {
       throw new Error(
         `Cannot rasterize: Playwright is not installed and no browser tab is connected. ` +
-        `Either open the document in Canvas, or run "npm i -D playwright && npx playwright install chromium" ` +
+        `Either open the document in Playground, or run "npm i -D playwright && npx playwright install chromium" ` +
         `in the server package to enable headless rendering.`,
       );
     }

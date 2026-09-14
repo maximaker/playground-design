@@ -2,7 +2,7 @@
  * Importing a live webpage onto the canvas.
  *
  * This is the capability an HTML-native document model should have that a
- * vector tool cannot: a real page and a Canvas document are the same kind of
+ * vector tool cannot: a real page and a Playground document are the same kind of
  * thing, so importing is fetch + inline + parse rather than a conversion.
  *
  * Fetching is server-side, so the usual precautions apply: private network
