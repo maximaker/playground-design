@@ -2,7 +2,7 @@
 
 import type { CanvasDocument } from '@playground/shared';
 import type {
-  DocSummary, Persistence, StoredAsset, StoredConnection, StoredSnapshot,
+  DocSummary, Persistence, StoredAsset, StoredConnection, StoredShare, StoredSnapshot,
 } from './persistence.ts';
 
 export class MemoryPersistence implements Persistence {
@@ -11,6 +11,7 @@ export class MemoryPersistence implements Persistence {
 
   private docs = new Map<string, { doc: CanvasDocument; updatedAt: number }>();
   private connections = new Map<string, StoredConnection>();
+  private shares = new Map<string, StoredShare>();
   private assets = new Map<string, StoredAsset>();
   private snapshots = new Map<string, StoredSnapshot>();
 
@@ -33,6 +34,13 @@ export class MemoryPersistence implements Persistence {
     return [...this.connections.values()].filter((c) => !docId || c.docId === docId);
   }
   async loadConnection(code: string) { return this.connections.get(code) ?? null; }
+
+  async saveShare(share: StoredShare) { this.shares.set(share.token, share); }
+  async loadShares(docId: string) {
+    return [...this.shares.values()].filter((s) => s.docId === docId)
+      .sort((a, b) => b.createdAt - a.createdAt);
+  }
+  async loadShare(token: string) { return this.shares.get(token) ?? null; }
 
   async saveAsset(asset: StoredAsset) { this.assets.set(asset.id, asset); }
   async loadAsset(id: string) { return this.assets.get(id) ?? null; }

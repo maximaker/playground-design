@@ -53,6 +53,13 @@ const COALESCE_WINDOW_MS = 900;
 
 interface CanvasState {
   docId: string | null;
+  /**
+   * True for a tab opened through a share link. The server refuses writes from
+   * such a session regardless; this is what stops the UI from *offering* edits
+   * it knows will bounce, and from showing an optimistic change that is about
+   * to be taken back.
+   */
+  readOnly: boolean;
   doc: CanvasDocument | null;
   version: number;
   /**
@@ -115,6 +122,7 @@ interface CanvasActions {
   setConnection(s: CanvasState['connection']): void;
   setTransport(t: CanvasState['transport']): void;
   setFatalError(message: string | null): void;
+  setReadOnly(readOnly: boolean): void;
   setPeers(p: PeerInfo[]): void;
   setSend(fn: CanvasState['send']): void;
 
@@ -235,6 +243,7 @@ function pushEntry(stack: UndoEntry[], entry: UndoEntry): UndoEntry[] {
 
 export const useCanvas = create<CanvasState & CanvasActions>((set, get) => ({
   docId: null,
+  readOnly: false,
   doc: null,
   version: 0,
   nodeVersions: {},
@@ -276,12 +285,17 @@ export const useCanvas = create<CanvasState & CanvasActions>((set, get) => ({
   setConnection(connection) { set({ connection }); },
   setTransport(transport) { set({ transport }); },
   setFatalError(fatalError) { set({ fatalError }); },
+  setReadOnly(readOnly) { set({ readOnly }); },
   setPeers(peers) { set({ peers: peers.filter((p) => p.clientId !== get().clientId) }); },
   setSend(send) { set({ send }); },
 
   dispatch(ops, opts) {
-    const { doc, send, selection, undoStack } = get();
+    const { doc, send, selection, undoStack, readOnly } = get();
     if (!doc || ops.length === 0) return;
+    if (readOnly) {
+      get().toast('This is a view-only link. Ask whoever shared it for an editing link.', 'info');
+      return;
+    }
     const batch = opts?.batch ?? batchId();
 
     const inverses: Op[] = [];

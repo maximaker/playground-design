@@ -23,6 +23,9 @@ import { peersOf, hasLiveTab } from './realtime.ts';
 import { createConnection, listConnections, resolveConnection, revokeConnection } from './connections.ts';
 import { handleMcpRequest } from './mcp.ts';
 import { getAsset, storeAsset, AssetError, MAX_ASSET_BYTES } from './assets.ts';
+import {
+  type Share, createShare, listShares, redactForViewer, resolveShare, revokeShare,
+} from './shares.ts';
 import { importUrl, ImportError } from './import.ts';
 import { getTemplate, templateSummaries, type Template } from './templates.ts';
 import { renderNode } from './render.ts';
@@ -333,6 +336,67 @@ api.delete('/connections/:code', async (c) =>
   (await revokeConnection(c.req.param('code'))) ? c.json({ ok: true }) : c.json({ error: 'not found' }, 404));
 
 // ---------------------------------------------------------------------------
+// Share links
+// ---------------------------------------------------------------------------
+
+api.post('/documents/:id/shares', async (c) => {
+  const doc = await requireDocument(c.req.param('id'));
+  const body = await c.req.json<{ label?: string }>().catch(() => ({} as { label?: string }));
+  const share = await createShare(doc.id, body.label);
+  return c.json({ share: publicShare(share), url: `${PUBLIC_URL}/s/${share.token}` }, 201);
+});
+
+api.get('/documents/:id/shares', async (c) => {
+  const doc = await requireDocument(c.req.param('id'));
+  const shares = await listShares(doc.id);
+  return c.json({
+    shares: shares.map((s) => ({ ...publicShare(s), url: `${PUBLIC_URL}/s/${s.token}` })),
+  });
+});
+
+api.delete('/shares/:token', async (c) =>
+  (await revokeShare(c.req.param('token'))) ? c.json({ ok: true }) : c.json({ error: 'not found' }, 404));
+
+/**
+ * Everything below is what a *viewer* may call. Each is addressed by token and
+ * never reveals the document id, because the id is the edit credential — a
+ * viewer who learned it could simply open the editor instead.
+ */
+api.get('/shares/:token', async (c) => {
+  const token = c.req.param('token');
+  const share = await resolveShare(token);
+  if (!share) return c.json({ error: 'This link has been revoked or never existed.' }, 404);
+  const doc = getDocument(share.docId)!;
+  return c.json({
+    role: share.role,
+    name: doc.name,
+    document: redactForViewer(doc, token),
+    rev: doc.rev,
+  });
+});
+
+api.get('/shares/:token/sync', async (c) => {
+  const token = c.req.param('token');
+  const share = await resolveShare(token);
+  if (!share) return c.json({ error: 'This link has been revoked or never existed.' }, 404);
+
+  const doc = getDocument(share.docId)!;
+  const since = Number(c.req.query('rev') ?? 0);
+  const ops = opsSince(doc.id, since);
+  if (ops === null) return c.json({ resync: true, document: redactForViewer(doc, token), rev: doc.rev });
+  return c.json({ ops, rev: doc.rev });
+});
+
+function publicShare(s: Share) {
+  // No docId: the caller minting a link already knows it, and the viewer must
+  // never see it, so it is simply never part of the shape.
+  return {
+    token: s.token, role: s.role, label: s.label,
+    createdAt: s.createdAt, lastUsedAt: s.lastUsedAt,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Assets
 // ---------------------------------------------------------------------------
 
@@ -398,6 +462,7 @@ if (SERVE_CLIENT && existsSync(WEB_DIST)) {
   // on a hard refresh.
   const shell = serveStatic({ path: `${relative(process.cwd(), WEB_DIST) || '.'}/index.html` });
   app.get('/d/:id', shell);
+  app.get('/s/:token', shell);
   app.notFound((c) => shell(c, async () => {}) as Response | Promise<Response>);
 } else {
   app.get('/', (c) =>

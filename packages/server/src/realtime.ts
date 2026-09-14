@@ -13,6 +13,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import type { Server } from 'node:http';
 import type { OpEnvelope } from '@playground/shared';
 import { applyOps, ensureLoaded, getDocument, subscribe, StoreError, autoSnapshotIfStale } from './store.ts';
+import { redactForViewer, resolveShare } from './shares.ts';
 
 export interface Peer {
   clientId: string;
@@ -30,6 +31,12 @@ interface Session {
   peer: Peer;
   unsubscribe: () => void;
   alive: boolean;
+  /**
+   * False for a session that joined through a share link. Enforced here rather
+   * than only in the client, because a hidden toolbar stops an honest viewer
+   * from making a mess and nothing else.
+   */
+  canWrite: boolean;
 }
 
 const sessions = new Set<Session>();
@@ -55,14 +62,30 @@ export function attachRealtime(server: Server): WebSocketServer {
       switch (msg.type) {
         case 'join': {
           if (session) teardown(session);
-          // The document may not be in the cache yet on a cold start.
-          void ensureLoaded(String(msg.docId ?? '')).then(() => {
-            if (!session) session = handleJoin(ws, msg);
-          });
+          // A viewer joins by share token and never learns the document id; the
+          // server resolves it here. The document may also not be in the cache
+          // yet on a cold start, so both paths are async.
+          void (async () => {
+            if (msg.shareToken) {
+              const share = await resolveShare(String(msg.shareToken));
+              if (!share) return send(ws, { type: 'error', message: 'This link has been revoked or never existed.' });
+              if (!session) session = handleJoin(ws, msg, share.docId, false);
+              return;
+            }
+            await ensureLoaded(String(msg.docId ?? ''));
+            if (!session) session = handleJoin(ws, msg, String(msg.docId ?? ''), true);
+          })();
           break;
         }
         case 'ops': {
           if (!session) return send(ws, { type: 'error', message: 'join first' });
+          if (!session.canWrite) {
+            return send(ws, {
+              type: 'rejected',
+              message: 'This is a view-only link. Ask whoever shared it for an editing link.',
+              doc: getDocument(session.docId),
+            });
+          }
           handleOps(session, msg.ops as OpEnvelope[]);
           break;
         }
@@ -108,8 +131,12 @@ export function attachRealtime(server: Server): WebSocketServer {
   return wss;
 }
 
-function handleJoin(ws: WebSocket, msg: Record<string, unknown>): Session | null {
-  const docId = String(msg.docId ?? '');
+function handleJoin(
+  ws: WebSocket,
+  msg: Record<string, unknown>,
+  docId: string,
+  canWrite: boolean,
+): Session | null {
   const doc = getDocument(docId);
   if (!doc) { send(ws, { type: 'error', message: `document ${docId} not found` }); return null; }
 
@@ -124,7 +151,7 @@ function handleJoin(ws: WebSocket, msg: Record<string, unknown>): Session | null
   };
 
   const session: Session = {
-    ws, docId, peer, alive: true,
+    ws, docId, peer, alive: true, canWrite,
     unsubscribe: subscribe(docId, (ops) => {
       // Echo every op, including the sender's own, so clients can reconcile the
       // revision numbers they optimistically guessed.
@@ -137,7 +164,13 @@ function handleJoin(ws: WebSocket, msg: Record<string, unknown>): Session | null
   if (!set) { set = new Set(); byDoc.set(docId, set); }
   set.add(session);
 
-  send(ws, { type: 'joined', clientId, peer, doc, rev: doc.rev });
+  send(ws, {
+    type: 'joined', clientId, peer, rev: doc.rev,
+    // A viewer must not receive the real document id, which is the edit
+    // credential — otherwise the read-only link is a formality.
+    doc: canWrite ? doc : redactForViewer(doc, String(msg.shareToken ?? '')),
+    canWrite,
+  });
   broadcastPeers(docId);
   void autoSnapshotIfStale(docId).catch(() => {});
   return session;

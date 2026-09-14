@@ -353,7 +353,18 @@ component bundled out of `scripts/fixtures/repo` by real esbuild:
 node scripts/code-component-check.mjs
 ```
 
-It asserts the sandbox actually held (no same-origin access, scripts enabled only
+Share links are checked the same way, because what they promise is a negative — that a viewer
+*cannot* write — and negatives are where UI-only enforcement quietly fails:
+
+```bash
+node scripts/share-check.mjs
+```
+
+It attempts the write over the real socket rather than through the interface that hides the button,
+re-reads the document to confirm nothing moved, and asserts the document id appears nowhere in
+anything a viewer receives.
+
+The code-component check asserts the sandbox actually held (no same-origin access, scripts enabled only
 on the hosting artboard), that props reach the component rather than being
 replaced by its defaults, that a prop change re-renders the live instance, and
 that export emits the import rather than the markup.
@@ -364,6 +375,22 @@ that export emits the import rather than the markup.
   surface the way an agent does, including the error paths
 - `packages/server/src/fidelity.test.ts` — the export-fidelity gate: render an artboard, export it,
   re-import the export into a fresh document, render that, and pixel-diff the two
+
+## Sharing
+
+A document URL is an edit credential — anyone holding `/d/<id>` can change the file — so showing work
+to someone used to be all-or-nothing. A share link is a separate, revocable token that opens the
+document read-only and **live**: the viewer watches changes land as they happen, which is the reason
+to send a link rather than a PNG.
+
+The link must not leak the document id, or the restriction is decoration: a viewer who learned it
+would open the editor instead. So every endpoint a viewer touches is addressed by token, the server
+resolves the id on its side, and the document is redacted on the way out — `doc.id` becomes the token.
+
+Read-only is enforced on the server. Hiding the toolbar stops an honest viewer from making a mess;
+refusing the ops over the socket is what stops the rest. The properties panel stays visible and
+readable — inspecting real values is most of why you send someone a link — inside a disabled
+`fieldset`, so no control can be forgotten one at a time.
 
 ## Security
 

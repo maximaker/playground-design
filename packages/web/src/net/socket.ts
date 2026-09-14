@@ -30,7 +30,23 @@ export interface Connection { close(): void }
 const WS_GRACE_MS = 1200;
 const POLL_INTERVAL_MS = 1500;
 
-export function connectDocument(docId: string): Connection {
+/**
+ * What this tab is connected to.
+ *
+ * A viewer holds only a share token and never learns the document id — that id
+ * is the edit credential, so handing it over would make the read-only link a
+ * formality. Every request a viewer makes is therefore addressed by token.
+ */
+export type Source =
+  | { kind: 'doc'; id: string }
+  | { kind: 'share'; token: string };
+
+export function connectDocument(source: Source): Connection {
+  const readOnly = source.kind === 'share';
+  const syncUrl = (rev: number) => source.kind === 'share'
+    ? `/api/shares/${source.token}/sync?rev=${rev}`
+    : `/api/documents/${source.id}/sync?rev=${rev}`;
+
   let ws: WebSocket | null = null;
   let closed = false;
   let retry = 0;
@@ -46,7 +62,7 @@ export function connectDocument(docId: string): Connection {
     if (closed) return;
     try {
       const rev = store.getState().rev;
-      const res = await fetch(`/api/documents/${docId}/sync?rev=${rev}`);
+      const res = await fetch(syncUrl(rev));
       if (!res.ok) throw new Error(`sync failed: ${res.status}`);
       const body = (await res.json()) as {
         resync?: boolean; document?: CanvasDocument;
@@ -77,21 +93,30 @@ export function connectDocument(docId: string): Connection {
 
     // Load the document once up front, since there is no `joined` message.
     try {
-      const res = await fetch(`/api/documents/${docId}`);
+      const res = await fetch(source.kind === 'share'
+        ? `/api/shares/${source.token}`
+        : `/api/documents/${source.id}`);
       if (res.ok) {
-        const { document } = (await res.json()) as { document: CanvasDocument };
-        store.getState().loadDocument(document);
+        const body = (await res.json()) as { document: CanvasDocument };
+        store.getState().loadDocument(body.document);
         store.getState().setConnection('open');
-        store.getState().setSend((envelopes: OpEnvelope[]) => {
-          // Fire-and-forget: the optimistic local apply already happened.
-          void fetch(`/api/documents/${docId}/ops`, {
-            method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ ops: envelopes }),
+        // A viewer has nowhere to send ops, and the server would refuse them
+        // anyway; leaving `send` unset keeps the store from pretending.
+        if (!readOnly && source.kind === 'doc') {
+          const id = source.id;
+          store.getState().setSend((envelopes: OpEnvelope[]) => {
+            // Fire-and-forget: the optimistic local apply already happened.
+            void fetch(`/api/documents/${id}/ops`, {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ ops: envelopes }),
+            });
           });
-        });
+        }
       } else if (res.status === 404) {
-        store.getState().setFatalError(`document ${docId} not found`);
+        store.getState().setFatalError(readOnly
+          ? 'This link has been revoked or never existed.'
+          : `document ${(source as { id: string }).id} not found`);
         closed = true;
         return;
       }
@@ -112,7 +137,7 @@ export function connectDocument(docId: string): Connection {
       stopPolling();
       ws!.send(JSON.stringify({
         type: 'join',
-        docId,
+        ...(source.kind === 'share' ? { shareToken: source.token } : { docId: source.id }),
         clientId: store.getState().clientId,
         name: localStorage.getItem('canvas.name') ?? undefined,
       }));
@@ -147,7 +172,9 @@ export function connectDocument(docId: string): Connection {
         store.getState().loadDocument(msg.doc as CanvasDocument);
         store.getState().setConnection('open');
         store.getState().setTransport('websocket');
-        store.getState().setSend((envelopes: OpEnvelope[]) => send({ type: 'ops', ops: envelopes }));
+        if (msg.canWrite !== false) {
+          store.getState().setSend((envelopes: OpEnvelope[]) => send({ type: 'ops', ops: envelopes }));
+        }
         break;
       }
       case 'ops': {

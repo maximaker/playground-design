@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useCanvas } from './state/store.ts';
-import { connectDocument } from './net/socket.ts';
+import { type Source, connectDocument } from './net/socket.ts';
 import { useKeyboard } from './hooks/useKeyboard.ts';
 import { useLayoutMode, panelsOverlay } from './hooks/useLayout.ts';
 import { useClipboard } from './hooks/useClipboard.ts';
@@ -14,6 +14,7 @@ import { Components } from './panels/Components.tsx';
 import { Review } from './panels/Review.tsx';
 import { History } from './panels/History.tsx';
 import { ConnectAgent } from './panels/ConnectAgent.tsx';
+import { Share } from './panels/Share.tsx';
 import { Export } from './panels/Export.tsx';
 import { Import } from './panels/Import.tsx';
 import { Toolbar } from './ui/Toolbar.tsx';
@@ -42,7 +43,7 @@ const LEFT_TABS: { id: LeftTab; icon: IconName; label: string; hint: string }[] 
 ];
 
 export function App() {
-  const [docId, setDocId] = useState<string | null>(() => docIdFromLocation());
+  const [source, setSource] = useState<Source | null>(() => sourceFromLocation());
   const [appearance, setAppearance] = useState<Appearance>(loadAppearance);
 
   useEffect(() => {
@@ -57,15 +58,15 @@ export function App() {
   }, [appearance]);
 
   useEffect(() => {
-    const onPop = () => setDocId(docIdFromLocation());
+    const onPop = () => setSource(sourceFromLocation());
     window.addEventListener('popstate', onPop);
     return () => window.removeEventListener('popstate', onPop);
   }, []);
 
-  if (!docId) {
+  if (!source) {
     return (
       <Home
-        onOpen={(id) => { history.pushState({}, '', `/d/${id}`); setDocId(id); }}
+        onOpen={(id) => { history.pushState({}, '', `/d/${id}`); setSource({ kind: 'doc', id }); }}
         appearance={appearance}
         onAppearance={setAppearance}
       />
@@ -73,8 +74,13 @@ export function App() {
   }
   return (
     <Editor
-      docId={docId}
-      onHome={() => { history.pushState({}, '', '/'); setDocId(null); }}
+      key={source.kind === 'doc' ? source.id : source.token}
+      source={source}
+      // A viewer arrived by link and has no library to go back to; sending them
+      // to a list of documents they cannot open would be a dead end.
+      onHome={source.kind === 'doc'
+        ? () => { history.pushState({}, '', '/'); setSource(null); }
+        : null}
       appearance={appearance}
       onAppearance={setAppearance}
     />
@@ -89,14 +95,17 @@ function hiddenWhenClosed(open: boolean): Record<string, unknown> {
   return open ? {} : { inert: '', 'aria-hidden': true };
 }
 
-function docIdFromLocation(): string | null {
-  const m = /^\/d\/([\w-]+)/.exec(location.pathname);
-  return m ? m[1]! : null;
+function sourceFromLocation(): Source | null {
+  const doc = /^\/d\/([\w-]+)/.exec(location.pathname);
+  if (doc) return { kind: 'doc', id: doc[1]! };
+  const share = /^\/s\/([\w-]+)/.exec(location.pathname);
+  if (share) return { kind: 'share', token: share[1]! };
+  return null;
 }
 
-function Editor({ docId, onHome, appearance, onAppearance }: {
-  docId: string;
-  onHome: () => void;
+function Editor({ source, onHome, appearance, onAppearance }: {
+  source: Source;
+  onHome: (() => void) | null;
   appearance: Appearance;
   onAppearance: (next: Appearance) => void;
 }) {
@@ -112,7 +121,7 @@ function Editor({ docId, onHome, appearance, onAppearance }: {
   const dispatch = useCanvas((s) => s.dispatch);
 
   const [leftTab, setLeftTab] = useState<LeftTab>('layers');
-  const [modal, setModal] = useState<'connect' | 'export' | 'import' | 'shortcuts' | null>(null);
+  const [modal, setModal] = useState<'connect' | 'share' | 'export' | 'import' | 'shortcuts' | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [showOverflow, setShowOverflow] = useState(false);
@@ -138,10 +147,14 @@ function Editor({ docId, onHome, appearance, onAppearance }: {
   });
   useClipboard();
 
+  const readOnly = source.kind === 'share';
+
   useEffect(() => {
-    const conn = connectDocument(docId);
+    useCanvas.getState().setReadOnly(readOnly);
+    const conn = connectDocument(source);
     return () => conn.close();
-  }, [docId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [source.kind === 'doc' ? source.id : source.token]);
 
   if (!doc) {
     return (
@@ -151,7 +164,7 @@ function Editor({ docId, onHome, appearance, onAppearance }: {
           {fatalError ? (
             <>
               <p className="boot-error">{fatalError}</p>
-              <button className="button primary" onClick={onHome}>Back to all documents</button>
+              {onHome && <button className="button primary" onClick={onHome}>Back to all documents</button>}
             </>
           ) : (
             <p>Opening document…</p>
@@ -164,9 +177,15 @@ function Editor({ docId, onHome, appearance, onAppearance }: {
   return (
     <div className={`app is-${mode}`}>
       <header className="topbar">
-        <button className="logo" onClick={onHome} title="All documents" aria-label="All documents">
-          <Logo size={17} variant={mode === 'narrow' ? 'mark' : 'full'} />
-        </button>
+        {onHome ? (
+          <button className="logo" onClick={onHome} title="All documents" aria-label="All documents">
+            <Logo size={17} variant={mode === 'narrow' ? 'mark' : 'full'} />
+          </button>
+        ) : (
+          <span className="logo">
+            <Logo size={17} variant={mode === 'narrow' ? 'mark' : 'full'} />
+          </span>
+        )}
 
         <button
           className="icon-button"
@@ -188,6 +207,7 @@ function Editor({ docId, onHome, appearance, onAppearance }: {
         <input
           className="doc-name"
           aria-label="Document name"
+          readOnly={readOnly}
           key={`${doc.id}-${version}`}
           defaultValue={doc.name}
           onBlur={(e) => {
@@ -222,7 +242,10 @@ function Editor({ docId, onHome, appearance, onAppearance }: {
               <OverflowMenu
                 onClose={() => setShowOverflow(false)}
                 items={[
-                  { label: 'Import a webpage', icon: 'download', run: () => setModal('import') },
+                  ...(readOnly ? [] : [
+                    { label: 'Import a webpage', icon: 'download' as IconName, run: () => setModal('import') },
+                    { label: 'Share a link', icon: 'share' as IconName, run: () => setModal('share') },
+                  ]),
                   { label: 'Export', icon: 'upload', run: () => setModal('export') },
                   { label: 'Keyboard shortcuts', icon: 'keyboard', run: () => setModal('shortcuts') },
                   { label: 'Appearance', icon: 'settings', run: () => setShowSettings(true) },
@@ -249,10 +272,12 @@ function Editor({ docId, onHome, appearance, onAppearance }: {
 
             <span className="topbar-divider" />
 
-            <button className="button" onClick={() => setModal('import')} title="Bring a live webpage onto the canvas">
-              <Icon name="download" size={14} />
-              <span className="button-label">Import</span>
-            </button>
+            {!readOnly && (
+              <button className="button" onClick={() => setModal('import')} title="Bring a live webpage onto the canvas">
+                <Icon name="download" size={14} />
+                <span className="button-label">Import</span>
+              </button>
+            )}
             <button className="button" onClick={() => setModal('export')} title="Export this design (\u2318\u21e7E)">
               <Icon name="upload" size={14} />
               <span className="button-label">Export</span>
@@ -260,10 +285,24 @@ function Editor({ docId, onHome, appearance, onAppearance }: {
           </>
         )}
 
-        <button className="button primary" onClick={() => setModal('connect')} title="Connect an agent">
-          <Icon name="sparkle" size={14} />
-          <span className="button-label">Connect agent</span>
-        </button>
+        {!readOnly && (
+          <>
+            <button className="button" onClick={() => setModal('share')} title="Create a read-only link">
+              <Icon name="share" size={14} />
+              <span className="button-label">Share</span>
+            </button>
+            <button className="button primary" onClick={() => setModal('connect')} title="Connect an agent">
+              <Icon name="sparkle" size={14} />
+              <span className="button-label">Connect agent</span>
+            </button>
+          </>
+        )}
+
+        {readOnly && (
+          <span className="view-badge" title="You are looking at a shared link. Nothing you do changes the document.">
+            <Icon name="eye" size={13} /> View only
+          </span>
+        )}
 
 
         {overlay && (
@@ -353,7 +392,15 @@ function Editor({ docId, onHome, appearance, onAppearance }: {
 
         <aside className={`rail rail-right${rightOpen ? ' is-open' : ''}`} {...hiddenWhenClosed(rightOpen)}>
           <ScrollArea className="rail-body">
-            <Properties />
+            {/*
+              * A viewer keeps the properties panel — reading the real values is
+              * most of why you send someone a link — but every control inside is
+              * disabled natively. A `fieldset` does that in one place and cannot
+              * be forgotten, which a per-control `disabled` prop could.
+              */}
+            <fieldset className="rail-fieldset" disabled={readOnly}>
+              <Properties />
+            </fieldset>
           </ScrollArea>
         </aside>
       </div>
@@ -367,7 +414,7 @@ function Editor({ docId, onHome, appearance, onAppearance }: {
             openConnect: () => setModal('connect'),
             openShortcuts: () => setModal('shortcuts'),
             openPanel: (tab) => { setLeftTab(tab as LeftTab); if (overlay) setOpenPanel('left'); },
-            goHome: onHome,
+            goHome: onHome ?? (() => {}),
           }}
         />
       )}
@@ -381,6 +428,7 @@ function Editor({ docId, onHome, appearance, onAppearance }: {
       )}
 
       {modal === 'connect' && <ConnectAgent onClose={() => setModal(null)} />}
+      {modal === 'share' && <Share onClose={() => setModal(null)} />}
       {modal === 'export' && <Export onClose={() => setModal(null)} />}
       {modal === 'import' && <Import onClose={() => setModal(null)} />}
       {modal === 'shortcuts' && <Shortcuts onClose={() => setModal(null)} />}

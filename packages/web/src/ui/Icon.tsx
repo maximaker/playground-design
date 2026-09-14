@@ -34,6 +34,8 @@ const PATHS = {
   // Angle brackets around a diamond: a component that is source code.
   codeComponent: 'M5.2 3.8 2.2 8l3 4.2M10.8 3.8 13.8 8l-3 4.2M8 5.9 9.8 8 8 10.1 6.2 8z',
 
+  share: 'M11.2 5.4a2 2 0 1 0 0-3.4 2 2 0 0 0 0 3.4zM4.8 9.7a2 2 0 1 0 0-3.4 2 2 0 0 0 0 3.4zM11.2 14a2 2 0 1 0 0-3.4 2 2 0 0 0 0 3.4zM6.5 7.1l3.1-1.7M6.5 8.9l3.1 1.7',
+
   // --- Layout modes ------------------------------------------------------
   // Little diagrams of the resulting layout, not abstract marks: loose boxes,
   // a stack, a row, a grid. You should be able to pick one without reading.

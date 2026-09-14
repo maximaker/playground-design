@@ -16,6 +16,7 @@ const TOOLS: { tool: Tool; icon: IconName; key: string; title: string }[] = [
 
 export function Toolbar({ compact }: { compact?: boolean }) {
   const tool = useCanvas((s) => s.tool);
+  const readOnly = useCanvas((s) => s.readOnly);
   const setTool = useCanvas((s) => s.setTool);
   const zoom = useCanvas((s) => s.viewport.zoom);
   const setViewport = useCanvas((s) => s.setViewport);
@@ -26,7 +27,9 @@ export function Toolbar({ compact }: { compact?: boolean }) {
   return (
     <>
     <div className={`toolbar${compact ? ' is-compact' : ''}`}>
-      {TOOLS.map((t) => (
+      {/* A viewer can move around and look; the drawing tools would only ever
+          produce a refusal, so they are not offered. */}
+      {TOOLS.filter((t) => !readOnly || t.tool === 'move' || t.tool === 'hand').map((t) => (
         <button
           key={t.tool}
           className={tool === t.tool ? 'is-active' : ''}

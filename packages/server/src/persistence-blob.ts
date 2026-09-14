@@ -14,7 +14,7 @@
 
 import type { CanvasDocument } from '@playground/shared';
 import type {
-  DocSummary, Persistence, StoredAsset, StoredConnection, StoredSnapshot,
+  DocSummary, Persistence, StoredAsset, StoredConnection, StoredShare, StoredSnapshot,
 } from './persistence.ts';
 
 type BlobModule = typeof import('@vercel/blob');
@@ -91,6 +91,18 @@ export class BlobPersistence implements Persistence {
     const { blobs } = await list({ prefix: 'connections/', token: this.token, limit: 500 });
     const all = await Promise.all(blobs.map((b) => this.getJson<StoredConnection>(b.pathname)));
     return all.filter((c): c is StoredConnection => !!c && (!docId || c.docId === docId));
+  }
+
+  async saveShare(s: StoredShare) { await this.putJson(`shares/${s.token}.json`, s); }
+  async loadShare(token: string) { return this.getJson<StoredShare>(`shares/${token}.json`); }
+
+  async loadShares(docId: string): Promise<StoredShare[]> {
+    const { list } = await this.blob();
+    const { blobs } = await list({ prefix: 'shares/', token: this.token, limit: 500 });
+    const all = await Promise.all(blobs.map((b) => this.getJson<StoredShare>(b.pathname)));
+    return all
+      .filter((s): s is StoredShare => !!s && s.docId === docId)
+      .sort((a, b) => b.createdAt - a.createdAt);
   }
 
   async saveAsset(a: StoredAsset) {

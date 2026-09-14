@@ -6,7 +6,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { CanvasDocument } from '@playground/shared';
 import type {
-  DocSummary, Persistence, StoredAsset, StoredConnection, StoredSnapshot,
+  DocSummary, Persistence, ShareRole, StoredAsset, StoredConnection, StoredShare, StoredSnapshot,
 } from './persistence.ts';
 
 // Anchored to the package, not the working directory: resolving against cwd
@@ -44,6 +44,15 @@ export class SqlitePersistence implements Persistence {
         revoked INTEGER NOT NULL DEFAULT 0
       );
       CREATE INDEX IF NOT EXISTS connections_doc ON connections(doc_id);
+
+      CREATE TABLE IF NOT EXISTS shares (
+        token TEXT PRIMARY KEY,
+        doc_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+        role TEXT NOT NULL, label TEXT,
+        created_at INTEGER NOT NULL, last_used_at INTEGER,
+        revoked INTEGER NOT NULL DEFAULT 0
+      );
+      CREATE INDEX IF NOT EXISTS shares_doc ON shares(doc_id);
 
       CREATE TABLE IF NOT EXISTS assets (
         id TEXT PRIMARY KEY,
@@ -110,6 +119,23 @@ export class SqlitePersistence implements Persistence {
     return row ? toConnection(row) : null;
   }
 
+  async saveShare(s: StoredShare): Promise<void> {
+    this.db.prepare(`
+      INSERT OR REPLACE INTO shares (token, doc_id, role, label, created_at, last_used_at, revoked)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(s.token, s.docId, s.role, s.label, s.createdAt, s.lastUsedAt, s.revoked ? 1 : 0);
+  }
+
+  async loadShares(docId: string): Promise<StoredShare[]> {
+    const rows = this.db.prepare('SELECT * FROM shares WHERE doc_id = ? ORDER BY created_at DESC').all(docId);
+    return (rows as Record<string, unknown>[]).map(shareRow);
+  }
+
+  async loadShare(token: string): Promise<StoredShare | null> {
+    const row = this.db.prepare('SELECT * FROM shares WHERE token = ?').get(token) as Record<string, unknown> | undefined;
+    return row ? shareRow(row) : null;
+  }
+
   async saveAsset(a: StoredAsset): Promise<void> {
     this.db.prepare('INSERT OR REPLACE INTO assets (id, doc_id, mime, name, bytes, created_at) VALUES (?, ?, ?, ?, ?, ?)')
       .run(a.id, a.docId, a.mime, a.name, a.bytes, a.createdAt);
@@ -153,6 +179,17 @@ function toConnection(row: Record<string, unknown>): StoredConnection {
     createdAt: Number(row.created_at),
     redeemedAt: row.redeemed_at === null ? null : Number(row.redeemed_at),
     lastUsedAt: row.last_used_at === null ? null : Number(row.last_used_at),
+    revoked: Number(row.revoked) === 1,
+  };
+}
+
+function shareRow(row: Record<string, unknown>): StoredShare {
+  return {
+    token: String(row.token), docId: String(row.doc_id),
+    role: String(row.role) as ShareRole,
+    label: (row.label as string) ?? null,
+    createdAt: Number(row.created_at),
+    lastUsedAt: row.last_used_at == null ? null : Number(row.last_used_at),
     revoked: Number(row.revoked) === 1,
   };
 }

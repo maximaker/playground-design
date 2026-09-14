@@ -28,6 +28,18 @@ export interface StoredConnection {
   revoked: boolean;
 }
 
+export type ShareRole = 'view';
+
+export interface StoredShare {
+  token: string;
+  docId: string;
+  role: ShareRole;
+  label: string | null;
+  createdAt: number;
+  lastUsedAt: number | null;
+  revoked: boolean;
+}
+
 export interface StoredAsset {
   id: string;
   docId: string | null;
@@ -59,6 +71,10 @@ export interface Persistence {
   saveConnection(conn: StoredConnection): Promise<void>;
   loadConnections(docId?: string): Promise<StoredConnection[]>;
   loadConnection(code: string): Promise<StoredConnection | null>;
+
+  saveShare(share: StoredShare): Promise<void>;
+  loadShares(docId: string): Promise<StoredShare[]>;
+  loadShare(token: string): Promise<StoredShare | null>;
 
   saveAsset(asset: StoredAsset): Promise<void>;
   loadAsset(id: string): Promise<StoredAsset | null>;

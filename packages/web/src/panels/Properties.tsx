@@ -46,6 +46,7 @@ export function Properties() {
   );
   const nodes = resolved.map((r) => r.node).filter((n): n is CanvasNode => !!n);
   const insideInstance = resolved.some((r) => r.defId !== null);
+  const readOnly = useCanvas((s) => s.readOnly);
 
   // A single selected instance gets its variant switcher.
   const instanceNode = resolved.length === 1 ? doc?.nodes[resolved[0]!.targetId] : undefined;
@@ -68,7 +69,12 @@ export function Properties() {
       <div className="properties">
         <p className="panel-empty">
           Select something on the canvas.<br />
-          <span className="dim">Or press <kbd>F</kbd> to draw a frame, <kbd>T</kbd> for text.</span>
+          <span className="dim">
+            {readOnly
+              // Telling a viewer to press F would be an invitation to a refusal.
+              ? 'You have a view-only link: everything here is readable, nothing is editable.'
+              : <>Or press <kbd>F</kbd> to draw a frame, <kbd>T</kbd> for text.</>}
+          </span>
         </p>
       </div>
     );
