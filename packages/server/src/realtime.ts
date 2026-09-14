@@ -13,7 +13,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import type { Server } from 'node:http';
 import type { OpEnvelope } from '@playground/shared';
 import { applyOps, ensureLoaded, getDocument, subscribe, StoreError, autoSnapshotIfStale } from './store.ts';
-import { redactForViewer, resolveShare } from './shares.ts';
+import { redactForViewer, resolveShare, viewerMayApply } from './shares.ts';
 
 export interface Peer {
   clientId: string;
@@ -79,10 +79,10 @@ export function attachRealtime(server: Server): WebSocketServer {
         }
         case 'ops': {
           if (!session) return send(ws, { type: 'error', message: 'join first' });
-          if (!session.canWrite) {
+          if (!session.canWrite && !viewerMayApply(msg.ops as OpEnvelope[])) {
             return send(ws, {
               type: 'rejected',
-              message: 'This is a view-only link. Ask whoever shared it for an editing link.',
+              message: 'This is a view-only link. You can comment, but not change the design.',
               doc: getDocument(session.docId),
             });
           }

@@ -312,6 +312,11 @@ function describeOp(op: Op): string {
     case 'tokens': return 'Updated tokens';
     case 'page': return `${op.action === 'add' ? 'Added' : op.action === 'remove' ? 'Removed' : 'Renamed'} page`;
     case 'note': return `${op.action === 'add' ? 'Added' : op.action === 'remove' ? 'Removed' : 'Updated'} a note`;
+    case 'comment': return op.action === 'add' ? 'Left a comment'
+      : op.action === 'reply' ? 'Replied to a comment'
+      : op.action === 'remove' ? 'Deleted a comment'
+      : op.comment.resolved === true ? 'Resolved a comment'
+      : 'Updated a comment';
     case 'component': return `${op.action === 'add' ? 'Created' : op.action === 'remove' ? 'Deleted' : 'Updated'} a component`;
     case 'override': return `Overrode ${op.updates.length} component ${op.updates.length === 1 ? 'layer' : 'layers'}`;
     case 'variant': return 'Edited a component variant';

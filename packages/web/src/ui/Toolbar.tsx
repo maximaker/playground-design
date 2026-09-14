@@ -12,6 +12,7 @@ const TOOLS: { tool: Tool; icon: IconName; key: string; title: string }[] = [
   { tool: 'ellipse', icon: 'circle', key: 'O', title: 'Ellipse' },
   { tool: 'image', icon: 'image', key: 'I', title: 'Image' },
   { tool: 'note', icon: 'note', key: 'N', title: 'Prompt card — leave a note or ask an agent' },
+  { tool: 'comment', icon: 'comment', key: 'C', title: 'Comment — say something about the design' },
 ];
 
 export function Toolbar({ compact }: { compact?: boolean }) {
@@ -29,7 +30,9 @@ export function Toolbar({ compact }: { compact?: boolean }) {
     <div className={`toolbar${compact ? ' is-compact' : ''}`}>
       {/* A viewer can move around and look; the drawing tools would only ever
           produce a refusal, so they are not offered. */}
-      {TOOLS.filter((t) => !readOnly || t.tool === 'move' || t.tool === 'hand').map((t) => (
+      {/* A viewer can move around, look, and comment — commenting is the whole
+          reason a review link exists. The rest would only ever be refused. */}
+      {TOOLS.filter((t) => !readOnly || ['move', 'hand', 'comment'].includes(t.tool)).map((t) => (
         <button
           key={t.tool}
           className={tool === t.tool ? 'is-active' : ''}

@@ -100,19 +100,21 @@ export function connectDocument(source: Source): Connection {
         const body = (await res.json()) as { document: CanvasDocument };
         store.getState().loadDocument(body.document);
         store.getState().setConnection('open');
-        // A viewer has nowhere to send ops, and the server would refuse them
-        // anyway; leaving `send` unset keeps the store from pretending.
-        if (!readOnly && source.kind === 'doc') {
-          const id = source.id;
-          store.getState().setSend((envelopes: OpEnvelope[]) => {
-            // Fire-and-forget: the optimistic local apply already happened.
-            void fetch(`/api/documents/${id}/ops`, {
-              method: 'POST',
-              headers: { 'content-type': 'application/json' },
-              body: JSON.stringify({ ops: envelopes }),
-            });
+        // A viewer gets a send too, pointed at the share endpoint — it accepts
+        // comments and refuses everything else. Serverless runs viewers on this
+        // transport, so without it commenting would work in development and
+        // silently not in production.
+        const opsUrl = source.kind === 'share'
+          ? `/api/shares/${source.token}/ops`
+          : `/api/documents/${source.id}/ops`;
+        store.getState().setSend((envelopes: OpEnvelope[]) => {
+          // Fire-and-forget: the optimistic local apply already happened.
+          void fetch(opsUrl, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ ops: envelopes }),
           });
-        }
+        });
       } else if (res.status === 404) {
         store.getState().setFatalError(readOnly
           ? 'This link has been revoked or never existed.'
@@ -172,9 +174,9 @@ export function connectDocument(source: Source): Connection {
         store.getState().loadDocument(msg.doc as CanvasDocument);
         store.getState().setConnection('open');
         store.getState().setTransport('websocket');
-        if (msg.canWrite !== false) {
-          store.getState().setSend((envelopes: OpEnvelope[]) => send({ type: 'ops', ops: envelopes }));
-        }
+        // Viewers send too — the server takes their comments and refuses the
+        // rest, which is the same rule the store applies locally.
+        store.getState().setSend((envelopes: OpEnvelope[]) => send({ type: 'ops', ops: envelopes }));
         break;
       }
       case 'ops': {

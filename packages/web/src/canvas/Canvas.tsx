@@ -6,7 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   type Box, type NodeId, type Op, type SnapGuide,
   makeNode, boxOf, getArtboardPosition, getArtboardSize,
-  DEFAULT_ARTBOARD_STYLES, defaultStylesFor, makeNote, notesOf, breakpointsOf,
+  DEFAULT_ARTBOARD_STYLES, defaultStylesFor, makeComment, makeNote, notesOf, commentsOf, breakpointsOf,
 } from '@playground/shared';
 import { useCanvas, getDoc, currentPage, topLevelSelection, getNodeById } from '../state/store.ts';
 import { resolveKey, treeNodeId } from '../state/keys.ts';
@@ -15,6 +15,7 @@ import { Artboard } from './Artboard.tsx';
 import { NoteCard } from './NoteCard.tsx';
 import { Overlay } from './Overlay.tsx';
 import { PeerCursors } from './PeerCursors.tsx';
+import { CommentPin, CommentComposer, authorName } from './CommentPin.tsx';
 import { hitTest, nodeRect } from './registry.ts';
 import {
   type DropTarget, type Handle, type ResizeStart,
@@ -75,6 +76,7 @@ export function Canvas({ onContextMenu }: CanvasProps) {
   const hoverRaf = useRef(0);
 
   const page = currentPage();
+  const doc = getDoc();
 
   // Only artboards near the viewport get a live iframe. Each one is a real
   // document with its own layout and style engine, so a page with dozens of
@@ -257,6 +259,23 @@ export function Canvas({ onContextMenu }: CanvasProps) {
     const panning = spacePanning || tool === 'hand' || e.button === 1;
     if (panning) {
       drag.current = { kind: 'pan', startX: e.clientX, startY: e.clientY, originX: viewport.x, originY: viewport.y };
+      return;
+    }
+
+    if (tool === 'comment') {
+      const at = toCanvasSpace(e.clientX, e.clientY, viewport);
+      // The node under the pin is recorded as well as the position, so an agent
+      // reading the thread knows what it is about — but the pin keeps its own
+      // coordinates, so the remark survives the node being moved or deleted.
+      const hit = hitTest(e.clientX, e.clientY);
+      const comment = makeComment({
+        pageId: page.id,
+        nodeId: hit?.nodeId,
+        x: Math.round(at.x), y: Math.round(at.y),
+        author: authorName(),
+      });
+      useCanvas.getState().setDraftComment(comment);
+      setTool('move');
       return;
     }
 
@@ -741,6 +760,8 @@ export function Canvas({ onContextMenu }: CanvasProps) {
           <Artboard key={id} id={id} live={visibleArtboards.has(id)} />
         ))}
         {notesOf(page).map((note) => <NoteCard key={note.id} note={note} />)}
+        {doc && commentsOf(doc, page.id).map((c) => <CommentPin key={c.id} comment={c} />)}
+        <CommentComposer />
       </div>
 
       <Overlay version={structureVersion} dropTarget={dropTarget} guides={guides} live={dragging} />

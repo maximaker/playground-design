@@ -215,6 +215,21 @@ a second, a selection changes on a click, and the overlay measures a rect per se
 forces an artboard iframe to lay out. Letting cursor churn invalidate the selection slice would put
 the editor into permanent layout thrash the moment a second person joined.
 
+**Comments.** Threads pinned to the design, with `C` to place one. Deliberately not a prompt card: a
+card is work you are handing to an agent and it has a lifecycle, a comment is something a person said
+and what it needs is a reply and a way to mark it settled. The pin keeps its own coordinates as well
+as the node it is about, because a remark has to outlive the thing it criticised — a comment that
+vanishes with the layer is worse than no comment.
+
+Agents read them. `list_comments` is the actual brief, more specific than anything an agent will
+infer from the design alone; `reply_to_comment` puts the answer on the pin where the question was
+asked; `resolve_comment` refuses to close a thread with no reply on it, because a thread that goes
+quiet and then closes tells the person who raised it nothing.
+
+A view-only link can comment — that is the reason to send one — and nothing else. Both transports run
+the same rule, and it allows only the additive parts: adding, replying, resolving. Rewriting or
+deleting someone else's words is not something a link-holder should be able to do.
+
 **Prompt cards.** Sticky notes that live next to the thing they are about. Write what you want
 changed, attach the layers it concerns, and hand it to an agent: it claims the card, does the work,
 and the answer comes back on the card. This is pen.dev's framing — an agent workspace rather than a

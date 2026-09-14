@@ -9,12 +9,12 @@
 
 import { create } from 'zustand';
 import {
-  type CanvasDocument, type CanvasNode, type NodeId, type Op, type OpEnvelope, type Page,
+  type CanvasDocument, type CanvasNode, type Comment, type NodeId, type Op, type OpEnvelope, type Page,
   applyOp, artboardOf, batchId, descendants, touchedNodes,
 } from '@playground/shared';
 import { styleOps, textOps, treeNodeId } from './keys.ts';
 
-export type Tool = 'move' | 'frame' | 'text' | 'rect' | 'ellipse' | 'image' | 'hand' | 'note';
+export type Tool = 'move' | 'frame' | 'text' | 'rect' | 'ellipse' | 'image' | 'hand' | 'note' | 'comment';
 
 export interface Viewport { x: number; y: number; zoom: number }
 
@@ -83,6 +83,15 @@ interface CanvasState {
   pointer: { x: number; y: number } | null;
   /** Peers again, but the fast-moving half — see `setPeers`. */
   peerCursors: PeerCursor[];
+  /** The comment thread currently expanded on the canvas. */
+  openComment: string | null;
+  showResolvedComments: boolean;
+  /**
+   * A comment being written but not yet posted. Kept local so an accidental
+   * click with the comment tool does not leave an empty pin on the design for
+   * everyone else to wonder about.
+   */
+  draftComment: Comment | null;
   doc: CanvasDocument | null;
   version: number;
   /**
@@ -148,6 +157,9 @@ interface CanvasActions {
   setReadOnly(readOnly: boolean): void;
   setPeers(p: PeerInfo[]): void;
   setPointer(pointer: { x: number; y: number } | null): void;
+  setOpenComment(id: string | null): void;
+  setDraftComment(comment: Comment | null): void;
+  setShowResolvedComments(show: boolean): void;
   setSend(fn: CanvasState['send']): void;
 
   /** Applies ops locally, pushes undo, and sends them to the server. */
@@ -270,6 +282,9 @@ export const useCanvas = create<CanvasState & CanvasActions>((set, get) => ({
   readOnly: false,
   pointer: null,
   peerCursors: [],
+  openComment: null,
+  showResolvedComments: false,
+  draftComment: null,
   doc: null,
   version: 0,
   nodeVersions: {},
@@ -338,6 +353,10 @@ export const useCanvas = create<CanvasState & CanvasActions>((set, get) => ({
    * meaningless to a peer — sending it would put their cursor somewhere else on
    * the design. World coordinates are the only shared frame of reference.
    */
+  setOpenComment(openComment) { set({ openComment, draftComment: null }); },
+  setDraftComment(draftComment) { set({ draftComment, openComment: null }); },
+  setShowResolvedComments(showResolvedComments) { set({ showResolvedComments }); },
+
   setPointer(pointer) {
     // Kept out of `set` when unchanged: pointermove fires constantly and every
     // set here would re-render every subscriber.
@@ -350,8 +369,11 @@ export const useCanvas = create<CanvasState & CanvasActions>((set, get) => ({
   dispatch(ops, opts) {
     const { doc, send, selection, undoStack, readOnly } = get();
     if (!doc || ops.length === 0) return;
-    if (readOnly) {
-      get().toast('This is a view-only link. Ask whoever shared it for an editing link.', 'info');
+    // Commenting is the reason a review link exists, so it is the one thing a
+    // viewer may do. The server enforces the same rule; this only keeps the UI
+    // from showing an optimistic change that is about to be taken back.
+    if (readOnly && !ops.every((op) => op.t === 'comment')) {
+      get().toast('This is a view-only link. You can comment, but not change the design.', 'info');
       return;
     }
     const batch = opts?.batch ?? batchId();

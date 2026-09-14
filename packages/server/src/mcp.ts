@@ -21,6 +21,7 @@ import {
   parseTokensFromCss, parseTokensFromTailwind, serializeTokens, diffTokens, mergeTokens,
   type CodeComponent, type CodeProp, codeComponentsOf, codeComponentOf, resolvedCodeProps,
   codeElementJsx, explicitCodeProps, MOUNT_CONTRACT,
+  type Comment, commentsOf, newId as newIdOf,
 } from '@playground/shared';
 import { applyOps, getDocument, StoreError, createSnapshot } from './store.ts';
 import { callTab, notifyTabs, selectionOf, hasLiveTab, NoTabError } from './realtime.ts';
@@ -106,6 +107,8 @@ export function buildMcpServer(ctx: McpContext): McpServer {
         `Start with get_basic_info, then get_tree_summary on the artboard you care about. ` +
         `Create with write_html. After any visual change, call get_screenshot to check your work — ` +
         `you cannot tell whether a layout is right without looking at it.\n\n` +
+        `If anyone has commented, call list_comments first — that is the actual brief, and it is ` +
+        `more specific than anything you will infer from the design alone.\n\n` +
         `Call get_guide("layout") before building anything substantial; it describes what makes ` +
         `output a designer will keep rather than discard.\n\n` +
         `Before you hand work back, call lint_design on what you changed — it checks contrast, tap ` +
@@ -124,6 +127,7 @@ export function buildMcpServer(ctx: McpContext): McpServer {
   registerNoteTools(server, ctx);
   registerComponentTools(server, ctx);
   registerCodeComponentTools(server, ctx);
+  registerCommentTools(server, ctx);
   registerSessionTools(server, ctx);
   return server;
 }
@@ -1952,6 +1956,100 @@ function resolveCodeComponent(doc: CanvasDocument, ref: string): CodeComponent {
     );
   }
   return found;
+}
+
+
+// ---------------------------------------------------------------------------
+// Comments
+// ---------------------------------------------------------------------------
+
+function registerCommentTools(server: McpServer, ctx: McpContext): void {
+  server.registerTool('list_comments', {
+    title: 'Read the feedback on this design',
+    description:
+      'Comment threads people have left on the design, with the layers they are about. Read these before deciding what to change — they are the actual brief.',
+    inputSchema: {
+      includeResolved: z.boolean().optional().default(false),
+      pageId: z.string().optional(),
+    },
+    annotations: { readOnlyHint: true },
+  }, async ({ includeResolved, pageId }) => guard(() => {
+    const doc = requireDoc(ctx);
+    const all = commentsOf(doc, pageId).filter((c) => includeResolved || !c.resolved);
+    return json({
+      open: all.filter((c) => !c.resolved).length,
+      comments: all.map((c) => describeComment(doc, c)),
+      ...(all.length ? {} : { hint: 'No comments yet. get_basic_info also reports queued prompt cards.' }),
+    });
+  }));
+
+  server.registerTool('reply_to_comment', {
+    title: 'Reply to a comment',
+    description:
+      'Adds a reply to a comment thread, attributed to you. Say what you changed, or ask for the detail you are missing — the reply appears on the pin, next to the thing being discussed.',
+    inputSchema: {
+      id: z.string().describe('Comment id from list_comments.'),
+      text: z.string().min(1),
+    },
+  }, async ({ id, text }) => guard(() => {
+    const doc = requireDoc(ctx);
+    const comment = (doc.comments ?? []).find((c) => c.id === id);
+    if (!comment) return fail(`No comment "${id}". Call list_comments for current ids.`);
+
+    commit(ctx, [{
+      t: 'comment', action: 'reply', comment: { id },
+      reply: {
+        id: newIdOf('r'),
+        author: ctx.connection.label ?? 'Agent',
+        text, kind: 'agent', createdAt: Date.now(),
+      },
+    }]);
+    return json({ id, replies: comment.replies.length + 1 });
+  }));
+
+  server.registerTool('resolve_comment', {
+    title: 'Mark a comment settled',
+    description:
+      'Resolves a thread once you have acted on it. Reply first saying what you did — a thread that goes quiet and then closes tells the human nothing.',
+    inputSchema: {
+      id: z.string(),
+      resolved: z.boolean().optional().default(true),
+    },
+  }, async ({ id, resolved }) => guard(() => {
+    const doc = requireDoc(ctx);
+    const comment = (doc.comments ?? []).find((c) => c.id === id);
+    if (!comment) return fail(`No comment "${id}". Call list_comments for current ids.`);
+    if (resolved && comment.replies.length === 0) {
+      return fail(
+        `Comment "${id}" has no replies. Call reply_to_comment first to say what you did — ` +
+        `resolving silently leaves the person who raised it with no idea whether it was understood.`,
+      );
+    }
+    commit(ctx, [{ t: 'comment', action: 'update', comment: { id, resolved } }]);
+    return json({ id, resolved });
+  }));
+}
+
+function describeComment(doc: CanvasDocument, c: Comment) {
+  const node = c.nodeId ? doc.nodes[c.nodeId] : undefined;
+  return {
+    id: c.id,
+    author: c.author,
+    text: c.text,
+    resolved: c.resolved,
+    createdAt: new Date(c.createdAt).toISOString(),
+    // The node it was placed on, when it still exists. A comment outlives the
+    // layer it criticised on purpose, so this is reported as missing rather
+    // than quietly dropped.
+    about: c.nodeId
+      ? node
+        ? { id: c.nodeId, name: node.name, type: node.type, artboard: doc.nodes[artboardOf(doc, c.nodeId) ?? '']?.name }
+        : { id: c.nodeId, deleted: true }
+      : { canvas: { x: c.x, y: c.y } },
+    replies: c.replies.map((r) => ({
+      author: r.author, kind: r.kind, text: r.text, at: new Date(r.createdAt).toISOString(),
+    })),
+  };
 }
 
 // ---------------------------------------------------------------------------

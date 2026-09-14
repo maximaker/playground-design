@@ -24,7 +24,7 @@ import { createConnection, listConnections, resolveConnection, revokeConnection 
 import { handleMcpRequest } from './mcp.ts';
 import { getAsset, storeAsset, AssetError, MAX_ASSET_BYTES } from './assets.ts';
 import {
-  type Share, createShare, listShares, redactForViewer, resolveShare, revokeShare,
+  type Share, createShare, listShares, redactForViewer, resolveShare, revokeShare, viewerMayApply,
 } from './shares.ts';
 import { importUrl, ImportError } from './import.ts';
 import { getTemplate, templateSummaries, type Template } from './templates.ts';
@@ -385,6 +385,25 @@ api.get('/shares/:token/sync', async (c) => {
   const ops = opsSince(doc.id, since);
   if (ops === null) return c.json({ resync: true, document: redactForViewer(doc, token), rev: doc.rev });
   return c.json({ ops, rev: doc.rev });
+});
+
+/**
+ * A viewer's only way to write.
+ *
+ * Serverless cannot hold a WebSocket open, so the deployed product runs viewers
+ * on the polling transport — without this endpoint, commenting would work in
+ * development and silently not in production.
+ */
+api.post('/shares/:token/ops', async (c) => {
+  const share = await resolveShare(c.req.param('token'));
+  if (!share) return c.json({ error: 'This link has been revoked or never existed.' }, 404);
+
+  const body = await c.req.json<{ ops: Parameters<typeof applyOps>[1] }>().catch(() => ({ ops: [] }));
+  if (!viewerMayApply(body.ops)) {
+    return c.json({ error: 'A view-only link can leave comments, but not change the design.' }, 403);
+  }
+  const applied = applyOps(share.docId, body.ops);
+  return c.json({ applied: applied.length });
 });
 
 function publicShare(s: Share) {

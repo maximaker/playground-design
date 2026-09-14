@@ -1545,3 +1545,92 @@ code { font-family: var(--mono); font-size: 0.92em; }
   white-space: nowrap;
   box-shadow: 0 1px 4px rgb(0 0 0 / 0.2);
 }
+
+/* Comments --------------------------------------------------------------- */
+
+/*
+ * Pins are positioned in world space but sized in screen pixels. A remark at
+ * 10% zoom is still a remark you have to find and click; scaling it with the
+ * canvas would make it a few pixels wide.
+ */
+.comment-pin { position: absolute; z-index: 9; }
+
+.comment-marker {
+  display: grid;
+  place-items: center;
+  width: 1.75rem; height: 1.75rem;
+  margin: -1.75rem 0 0 0;
+  border: 2px solid #fff;
+  /* Round except for the corner that points at what it is about. */
+  border-radius: 999px 999px 999px 2px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 0.68rem; font-weight: 700; letter-spacing: 0.02em;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgb(0 0 0 / 0.25);
+  position: relative;
+}
+.comment-marker:hover { transform: scale(1.08); }
+.comment-pin.is-resolved .comment-marker { background: var(--fg-faint); }
+
+.comment-count {
+  position: absolute; top: -0.35rem; right: -0.35rem;
+  min-width: 0.95rem; height: 0.95rem; padding: 0 0.15rem;
+  border-radius: 999px;
+  background: var(--bg-raised); color: var(--fg);
+  border: 1px solid var(--border);
+  font-size: 0.6rem; line-height: 0.85rem;
+}
+
+.comment-thread {
+  position: absolute; left: 2.1rem; top: -1.75rem;
+  width: 17rem;
+  display: flex; flex-direction: column; gap: var(--s2);
+  padding: var(--s3);
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 28px rgb(0 0 0 / 0.28);
+  cursor: default;
+}
+
+.comment-entry { font-size: 0.82rem; line-height: 1.5; }
+.comment-entry p { margin: 0.1rem 0 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+.comment-entry-head { display: flex; align-items: baseline; gap: var(--s2); font-size: 0.72rem; }
+.comment-entry-head strong { font-weight: 600; }
+
+.comment-agent-tag {
+  padding: 0 0.25rem; border-radius: 0.25rem;
+  background: var(--accent); color: #fff;
+  font-size: 0.6rem; text-transform: uppercase; letter-spacing: .05em;
+}
+
+.comment-input {
+  width: 100%; min-height: 2.4rem; resize: vertical;
+  padding: var(--s2);
+  background: var(--bg-input); color: var(--fg);
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  font: inherit; font-size: 0.82rem;
+}
+.comment-input:focus { outline: none; border-color: var(--accent); }
+
+.comment-actions { display: flex; justify-content: flex-end; gap: var(--s2); }
+
+.comment-pin.is-draft .comment-marker { background: var(--accent); opacity: .7; }
+
+.comments-panel { padding: var(--s4); display: flex; flex-direction: column; gap: var(--s2); }
+.comments-head { display: flex; align-items: center; justify-content: space-between; gap: var(--s3); margin-bottom: var(--s2); }
+
+.comment-row {
+  display: flex; flex-direction: column; gap: 0.15rem;
+  width: 100%; text-align: left;
+  padding: var(--s3);
+  background: var(--bg-input);
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  color: var(--fg); cursor: pointer;
+}
+.comment-row:hover { border-color: var(--border-strong); }
+.comment-row.is-resolved { opacity: .55; }
+.comment-row-head { display: flex; align-items: center; gap: var(--s2); font-size: 0.75rem; }
+.comment-row-text { margin: 0; font-size: 0.82rem; line-height: 1.45; overflow-wrap: anywhere; }
+.comment-row-target { font-size: 0.7rem; }

@@ -152,6 +152,64 @@ export interface Page {
 }
 
 /**
+ * A comment thread, pinned to the design.
+ *
+ * Distinct from a prompt card on purpose. A card is work you are handing to an
+ * agent and it has a lifecycle — queued, running, done. A comment is something
+ * a person said about the design, and what it needs is a reply and a way to
+ * mark it settled.
+ *
+ * The pin carries its own coordinates as well as the node it is about, because
+ * the node may be moved, restyled or deleted and the remark still has to be
+ * findable. A comment that vanishes with the thing it criticised is worse than
+ * no comment at all.
+ */
+export interface Comment {
+  id: string;
+  pageId: string;
+  /** The node it concerns, when it was placed on one. */
+  nodeId?: NodeId;
+  /** Canvas-space pin position. */
+  x: number;
+  y: number;
+  author: string;
+  text: string;
+  resolved: boolean;
+  createdAt: number;
+  replies: CommentReply[];
+}
+
+export interface CommentReply {
+  id: string;
+  author: string;
+  text: string;
+  /** Agents can reply too; the UI says which is which. */
+  kind: 'human' | 'agent';
+  createdAt: number;
+}
+
+export function makeComment(partial: Partial<Comment> & { pageId: string }): Comment {
+  return {
+    id: partial.id ?? newId('cm'),
+    pageId: partial.pageId,
+    nodeId: partial.nodeId,
+    x: partial.x ?? 0,
+    y: partial.y ?? 0,
+    author: partial.author ?? 'Guest',
+    text: partial.text ?? '',
+    resolved: partial.resolved ?? false,
+    createdAt: partial.createdAt ?? Date.now(),
+    replies: partial.replies ?? [],
+  };
+}
+
+export function commentsOf(doc: CanvasDocument, pageId?: string): Comment[] {
+  return (doc.comments ?? [])
+    .filter((c) => !pageId || c.pageId === pageId)
+    .sort((a, b) => a.createdAt - b.createdAt);
+}
+
+/**
  * A prompt card: a sticky note on the canvas that can be handed to an agent.
  *
  * This is what turns the canvas into a workspace rather than a design file with
@@ -283,6 +341,8 @@ export interface CanvasDocument {
   components?: Record<string, ComponentDef>;
   /** The project's real components, keyed by id. */
   codeComponents?: Record<string, CodeComponent>;
+  /** Comment threads, across all pages. */
+  comments?: Comment[];
   /** Named widths this design is authored against. */
   breakpoints?: Breakpoint[];
   /** Monotonic, bumped on every applied op. Used for reconnect/catch-up. */

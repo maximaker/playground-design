@@ -14,6 +14,7 @@ import {
   type CanvasDocument, type CanvasNode, type NodeId, type StyleMap, type Page,
   type Token, type Note, type ComponentDef, type ComponentVariant, type InstanceOverride,
   type Breakpoint, breakpointsOf,
+  type Comment, type CommentReply,
   descendants, isAncestorOf, makeNote, newId, variantKey,
 } from './model.ts';
 import type { CodeComponent } from './code-components.ts';
@@ -44,6 +45,14 @@ export type Op =
   | { t: 'props'; updates: { id: NodeId; props: Record<string, string | null> }[] }
   | { t: 'breakpoints'; breakpoints: Breakpoint[] }
   | { t: 'code-component'; action: 'add' | 'update' | 'remove'; component: Partial<CodeComponent> & { id: string } }
+  | {
+      t: 'comment';
+      action: 'add' | 'update' | 'remove' | 'reply' | 'unreply';
+      comment: Partial<Comment> & { id: string };
+      reply?: CommentReply;
+      /** For `unreply`, which reply to take back. */
+      replyId?: string;
+    }
   | {
       t: 'override';
       updates: {
@@ -97,6 +106,7 @@ export function applyOp(doc: CanvasDocument, op: Op): Op {
     case 'props': return applyProps(doc, op);
     case 'breakpoints': return applyBreakpoints(doc, op);
     case 'code-component': return applyCodeComponent(doc, op);
+    case 'comment': return applyComment(doc, op);
   }
 }
 
@@ -538,6 +548,59 @@ function applyCodeComponent(doc: CanvasDocument, op: Extract<Op, { t: 'code-comp
   return { t: 'code-component', action: 'update', component: before };
 }
 
+function applyComment(doc: CanvasDocument, op: Extract<Op, { t: 'comment' }>): Op {
+  if (!doc.comments) doc.comments = [];
+  const index = doc.comments.findIndex((c) => c.id === op.comment.id);
+  const current = index === -1 ? undefined : doc.comments[index]!;
+
+  if (op.action === 'add') {
+    if (current) throw new OpError(`comment ${op.comment.id} already exists`);
+    const { id, pageId } = op.comment;
+    if (!pageId) throw new OpError('a comment needs a pageId');
+    doc.comments.push({
+      id, pageId,
+      nodeId: op.comment.nodeId,
+      x: op.comment.x ?? 0,
+      y: op.comment.y ?? 0,
+      author: op.comment.author ?? 'Guest',
+      text: op.comment.text ?? '',
+      resolved: op.comment.resolved ?? false,
+      createdAt: op.comment.createdAt ?? Date.now(),
+      replies: op.comment.replies ?? [],
+    });
+    return { t: 'comment', action: 'remove', comment: { id } };
+  }
+
+  if (!current) throw new OpError(`comment ${op.comment.id} not found`);
+
+  if (op.action === 'remove') {
+    doc.comments.splice(index, 1);
+    return { t: 'comment', action: 'add', comment: current };
+  }
+
+  if (op.action === 'reply') {
+    if (!op.reply) throw new OpError('reply needs a reply');
+    current.replies.push(op.reply);
+    return { t: 'comment', action: 'unreply', comment: { id: current.id }, replyId: op.reply.id };
+  }
+
+  if (op.action === 'unreply') {
+    const at = current.replies.findIndex((r) => r.id === op.replyId);
+    if (at === -1) throw new OpError(`reply ${op.replyId} not found`);
+    const [removed] = current.replies.splice(at, 1);
+    return { t: 'comment', action: 'reply', comment: { id: current.id }, reply: removed! };
+  }
+
+  // Update: only the fields mentioned, with the previous values as the inverse.
+  const before: Partial<Comment> & { id: string } = { id: current.id };
+  for (const key of Object.keys(op.comment) as (keyof Comment)[]) {
+    if (key === 'id') continue;
+    (before as Record<string, unknown>)[key] = current[key];
+  }
+  Object.assign(current, { ...op.comment, id: current.id });
+  return { t: 'comment', action: 'update', comment: before };
+}
+
 function clamp(n: number, lo: number, hi: number): number {
   if (!Number.isFinite(n) || n < 0) return hi;
   return Math.max(lo, Math.min(hi, n));
@@ -637,5 +700,9 @@ export function touchedNodes(op: Op): TouchedNodes {
     case 'breakpoints':
     case 'code-component':
       return { ...empty, global: true };
+    // Comments are chrome, not content: they change nothing about how a node
+    // renders, so nothing needs re-measuring or re-laying out for them.
+    case 'comment':
+      return { ...empty };
   }
 }

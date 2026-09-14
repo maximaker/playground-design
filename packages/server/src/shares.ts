@@ -18,7 +18,7 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { persistence, type ShareRole, type StoredShare } from './persistence.ts';
 import { ensureLoaded, getDocument } from './store.ts';
-import type { CanvasDocument } from '@playground/shared';
+import type { CanvasDocument, OpEnvelope } from '@playground/shared';
 
 export interface Share {
   token: string;
@@ -92,6 +92,26 @@ export async function revokeShare(token: string): Promise<boolean> {
   if (!found) return false;
   await store.saveShare({ ...found, revoked: true });
   return true;
+}
+
+/**
+ * Whether a batch of ops is nothing but someone leaving a remark.
+ *
+ * Commenting is the reason to send a review link in the first place, so a
+ * view-only session is allowed to do it — but only that, and only the additive
+ * parts. Deleting or rewriting a thread is not something a link-holder should
+ * be able to do to someone else's words.
+ *
+ * Both transports run this: sockets where they work, and an HTTP endpoint
+ * everywhere else, because the deployed product is serverless and cannot hold
+ * a socket open at all.
+ */
+export function viewerMayApply(envelopes: OpEnvelope[]): boolean {
+  if (!Array.isArray(envelopes) || envelopes.length === 0) return false;
+  return envelopes.every(({ op }) =>
+    op?.t === 'comment' && (op.action === 'add' || op.action === 'reply'
+      // Resolving is allowed: it is a status, not a rewrite.
+      || (op.action === 'update' && Object.keys(op.comment).every((k) => k === 'id' || k === 'resolved'))));
 }
 
 /**

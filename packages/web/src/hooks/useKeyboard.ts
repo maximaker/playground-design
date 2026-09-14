@@ -18,7 +18,7 @@ import type { Tool } from '../state/store.ts';
 
 const TOOL_KEYS: Record<string, Tool> = {
   v: 'move', h: 'hand', f: 'frame', a: 'frame', t: 'text',
-  r: 'rect', o: 'ellipse', i: 'image', n: 'note',
+  r: 'rect', o: 'ellipse', i: 'image', n: 'note', c: 'comment',
 };
 
 function isTyping(target: EventTarget | null): boolean {
