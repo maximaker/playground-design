@@ -6,6 +6,10 @@
  * well; the cost is that Blob is eventually consistent and has no transactions,
  * so two writers editing one document can clobber each other. That is stated in
  * the README rather than papered over.
+ *
+ * Everything is stored with private access and read back through the SDK's
+ * authenticated `get`, so a document is reachable only through the app — not by
+ * anyone who guesses a blob URL.
  */
 
 import type { CanvasDocument } from '@playground/shared';
@@ -30,7 +34,7 @@ export class BlobPersistence implements Persistence {
   private async putJson(path: string, value: unknown): Promise<void> {
     const { put } = await this.blob();
     await put(path, JSON.stringify(value), {
-      access: 'public',
+      access: 'private',
       token: this.token,
       contentType: 'application/json',
       // Paths are our own ids; a random suffix would make them unfindable.
@@ -41,14 +45,15 @@ export class BlobPersistence implements Persistence {
   }
 
   private async getJson<T>(path: string): Promise<T | null> {
-    const { head } = await this.blob();
+    const { get } = await this.blob();
     try {
-      const meta = await head(path, { token: this.token });
-      const res = await fetch(`${meta.url}?t=${Date.now()}`, { cache: 'no-store' });
-      if (!res.ok) return null;
-      return (await res.json()) as T;
+      // `useCache: false` because a document is read straight after it is
+      // written, and a cached copy would hand back the previous revision.
+      const result = await get(path, { access: 'private', token: this.token, useCache: false });
+      if (!result) return null;
+      return (await new Response(result.stream).json()) as T;
     } catch {
-      // `head` throws for a blob that does not exist.
+      // `get` throws rather than returning null for a blob that does not exist.
       return null;
     }
   }
@@ -74,14 +79,7 @@ export class BlobPersistence implements Persistence {
   async listDocuments(): Promise<DocSummary[]> {
     const { list } = await this.blob();
     const { blobs } = await list({ prefix: 'index/', token: this.token, limit: 200 });
-    const summaries = await Promise.all(
-      blobs.map(async (b) => {
-        try {
-          const res = await fetch(`${b.url}?t=${Date.now()}`, { cache: 'no-store' });
-          return res.ok ? ((await res.json()) as DocSummary) : null;
-        } catch { return null; }
-      }),
-    );
+    const summaries = await Promise.all(blobs.map((b) => this.getJson<DocSummary>(b.pathname)));
     return summaries.filter((s): s is DocSummary => !!s).sort((a, b) => b.updatedAt - a.updatedAt);
   }
 
@@ -91,21 +89,14 @@ export class BlobPersistence implements Persistence {
   async loadConnections(docId?: string): Promise<StoredConnection[]> {
     const { list } = await this.blob();
     const { blobs } = await list({ prefix: 'connections/', token: this.token, limit: 500 });
-    const all = await Promise.all(
-      blobs.map(async (b) => {
-        try {
-          const res = await fetch(`${b.url}?t=${Date.now()}`, { cache: 'no-store' });
-          return res.ok ? ((await res.json()) as StoredConnection) : null;
-        } catch { return null; }
-      }),
-    );
+    const all = await Promise.all(blobs.map((b) => this.getJson<StoredConnection>(b.pathname)));
     return all.filter((c): c is StoredConnection => !!c && (!docId || c.docId === docId));
   }
 
   async saveAsset(a: StoredAsset) {
     const { put } = await this.blob();
     await put(`assets/${a.id}`, a.bytes, {
-      access: 'public', token: this.token, contentType: a.mime,
+      access: 'private', token: this.token, contentType: a.mime,
       addRandomSuffix: false, allowOverwrite: true,
     });
     await this.putJson(`assets/${a.id}.meta.json`, {
@@ -116,12 +107,11 @@ export class BlobPersistence implements Persistence {
   async loadAsset(id: string): Promise<StoredAsset | null> {
     const meta = await this.getJson<Omit<StoredAsset, 'bytes'>>(`assets/${id}.meta.json`);
     if (!meta) return null;
-    const { head } = await this.blob();
+    const { get } = await this.blob();
     try {
-      const info = await head(`assets/${id}`, { token: this.token });
-      const res = await fetch(info.url);
-      if (!res.ok) return null;
-      return { ...meta, bytes: Buffer.from(await res.arrayBuffer()) };
+      const result = await get(`assets/${id}`, { access: 'private', token: this.token });
+      if (!result) return null;
+      return { ...meta, bytes: Buffer.from(await new Response(result.stream).arrayBuffer()) };
     } catch { return null; }
   }
 
@@ -130,18 +120,11 @@ export class BlobPersistence implements Persistence {
   async loadSnapshots(docId: string) {
     const { list } = await this.blob();
     const { blobs } = await list({ prefix: `snapshots/${docId}/`, token: this.token, limit: 100 });
-    const all = await Promise.all(
-      blobs.map(async (b) => {
-        try {
-          const res = await fetch(`${b.url}?t=${Date.now()}`, { cache: 'no-store' });
-          if (!res.ok) return null;
-          const { data, ...rest } = (await res.json()) as StoredSnapshot;
-          void data;
-          return rest;
-        } catch { return null; }
-      }),
-    );
-    return all.filter((s): s is Omit<StoredSnapshot, 'data'> => !!s).sort((a, b) => b.ts - a.ts);
+    const all = await Promise.all(blobs.map((b) => this.getJson<StoredSnapshot>(b.pathname)));
+    return all
+      .filter((s): s is StoredSnapshot => !!s)
+      .map(({ data, ...rest }) => { void data; return rest; })
+      .sort((a, b) => b.ts - a.ts);
   }
 
   async loadSnapshot(docId: string, id: string) {
