@@ -6,7 +6,7 @@ import { Icon } from './ui/Icon.tsx';
 import { Settings } from './ui/Settings.tsx';
 import type { Appearance } from './state/appearance.ts';
 
-interface DocSummary { id: string; name: string; rev: number; updated_at: number; nodeCount: number }
+interface DocSummary { id: string; name: string; rev: number; updatedAt: number; nodeCount: number }
 interface TemplateSummary { id: string; name: string; description: string; tokenCount: number }
 
 export function Home({ onOpen, appearance, onAppearance }: {
@@ -113,7 +113,7 @@ export function Home({ onOpen, appearance, onAppearance }: {
           <div key={d.id} className="home-card" onClick={() => onOpen(d.id)}>
             <h3>{d.name}</h3>
             <p className="dim">{d.nodeCount} layers · rev {d.rev}</p>
-            <p className="dim">{new Date(d.updated_at).toLocaleString()}</p>
+            <p className="dim">{relativeTime(d.updatedAt)}</p>
             <button
               className="button subtle"
               onClick={(e) => { e.stopPropagation(); void remove(d.id, d.name); }}
@@ -127,4 +127,15 @@ export function Home({ onOpen, appearance, onAppearance }: {
       )}
     </div>
   );
+}
+
+/** Short relative time — an absolute timestamp is noise on a document list. */
+function relativeTime(ts: number): string {
+  if (!Number.isFinite(ts)) return 'just now';
+  const diff = Date.now() - ts;
+  if (diff < 60_000) return 'just now';
+  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)} min ago`;
+  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)} h ago`;
+  if (diff < 7 * 86_400_000) return `${Math.floor(diff / 86_400_000)} d ago`;
+  return new Date(ts).toLocaleDateString();
 }
