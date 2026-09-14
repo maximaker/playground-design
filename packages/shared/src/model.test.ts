@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createEmptyDocument, makeNode, descendants, artboardOf, isAncestorOf } from './model.ts';
+import { createEmptyDocument, makeNode, descendants, artboardOf, isAncestorOf, contestedProperties } from './model.ts';
 import { applyOp, cloneSubtree } from './ops.ts';
 import { parseHtml, emitHtml, emitStandalone } from './html.ts';
 import { emitJsx, cssToTailwind } from './jsx.ts';
@@ -239,4 +239,41 @@ test('artboardOf and isAncestorOf walk the tree correctly', () => {
   assert.equal(artboardOf(doc, b.id), artboard);
   assert.ok(isAncestorOf(doc, a.id, b.id));
   assert.ok(!isAncestorOf(doc, b.id, a.id));
+});
+
+test('a variant can override a property the base also sets', () => {
+  // Inline styles beat every stylesheet rule, so any property a variant
+  // overrides has to leave the style attribute or the variant is dead.
+  const { doc, artboard } = seed();
+  const parsed = parseHtml(`
+    <style>
+      .box { display: flex; flex-direction: row; padding: 40px }
+      @media (max-width: 768px) { .box { flex-direction: column; padding: 16px } }
+      .box:hover { flex-direction: column }
+    </style>
+    <div class="box"><span>a</span></div>`);
+  applyOp(doc, { t: 'insert', nodes: parsed.nodes, parent: artboard, index: 0 });
+
+  const box = parsed.nodes.find((n) => n.styles.display === 'flex')!;
+  const contested = contestedProperties(box);
+  assert.ok(contested.has('flex-direction'), 'flex-direction is contested');
+  assert.ok(contested.has('padding'));
+  assert.ok(!contested.has('display'), 'display is only set on the base');
+
+  const { html, css } = emitHtml(doc, artboard, { mode: 'inline' });
+  // The box, not the artboard: only nodes with variants get a class.
+  const boxTag = new RegExp(`<div[^>]*class="c-${box.id}"[^>]*>`).exec(html)?.[0] ?? '';
+  const style = /style="([^"]*)"/.exec(boxTag)?.[1] ?? '';
+  assert.ok(boxTag, 'the box should be emitted with a class');
+  assert.match(style, /display:flex/, 'uncontested properties stay inline');
+  assert.doesNotMatch(style, /flex-direction/, 'contested properties must not be inline');
+  assert.doesNotMatch(style, /padding/);
+
+  // Both the base and the override are in the stylesheet, base first.
+  assert.match(css, /flex-direction: row/);
+  assert.match(css, /@media \(max-width: 768px\)/);
+  assert.ok(
+    css.indexOf('flex-direction: row') < css.indexOf('flex-direction: column'),
+    'the base rule must come before the override',
+  );
 });

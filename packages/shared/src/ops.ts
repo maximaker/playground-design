@@ -13,6 +13,7 @@
 import {
   type CanvasDocument, type CanvasNode, type NodeId, type StyleMap, type Page,
   type Token, type Note, type ComponentDef, type ComponentVariant, type InstanceOverride,
+  type Breakpoint, breakpointsOf,
   descendants, isAncestorOf, makeNote, newId, variantKey,
 } from './model.ts';
 
@@ -40,6 +41,7 @@ export type Op =
       overrides: Record<NodeId, InstanceOverride | null> | null;
     }
   | { t: 'props'; updates: { id: NodeId; props: Record<string, string | null> }[] }
+  | { t: 'breakpoints'; breakpoints: Breakpoint[] }
   | {
       t: 'override';
       updates: {
@@ -91,6 +93,7 @@ export function applyOp(doc: CanvasDocument, op: Op): Op {
     case 'override': return applyOverride(doc, op);
     case 'variant': return applyVariant(doc, op);
     case 'props': return applyProps(doc, op);
+    case 'breakpoints': return applyBreakpoints(doc, op);
   }
 }
 
@@ -491,6 +494,12 @@ function applyProps(doc: CanvasDocument, op: Extract<Op, { t: 'props' }>): Op {
   return { t: 'props', updates: inverse };
 }
 
+function applyBreakpoints(doc: CanvasDocument, op: Extract<Op, { t: 'breakpoints' }>): Op {
+  const before = breakpointsOf(doc);
+  doc.breakpoints = [...op.breakpoints].sort((a, b) => a.maxWidth - b.maxWidth);
+  return { t: 'breakpoints', breakpoints: before };
+}
+
 function clamp(n: number, lo: number, hi: number): number {
   if (!Number.isFinite(n) || n < 0) return hi;
   return Math.max(lo, Math.min(hi, n));
@@ -587,6 +596,7 @@ export function touchedNodes(op: Op): TouchedNodes {
     case 'note':
     case 'component':
     case 'variant':
+    case 'breakpoints':
       return { ...empty, global: true };
   }
 }

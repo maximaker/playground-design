@@ -1226,3 +1226,42 @@ code { font-family: var(--mono); font-size: 0.92em; }
   .palette-backdrop { padding-top: 0; align-items: flex-end; }
   .palette { width: 100%; max-height: 80vh; border-radius: var(--radius-lg) var(--radius-lg) 0 0; }
 }
+
+/* --- Breakpoint ruler ---------------------------------------------------- */
+
+.breakpoint-bar {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  margin-bottom: 1.9rem;
+  display: flex;
+  align-items: center;
+  gap: 0.2rem;
+  pointer-events: auto;
+  font-size: 0.78rem;
+  color: var(--fg-faint);
+  min-width: 14rem;
+}
+
+.bp-tick {
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0.1rem 0.4rem;
+  color: var(--fg-faint);
+  line-height: 1.5;
+  transition: color var(--transition), border-color var(--transition);
+}
+.bp-tick:hover { color: var(--fg); border-color: var(--border-strong); }
+/* Applying but not the narrowest match: this breakpoint's rules are in play. */
+.bp-tick.is-applying { color: var(--fg-muted); border-color: var(--border-strong); }
+.bp-tick.is-current { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
+
+.bp-spacer { flex: 1; }
+
+.bp-width {
+  display: inline-flex; align-items: baseline; gap: 0.3rem;
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.bp-width em { font-style: normal; color: var(--accent); }
+.bp-add { display: grid; place-items: center; }

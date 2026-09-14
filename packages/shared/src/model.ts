@@ -115,6 +115,22 @@ export interface ComponentVariant {
 /** A node in a definition marked `data-slot` renders the instance's children. */
 export const SLOT_ATTR = 'data-slot';
 
+/**
+ * Properties some variant of this node overrides.
+ *
+ * These cannot stay in an inline style attribute: inline beats every stylesheet
+ * rule, so a `:hover` or media-query variant could never override a property the
+ * base also sets. They move into the stylesheet alongside the variant rules, and
+ * the cascade resolves them the way CSS intends.
+ */
+export function contestedProperties(node: CanvasNode): Set<string> {
+  const contested = new Set<string>();
+  for (const variant of node.variants) {
+    for (const prop of Object.keys(variant.styles)) contested.add(prop);
+  }
+  return contested;
+}
+
 export function slotNameOf(node: CanvasNode): string | null {
   const value = node.attrs[SLOT_ATTR];
   return value === undefined ? null : (value || 'default');
@@ -198,6 +214,48 @@ export function notesOf(page: Page | undefined): Note[] {
   return page?.notes ?? [];
 }
 
+/**
+ * A named width the design responds at.
+ *
+ * Artboards are real viewports, so a breakpoint is not a metaphor here: setting
+ * an artboard to a breakpoint's width makes the browser resolve that media
+ * query, and what you see is what will ship.
+ */
+export interface Breakpoint {
+  id: string;
+  name: string;
+  /** Applies at this width and below. */
+  maxWidth: number;
+}
+
+/** Tailwind's widths, which most codebases already share. */
+export const DEFAULT_BREAKPOINTS: Breakpoint[] = [
+  { id: 'bp_sm', name: 'sm', maxWidth: 640 },
+  { id: 'bp_md', name: 'md', maxWidth: 768 },
+  { id: 'bp_lg', name: 'lg', maxWidth: 1024 },
+  { id: 'bp_xl', name: 'xl', maxWidth: 1280 },
+];
+
+export function breakpointsOf(doc: CanvasDocument): Breakpoint[] {
+  return [...(doc.breakpoints ?? DEFAULT_BREAKPOINTS)].sort((a, b) => a.maxWidth - b.maxWidth);
+}
+
+/** The CSS selector a breakpoint's variant is stored under. */
+export function breakpointSelector(bp: Breakpoint): string {
+  return `@media (max-width: ${bp.maxWidth}px)`;
+}
+
+/** Reads a max-width back out of a variant selector. */
+export function maxWidthOf(selector: string): number | null {
+  const m = /@media[^(]*\(\s*max-width:\s*(\d+(?:\.\d+)?)px/.exec(selector);
+  return m ? parseFloat(m[1]!) : null;
+}
+
+/** The breakpoints that apply at a given artboard width, widest last. */
+export function activeBreakpoints(doc: CanvasDocument, width: number): Breakpoint[] {
+  return breakpointsOf(doc).filter((bp) => width <= bp.maxWidth);
+}
+
 export type TokenGroup = 'color' | 'space' | 'radius' | 'font' | 'shadow' | 'duration';
 
 export interface Token {
@@ -217,6 +275,8 @@ export interface CanvasDocument {
   themes: string[];
   /** Component definitions, keyed by id. */
   components?: Record<string, ComponentDef>;
+  /** Named widths this design is authored against. */
+  breakpoints?: Breakpoint[];
   /** Monotonic, bumped on every applied op. Used for reconnect/catch-up. */
   rev: number;
 }
@@ -457,6 +517,7 @@ export function createEmptyDocument(name = 'Untitled'): CanvasDocument {
     tokens: [...DEFAULT_TOKENS],
     themes: ['default', 'dark'],
     components: {},
+    breakpoints: [...DEFAULT_BREAKPOINTS],
     rev: 0,
   };
 }

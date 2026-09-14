@@ -9,7 +9,7 @@
 import { parse as parseHtmlDom, type HTMLElement as ParsedElement } from 'node-html-parser';
 import {
   type CanvasDocument, type CanvasNode, type NodeId, type NodeType, type StyleMap,
-  makeNode, newId, defaultStylesFor,
+  contestedProperties, makeNode, newId, defaultStylesFor,
 } from './model.ts';
 import { type ExpandedNode, expandNode } from './components.ts';
 import {
@@ -112,9 +112,20 @@ export function emitHtml(doc: CanvasDocument, rootId: NodeId, opts: EmitOptions 
 
     const needsClass = node.variants.length > 0 || mode === 'stylesheet';
     if (needsClass) attrs.push(`class="${cls}"`);
+
     if (mode === 'inline') {
-      const inline = inlineDeclarations(node.styles);
+      // Properties a variant overrides move to the stylesheet: an inline style
+      // beats every rule, so leaving them here would make the variants dead.
+      const contested = contestedProperties(node);
+      const inline = inlineDeclarations(
+        contested.size
+          ? Object.fromEntries(Object.entries(node.styles).filter(([prop]) => !contested.has(prop)))
+          : node.styles,
+      );
       if (inline) attrs.push(`style="${escapeAttr(inline)}"`);
+
+      const base = Object.fromEntries(Object.entries(node.styles).filter(([prop]) => contested.has(prop)));
+      if (Object.keys(base).length) cssBlocks.push(`.${cls} {\n${serializeDeclarations(base, '  ')}\n}`);
     } else {
       cssBlocks.push(`.${cls} {\n${serializeDeclarations(node.styles, '  ')}\n}`);
     }

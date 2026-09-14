@@ -315,6 +315,7 @@ function describeOp(op: Op): string {
     case 'override': return `Overrode ${op.updates.length} component ${op.updates.length === 1 ? 'layer' : 'layers'}`;
     case 'variant': return 'Edited a component variant';
     case 'props': return 'Changed component properties';
+    case 'breakpoints': return 'Changed breakpoints';
   }
 }
 

@@ -173,6 +173,7 @@ function trackChanges(
       if (affects) styleBump = 1;
     }
     if (op.t === 'tokens' || op.t === 'variant' || op.t === 'override' || op.t === 'props') styleBump = 1;
+    if (op.t === 'breakpoints') styleBump = 1;
 
     for (const id of touched.nodes) {
       bump(id);

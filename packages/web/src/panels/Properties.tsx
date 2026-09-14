@@ -7,7 +7,10 @@
  */
 
 import { useMemo } from 'react';
-import { type CanvasNode, type ComponentDef, type NodeId, type StyleMap, resolvedProps } from '@playground/shared';
+import {
+  type Breakpoint, type CanvasNode, type ComponentDef, type NodeId, type StyleMap,
+  breakpointSelector, breakpointsOf, maxWidthOf, resolvedProps,
+} from '@playground/shared';
 import { useCanvas, getDoc } from '../state/store.ts';
 import { attrOps, resolveKey, resetOverrideOps } from '../state/keys.ts';
 import { Field, NumberInput, Row, Section, SegmentedControl, Select, TextInput, ColorInput } from '../ui/controls.tsx';
@@ -97,6 +100,7 @@ export function Properties() {
   const parentIsFlex = (parent?.styles.display ?? '').includes('flex');
 
   const knownVariants = [...new Set(nodes.flatMap((n) => n.variants.map((v) => v.selector)))];
+  const breakpoints = doc ? breakpointsOf(doc) : [];
 
   return (
     <div className="properties">
@@ -136,30 +140,46 @@ export function Properties() {
             onClick={() => setActiveVariant(activeVariant === v ? null : v)}
           >{v}</button>
         ))}
-        {knownVariants.filter((v) => v.startsWith('@')).map((v) => (
-          <button
-            key={v}
-            className={activeVariant === v ? 'is-active' : ''}
-            title={v}
-            onClick={() => setActiveVariant(activeVariant === v ? null : v)}
-          >{v.replace('@media', '').trim()}</button>
-        ))}
-        <button
-          className="add-variant"
-          title="Add a breakpoint override"
-          onClick={() => {
-            const width = window.prompt('Max width for this breakpoint, in px', '768');
-            if (!width) return;
-            const selector = `@media (max-width: ${parseInt(width, 10)}px)`;
-            write({});
-            setActiveVariant(selector);
-          }}
-        >+</button>
+        {/* The document's breakpoints, not ad-hoc numbers: an override authored
+            here uses the same width the rest of the design responds at. */}
+        {breakpoints.map((bp) => {
+          const selector = breakpointSelector(bp);
+          const has = knownVariants.includes(selector);
+          return (
+            <button
+              key={bp.id}
+              className={activeVariant === selector ? 'is-active' : ''}
+              data-has={has ? 'yes' : 'no'}
+              title={`${bp.name} — ${bp.maxWidth}px and below${has ? ' (has overrides)' : ''}`}
+              onClick={() => setActiveVariant(activeVariant === selector ? null : selector)}
+            >{bp.name}</button>
+          );
+        })}
+
+        {/* Any breakpoint width that is not in the document's list. */}
+        {knownVariants
+          .filter((v) => v.startsWith('@') && !breakpoints.some((bp) => breakpointSelector(bp) === v))
+          .map((v) => (
+            <button
+              key={v}
+              className={activeVariant === v ? 'is-active' : ''}
+              data-has="yes"
+              title={`${v} — not one of this document's breakpoints`}
+              onClick={() => setActiveVariant(activeVariant === v ? null : v)}
+            >{maxWidthOf(v) ? `${maxWidthOf(v)}px` : v.replace('@media', '').trim()}</button>
+          ))}
       </div>
 
       {activeVariant && (
         <p className="variant-note">
-          Editing <code>{activeVariant}</code>. Only properties you change here are overridden.
+          {activeVariant.startsWith('@') ? (
+            <>
+              Editing <strong>{labelForSelector(activeVariant, breakpoints)}</strong>. Only properties
+              you change here are overridden — set the artboard to this width to see it.
+            </>
+          ) : (
+            <>Editing <code>{activeVariant}</code>. Only properties you change here are overridden.</>
+          )}
         </p>
       )}
 
@@ -540,6 +560,12 @@ function InstanceProps({ instanceId, def, node }: {
       ))}
     </div>
   );
+}
+
+function labelForSelector(selector: string, breakpoints: Breakpoint[]): string {
+  const width = maxWidthOf(selector);
+  const bp = breakpoints.find((b) => b.maxWidth === width);
+  return bp ? `${bp.name} (${bp.maxWidth}px and below)` : `${width}px and below`;
 }
 
 function extractBlur(filter: string): string {

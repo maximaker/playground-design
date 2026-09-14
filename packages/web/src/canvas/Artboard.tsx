@@ -13,6 +13,7 @@ import { getArtboardPosition, getArtboardSize } from '@playground/shared';
 import { useCanvas, getDoc, getNodeById } from '../state/store.ts';
 import { registerFrame } from './registry.ts';
 import { NodeView } from './NodeView.tsx';
+import { BreakpointBar } from './BreakpointBar.tsx';
 import { artboardStylesheet, fontFamilies, googleFontsHref } from './styles.ts';
 
 const RESET = `
@@ -180,6 +181,8 @@ export const Artboard = memo(function Artboard({ id, live }: Props) {
         <span className="artboard-size">{Math.round(width)} × {Math.round(height)}</span>
       </div>
       )}
+
+      {isSelected && <BreakpointBar artboardId={id} />}
 
       {agentWorking && (
         <div className="artboard-agent-badge" title={agentActivity?.summary ?? undefined}>

@@ -6,7 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   type Box, type NodeId, type Op, type SnapGuide,
   makeNode, boxOf, getArtboardPosition, getArtboardSize,
-  DEFAULT_ARTBOARD_STYLES, defaultStylesFor, makeNote, notesOf,
+  DEFAULT_ARTBOARD_STYLES, defaultStylesFor, makeNote, notesOf, breakpointsOf,
 } from '@playground/shared';
 import { useCanvas, getDoc, currentPage, topLevelSelection, getNodeById } from '../state/store.ts';
 import { resolveKey, treeNodeId } from '../state/keys.ts';
@@ -372,7 +372,7 @@ export function Canvas({ onContextMenu }: CanvasProps) {
 
     const dxScreen = e.clientX - d.startX!;
     const dyScreen = e.clientY - d.startY!;
-    const dx = dxScreen / vp.zoom;
+    let dx = dxScreen / vp.zoom;
     const dy = dyScreen / vp.zoom;
 
     switch (d.kind) {
@@ -528,6 +528,14 @@ export function Canvas({ onContextMenu }: CanvasProps) {
       }
 
       case 'resize': {
+        // Resizing an artboard settles on the document's breakpoints, so the
+        // widths you author at are the widths the design responds at.
+        const resizingArtboard = doc.nodes[d.start.id]?.type === 'artboard';
+        if (resizingArtboard && !e.metaKey && !e.ctrlKey) {
+          const target = d.start.width + dx;
+          const snapped = breakpointsOf(doc).find((bp) => Math.abs(bp.maxWidth - target) < 16 / vp.zoom);
+          if (snapped) dx = snapped.maxWidth - d.start.width;
+        }
         const proposed = resizeBox(d.start, dx, dy);
         const snap = e.metaKey || e.ctrlKey || e.shiftKey
           ? { dx: 0, dy: 0, guides: [] }

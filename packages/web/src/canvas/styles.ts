@@ -1,7 +1,7 @@
 /** Conversions between the document's CSS-shaped styles and React style objects. */
 
 import type { CanvasDocument, CanvasNode, NodeId, StyleMap } from '@playground/shared';
-import { descendants } from '@playground/shared';
+import { contestedProperties, descendants } from '@playground/shared';
 import type { CSSProperties } from 'react';
 
 export function toReactStyle(styles: StyleMap): CSSProperties {
@@ -41,6 +41,16 @@ export function artboardStylesheet(doc: CanvasDocument, artboardId: NodeId, them
   for (const id of [artboardId, ...descendants(doc, artboardId)]) {
     const node = doc.nodes[id];
     if (!node?.variants.length) continue;
+
+    // The base values for properties a variant contests. They have to be here
+    // rather than inline, or the variant can never win the cascade.
+    const contested = contestedProperties(node);
+    const base = Object.entries(node.styles)
+      .filter(([prop, value]) => contested.has(prop) && value)
+      .map(([prop, value]) => `  ${prop}: ${value};`)
+      .join('\n');
+    if (base) blocks.push(`[data-node-id="${id}"] {\n${base}\n}`);
+
     for (const variant of node.variants) {
       const decls = Object.entries(variant.styles)
         .filter(([, v]) => v)

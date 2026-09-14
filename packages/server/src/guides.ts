@@ -55,13 +55,24 @@ so the human sees which artboards you are touching.
   responsive: `
 # Responsive work
 
-- Artboards are viewports: a 390px artboard resolves \`@media (max-width: 768px)\`
-  on its own width, so you can author real breakpoints and see them.
-- Write media queries in a <style> block inside \`write_html\`. They are stored as
-  node variants and exported as real media queries / Tailwind \`max-md:\` classes.
-- To build a mobile version of an existing design: \`duplicate_nodes\` the desktop
-  artboard, \`create_artboard\` at 390px wide, move the copy in, then restyle.
-  Duplicating preserves structure so the two stay recognisably the same design.
+Artboards are real viewports. A 390px artboard resolves \`@media (max-width: 768px)\`
+on its own width, so responsive work here is not a preview — it is the thing.
+
+1. \`get_breakpoints\` first. Author against those widths rather than inventing
+   your own, so the design responds where the codebase does.
+2. Style the base case, then add overrides with \`update_styles\` and the
+   breakpoint's \`selector\`. Only put in an override what actually changes.
+3. \`preview_at_width\` to check. It sets the width, lets the browser re-resolve
+   the media queries, and gives you the screenshot. Do not assume a layout
+   reflows correctly — look at it.
+
+Two things reliably break at narrow widths, so check them specifically: a row
+that should become a column, and a fixed width that should be a percentage or
+\`fit-content\`.
+
+To build a separate mobile artboard: \`duplicate_nodes\` the desktop one, set the
+copy's width with \`preview_at_width\` or \`update_styles\`, then restyle.
+Duplicating preserves structure so the two stay recognisably the same design.
 `.trim(),
 
   'figma-import': `

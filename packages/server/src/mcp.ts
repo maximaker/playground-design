@@ -17,6 +17,7 @@ import {
   batchId, tokenToCssVar, DEFAULT_ARTBOARD_STYLES, DEFINITIONS_PAGE,
   componentsOf, collectSlots, detachedNodes, expandInstance, instancesOf,
   resolvedProps, variantMatrix, lintDocument, summarise, RULES,
+  breakpointsOf, breakpointSelector,
 } from '@playground/shared';
 import { applyOps, getDocument, StoreError, createSnapshot } from './store.ts';
 import { callTab, notifyTabs, selectionOf, hasLiveTab, NoTabError } from './realtime.ts';
@@ -765,7 +766,8 @@ function registerWriteTools(server: McpServer, ctx: McpContext): void {
       updates: z.array(z.object({
         id: z.string(),
         styles: StyleRecord.describe('Kebab-case CSS properties, e.g. {"background-color": "var(--color-brand)"}.'),
-        selector: z.string().optional().describe('":hover", ":focus", or "@media (max-width: 768px)". Omit for base styles.'),
+        selector: z.string().optional()
+        .describe('":hover", ":focus", or a breakpoint selector from get_breakpoints. Omit for base styles.'),
       })).min(1).max(200),
     },
   }, async ({ updates }) => guard(() => {
@@ -927,6 +929,104 @@ function registerWriteTools(server: McpServer, ctx: McpContext): void {
     for (const id of ids) { node(doc, id); total += 1 + descendants(doc, id).length; }
     commit(ctx, [{ t: 'remove', ids }]);
     return json({ deleted: ids.length, totalNodesRemoved: total });
+  }));
+
+  server.registerTool('get_breakpoints', {
+    title: 'Get the document’s breakpoints',
+    description:
+      'The named widths this design responds at. Author responsive overrides against these rather ' +
+      'than inventing widths — artboards are real viewports, so setting one to a breakpoint width ' +
+      'shows exactly what that breakpoint does.',
+    inputSchema: {},
+    annotations: { readOnlyHint: true },
+  }, async () => guard(() => {
+    const doc = requireDoc(ctx);
+    return json({
+      breakpoints: breakpointsOf(doc).map((bp) => ({
+        ...bp,
+        selector: breakpointSelector(bp),
+        usage: `Pass selector "${breakpointSelector(bp)}" to update_styles.`,
+      })),
+    });
+  }));
+
+  server.registerTool('set_breakpoints', {
+    title: 'Set the document’s breakpoints',
+    description:
+      'Replaces the breakpoint list. Use it to match the widths the codebase already uses, so design ' +
+      'and code respond at the same places.',
+    inputSchema: {
+      breakpoints: z.array(z.object({
+        name: z.string().min(1).max(24),
+        maxWidth: z.number().int().min(160).max(4000),
+      })).min(1).max(12),
+    },
+  }, async ({ breakpoints }) => guard(() => {
+    const doc = requireDoc(ctx);
+    const seen = new Set<number>();
+    for (const bp of breakpoints) {
+      if (seen.has(bp.maxWidth)) return fail(`Two breakpoints share the width ${bp.maxWidth}px.`);
+      seen.add(bp.maxWidth);
+    }
+
+    const existing = breakpointsOf(doc);
+    commit(ctx, [{
+      t: 'breakpoints',
+      breakpoints: breakpoints.map((bp) => ({
+        // Keep ids stable for widths that already exist, so existing variants
+        // and any UI state stay attached to the same breakpoint.
+        id: existing.find((e) => e.maxWidth === bp.maxWidth)?.id ?? newId('bp'),
+        name: bp.name,
+        maxWidth: bp.maxWidth,
+      })),
+    }]);
+    return json({ breakpoints: breakpoints.length });
+  }));
+
+  server.registerTool('preview_at_width', {
+    title: 'See an artboard at a width',
+    description:
+      'Sets an artboard’s width so the browser re-resolves its media queries, and returns a ' +
+      'screenshot. This is how to check a responsive design actually works rather than assuming it ' +
+      'does — the reflow you see is the reflow that will ship.',
+    inputSchema: {
+      id: z.string().describe('Artboard id.'),
+      width: z.number().int().min(160).max(4000).optional()
+        .describe('Width to set. Omit to use each of the document’s breakpoints in turn.'),
+      restore: z.boolean().optional().default(true).describe('Put the width back afterwards.'),
+    },
+  }, async ({ id, width, restore }) => guard(async () => {
+    const doc = requireDoc(ctx);
+    const artboard = node(doc, id);
+    if (artboard.type !== 'artboard') return fail(`${id} is not an artboard.`);
+
+    const original = artboard.styles.width;
+    const widths = width ? [width] : breakpointsOf(doc).map((bp) => bp.maxWidth);
+    const shots: { width: number; breakpoint: string | null; image: string; mime: string }[] = [];
+
+    try {
+      for (const w of widths) {
+        commit(ctx, [{ t: 'styles', updates: [{ id, styles: { width: `${w}px` } }] }]);
+        const { data, mime } = await renderNode(requireDoc(ctx), id, { format: 'png', scale: 1, baseUrl: ctx.baseUrl });
+        shots.push({
+          width: w,
+          breakpoint: breakpointsOf(doc).find((bp) => bp.maxWidth === w)?.name ?? null,
+          image: data.toString('base64'),
+          mime,
+        });
+      }
+    } finally {
+      if (restore && original) {
+        commit(ctx, [{ t: 'styles', updates: [{ id, styles: { width: original } }] }]);
+      }
+    }
+
+    return {
+      content: [
+        { type: 'text' as const, text: `${artboard.name} at ${shots.map((s) => `${s.width}px${s.breakpoint ? ` (${s.breakpoint})` : ''}`).join(', ')}.` },
+        ...shots.map((s) => ({ type: 'image' as const, data: s.image, mimeType: s.mime })),
+      ],
+    };
   }));
 
   server.registerTool('set_tokens', {

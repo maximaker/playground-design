@@ -12,7 +12,7 @@
  */
 
 import { createElement, memo, useCallback, useEffect, useRef } from 'react';
-import { type ExpandedNode, type NodeId, expandInstance } from '@playground/shared';
+import { type ExpandedNode, type NodeId, contestedProperties, expandInstance } from '@playground/shared';
 import { useCanvas, getDoc, getNodeById } from '../state/store.ts';
 import { toReactStyle } from './styles.ts';
 
@@ -42,7 +42,7 @@ export const NodeView = memo(function NodeView({ id, isRoot }: Props) {
     return <ExpandedView expanded={expanded} isRoot={isRoot} editingText={editingText} />;
   }
 
-  const props = domProps(node.attrs, id, node.styles, isRoot);
+  const props = domProps(node.attrs, id, node.styles, isRoot, contestedProperties(node));
 
   if (node.type === 'vector') {
     return createElement(node.tag, { ...props, dangerouslySetInnerHTML: { __html: node.text ?? '' } });
@@ -75,7 +75,7 @@ const ExpandedView = memo(function ExpandedView({ expanded, isRoot, editingText 
   editingText: string | null;
 }) {
   const node = expanded.node;
-  const props = domProps(node.attrs, expanded.key, node.styles, isRoot);
+  const props = domProps(node.attrs, expanded.key, node.styles, isRoot, contestedProperties(node));
 
   if (node.type === 'vector') {
     return createElement(node.tag, { ...props, dangerouslySetInnerHTML: { __html: node.text ?? '' } });
@@ -104,6 +104,8 @@ function domProps(
   key: string,
   styles: Record<string, string>,
   isRoot?: boolean,
+  /** Properties some variant overrides; these live in the stylesheet instead. */
+  contested?: Set<string>,
 ): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(attrs)) {
@@ -112,7 +114,11 @@ function domProps(
     if (lower === 'data-x' || lower === 'data-y') continue;
     out[k] = v;
   }
-  const style = toReactStyle(styles);
+  const style = toReactStyle(
+    contested?.size
+      ? Object.fromEntries(Object.entries(styles).filter(([prop]) => !contested.has(prop)))
+      : styles,
+  );
   // The editor-facing identity: for a node inside an instance this addresses
   // the override, not the shared definition node.
   out['data-node-id'] = key;
