@@ -122,7 +122,7 @@ function Editor({ docId, onHome, appearance, onAppearance }: {
               <button className="button primary" onClick={onHome}>Back to all documents</button>
             </>
           ) : (
-            <p>{connection === 'closed' ? 'Reconnecting…' : 'Opening document…'}</p>
+            <p>Opening document…</p>
           )}
         </div>
       </div>

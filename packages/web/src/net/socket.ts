@@ -19,13 +19,15 @@ const WS_URL = () => {
 export interface Connection { close(): void }
 
 /**
- * How many failed WebSocket attempts before falling back to polling.
+ * How long to give the WebSocket before starting to poll as well.
  *
- * Serverless hosts (Vercel among them) cannot hold a WebSocket open at all, so
- * retrying forever would leave the editor permanently disconnected. Polling is
- * slower and drops presence and agent RPC, but the document still syncs.
+ * Serverless hosts (Vercel among them) cannot hold a WebSocket open at all.
+ * Waiting out reconnection attempts first left the editor showing "Connecting"
+ * for several seconds on every load there, so instead the two race: a local
+ * socket opens in milliseconds and wins, and where sockets are impossible the
+ * document is up almost as fast. If the socket connects later, polling stops.
  */
-const WS_ATTEMPTS_BEFORE_POLLING = 3;
+const WS_GRACE_MS = 1200;
 const POLL_INTERVAL_MS = 1500;
 
 export function connectDocument(docId: string): Connection {
@@ -34,6 +36,7 @@ export function connectDocument(docId: string): Connection {
   let retry = 0;
   let presenceTimer: number | undefined;
   let pollTimer: number | undefined;
+  let graceTimer: number | undefined;
   let polling = false;
 
   const store = useCanvas;
@@ -59,6 +62,12 @@ export function connectDocument(docId: string): Connection {
     } finally {
       if (!closed) pollTimer = window.setTimeout(poll, POLL_INTERVAL_MS);
     }
+  };
+
+  const stopPolling = () => {
+    polling = false;
+    clearTimeout(pollTimer);
+    clearTimeout(graceTimer);
   };
 
   const startPolling = async () => {
@@ -99,6 +108,8 @@ export function connectDocument(docId: string): Connection {
 
     ws.onopen = () => {
       retry = 0;
+      // The socket won the race; polling is redundant from here.
+      stopPolling();
       ws!.send(JSON.stringify({
         type: 'join',
         docId,
@@ -114,12 +125,13 @@ export function connectDocument(docId: string): Connection {
     };
 
     ws.onclose = () => {
-      store.getState().setConnection('closed');
-      if (closed || polling) return;
-      if (retry >= WS_ATTEMPTS_BEFORE_POLLING) { void startPolling(); return; }
-      // Back off, but stay responsive: a dev server restart should reconnect fast.
-      const delay = Math.min(10_000, 400 * 2 ** retry++);
-      setTimeout(open, delay);
+      if (closed) return;
+      if (!polling) {
+        store.getState().setConnection('closed');
+        // Back off, but stay responsive: a dev server restart should reconnect fast.
+        const delay = Math.min(10_000, 400 * 2 ** retry++);
+        setTimeout(open, delay);
+      }
     };
 
     ws.onerror = () => ws?.close();
@@ -204,6 +216,10 @@ export function connectDocument(docId: string): Connection {
   });
 
   open();
+  // If the socket has not opened by now, this host probably cannot hold one.
+  graceTimer = window.setTimeout(() => {
+    if (!closed && ws?.readyState !== WebSocket.OPEN) void startPolling();
+  }, WS_GRACE_MS);
 
   return {
     close() {
@@ -211,6 +227,7 @@ export function connectDocument(docId: string): Connection {
       unsubscribe();
       clearTimeout(presenceTimer);
       clearTimeout(pollTimer);
+      clearTimeout(graceTimer);
       ws?.close();
     },
   };
