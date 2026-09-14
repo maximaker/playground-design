@@ -11,6 +11,7 @@ import { Layers } from './panels/Layers.tsx';
 import { Properties } from './panels/Properties.tsx';
 import { Tokens } from './panels/Tokens.tsx';
 import { Components } from './panels/Components.tsx';
+import { Review } from './panels/Review.tsx';
 import { History } from './panels/History.tsx';
 import { ConnectAgent } from './panels/ConnectAgent.tsx';
 import { Export } from './panels/Export.tsx';
@@ -28,13 +29,14 @@ import {
 } from './state/appearance.ts';
 import { Home } from './Home.tsx';
 
-type LeftTab = 'layers' | 'pages' | 'components' | 'tokens' | 'history';
+type LeftTab = 'layers' | 'pages' | 'components' | 'tokens' | 'review' | 'history';
 
 const LEFT_TABS: { id: LeftTab; icon: IconName; label: string; hint: string }[] = [
   { id: 'layers', icon: 'layers', label: 'Layers', hint: 'The structure of this page' },
   { id: 'pages', icon: 'page', label: 'Pages', hint: 'Pages in this document' },
   { id: 'components', icon: 'component', label: 'Components', hint: 'Reusable components and their variants' },
   { id: 'tokens', icon: 'palette', label: 'Tokens', hint: 'Design tokens and themes' },
+  { id: 'review', icon: 'check', label: 'Review', hint: 'Contrast, tap targets, token consistency and layout shape' },
   { id: 'history', icon: 'history', label: 'History', hint: 'Changes and saved versions' },
 ];
 
@@ -326,6 +328,7 @@ function Editor({ docId, onHome, appearance, onAppearance }: {
             )}
             {leftTab === 'components' && <Components />}
             {leftTab === 'tokens' && <Tokens />}
+            {leftTab === 'review' && <Review />}
             {leftTab === 'history' && <History />}
           </ScrollArea>
         </aside>

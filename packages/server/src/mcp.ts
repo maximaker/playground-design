@@ -16,7 +16,7 @@ import {
   makeNode, makeNote, newId, parseHtml, treeSummary, describeNode, getArtboardPosition, getArtboardSize,
   batchId, tokenToCssVar, DEFAULT_ARTBOARD_STYLES, DEFINITIONS_PAGE,
   componentsOf, collectSlots, detachedNodes, expandInstance, instancesOf,
-  resolvedProps, variantMatrix,
+  resolvedProps, variantMatrix, lintDocument, summarise, RULES,
 } from '@playground/shared';
 import { applyOps, getDocument, StoreError, createSnapshot } from './store.ts';
 import { callTab, notifyTabs, selectionOf, hasLiveTab, NoTabError } from './realtime.ts';
@@ -104,6 +104,9 @@ export function buildMcpServer(ctx: McpContext): McpServer {
         `you cannot tell whether a layout is right without looking at it.\n\n` +
         `Call get_guide("layout") before building anything substantial; it describes what makes ` +
         `output a designer will keep rather than discard.\n\n` +
+        `Before you hand work back, call lint_design on what you changed — it checks contrast, tap ` +
+        `targets, token consistency and layout shape, and catches the things that get agent output ` +
+        `rejected.\n\n` +
         `Reuse rather than rebuild: call list_components first, and create_component the moment you ` +
         `would otherwise build the same thing twice.\n\n` +
         `The canvas also carries prompt cards — sticky notes the human writes next to the thing ` +
@@ -408,6 +411,79 @@ function registerReadTools(server: McpServer, ctx: McpContext): void {
         value: theme ? (t.values[theme] ?? t.values.default) : undefined,
         values: theme ? undefined : t.values,
       })),
+    });
+  }));
+
+  server.registerTool('lint_design', {
+    title: 'Check a design',
+    description:
+      'Runs the design checks and reports what is wrong: text contrast below WCAG AA, tap targets ' +
+      'under 44px, missing alt text, literals where the design uses a token, containers that cannot ' +
+      'reflow, and structures repeated enough to deserve a component.\n\n' +
+      'Run this on your own work before handing it back. get_guide describes what good output looks ' +
+      'like; this tells you whether yours is.',
+    inputSchema: {
+      within: z.string().optional().describe('Limit to one artboard or subtree. Defaults to the whole document.'),
+      rules: z.array(z.string()).optional().describe(`Limit to specific rules: ${RULES.map((r) => r.id).join(', ')}`),
+      severity: z.enum(['error', 'warning', 'info']).optional()
+        .describe('Minimum severity to report. Defaults to reporting everything.'),
+      theme: z.string().optional(),
+    },
+    annotations: { readOnlyHint: true },
+  }, async ({ within, rules, severity, theme }) => guard(async () => {
+    const doc = requireDoc(ctx);
+    if (within) node(doc, within);
+
+    // Rendered boxes make the tap-target check exact rather than a guess from
+    // authored styles; without a tab it stays conservative.
+    let measured: Record<string, { width: number; height: number }> | undefined;
+    if (hasLiveTab(doc.id)) {
+      const ids = Object.values(doc.nodes)
+        .filter((n) => n.tag === 'button' || n.tag === 'a' || n.attrs.role === 'button')
+        .map((n) => n.id)
+        .slice(0, 200);
+      if (ids.length) {
+        measured = await callTab<Record<string, { width: number; height: number }>>(doc.id, 'measure', { ids })
+          .catch(() => undefined);
+      }
+    }
+
+    const findings = lintDocument(doc, {
+      within,
+      rules: rules as never,
+      theme,
+      measured,
+    }).filter((f) => !severity || rank(f.severity) <= rank(severity));
+
+    if (!findings.length) {
+      return text(
+        within
+          ? 'No problems found in that subtree.'
+          : 'No problems found. Run this again after any substantial change.',
+      );
+    }
+
+    return json({
+      total: findings.length,
+      bySeverity: {
+        error: findings.filter((f) => f.severity === 'error').length,
+        warning: findings.filter((f) => f.severity === 'warning').length,
+        info: findings.filter((f) => f.severity === 'info').length,
+      },
+      summary: summarise(findings).map((s) => ({
+        ...s,
+        why: RULES.find((r) => r.id === s.rule)?.why,
+      })),
+      findings: findings.slice(0, 100).map((f) => ({
+        rule: f.rule,
+        severity: f.severity,
+        node: f.nodeId,
+        name: getNode(doc, f.nodeId)?.name ?? null,
+        artboard: f.artboard,
+        message: f.message,
+        fix: f.fix ?? null,
+      })),
+      ...(findings.length > 100 ? { note: `${findings.length - 100} more not listed; narrow with "within" or "rules".` } : {}),
     });
   }));
 
@@ -927,6 +1003,11 @@ function rightmostEdge(doc: CanvasDocument, artboards: NodeId[]): number {
     max = Math.max(max, getArtboardPosition(n).x + getArtboardSize(n).width);
   }
   return max;
+}
+
+const SEVERITY_RANK = { error: 0, warning: 1, info: 2 } as const;
+function rank(severity: 'error' | 'warning' | 'info'): number {
+  return SEVERITY_RANK[severity];
 }
 
 function slug(s: string): string {

@@ -30,21 +30,21 @@ const foundationsSheet = (opts: {
   uppercaseLabels?: boolean;
 }) => `
 <style>
-  .sheet { display:flex; flex-direction:column; gap:40px; padding:56px;
+  .sheet { display:flex; flex-direction:column; gap:32px; padding:64px;
            background:var(--color-bg); color:var(--color-fg);
            font-family:${opts.bodyFont}; width:100%; }
   .row { display:flex; flex-direction:row; gap:16px; align-items:center; flex-wrap:wrap; }
-  .col { display:flex; flex-direction:column; gap:12px; }
-  .label { font-size:11px; letter-spacing:.14em; color:var(--color-muted);
+  .col { display:flex; flex-direction:column; gap:16px; }
+  .label { font-size:12px; letter-spacing:.14em; color:var(--color-muted);
            ${opts.uppercaseLabels ? 'text-transform:uppercase;' : ''} }
   .h1 { font-family:${opts.headingFont}; font-size:56px; font-weight:700; line-height:1.08;
         margin:0; letter-spacing:${opts.letterSpacing ?? '-0.02em'}; }
   .h2 { font-family:${opts.headingFont}; font-size:32px; font-weight:600; line-height:1.2; margin:0; }
   .body { font-size:16px; line-height:1.65; color:var(--color-muted); margin:0; max-width:56ch; }
-  .swatches { display:flex; flex-direction:row; gap:12px; }
-  .swatch { display:flex; flex-direction:column; gap:6px; width:96px; }
+  .swatches { display:flex; flex-direction:row; gap:16px; }
+  .swatch { display:flex; flex-direction:column; gap:8px; width:96px; }
   .chip { height:64px; border-radius:${opts.radius}; border:${opts.borderWidth} solid var(--color-border); }
-  .chip-name { font-size:11px; color:var(--color-muted); }
+  .chip-name { font-size:12px; color:var(--color-muted); }
   .btn { display:flex; align-items:center; justify-content:center;
          padding:12px 22px; border-radius:${opts.buttonRadius}; font-size:15px; font-weight:600;
          background:var(--color-brand); color:var(--color-on-brand); width:fit-content;
@@ -55,7 +55,7 @@ const foundationsSheet = (opts: {
   .input { padding:12px 14px; border-radius:${opts.radius};
            border:${opts.borderWidth} solid var(--color-border);
            background:var(--color-surface); color:var(--color-fg); font-size:15px; width:280px; }
-  .card { display:flex; flex-direction:column; gap:10px; padding:24px; width:280px;
+  .card { display:flex; flex-direction:column; gap:8px; padding:32px; width:280px;
           background:var(--color-surface); border:${opts.borderWidth} solid var(--color-border);
           border-radius:${opts.radius}; box-shadow:${opts.shadow}; }
   .card-title { font-family:${opts.headingFont}; font-size:18px; font-weight:600; margin:0; }
@@ -223,9 +223,9 @@ export const TEMPLATES: Template[] = [
         'color.bg': ['#fdf4ff', '#170c1b'],
         'color.surface': ['#ffffff', '#221129'],
         'color.fg': ['#3b0764', '#f3e8ff'],
-        'color.muted': ['#7e5a95', '#c4a8d4'],
+        'color.muted': ['#6b4a80', '#c4a8d4'],
         'color.border': ['#f0ddf7', '#3b1f47'],
-        'color.brand': ['#a855f7', '#d8b4fe'],
+        'color.brand': ['#9333ea', '#d8b4fe'],
         'color.on-brand': ['#ffffff', '#170c1b'],
       }),
       ...RADII('12px', '20px', '32px'),

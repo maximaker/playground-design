@@ -7,3 +7,5 @@ export * from './summary.ts';
 export * from './snap.ts';
 export * from './components.ts';
 export * from './gradient.ts';
+export * from './color.ts';
+export * from './lint.ts';

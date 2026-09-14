@@ -290,10 +290,13 @@ export function parseHtml(html: string, opts: ParseOptions = {}): ParseResult {
           const raw = decodeEntities(String(child.rawText ?? '')).trim();
           if (raw) {
             // A bare text run inside a container becomes its own text node so it
-            // remains selectable and stylable on the canvas.
+            // remains selectable and stylable on the canvas — but with no styles
+            // of its own. Giving it the text defaults would override the colour
+            // and font it inherits in HTML, which silently changed how pasted
+            // and imported markup renders (white button labels came out dark).
             const t = makeNode({
               type: 'text', id: newId(), tag: 'span', name: truncate(raw, 24),
-              styles: { ...defaultStylesFor('text') }, parent: node.id, text: raw,
+              styles: {}, parent: node.id, text: raw,
             });
             nodes.push(t);
             node.children.push(t.id);
