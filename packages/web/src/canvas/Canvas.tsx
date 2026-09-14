@@ -607,44 +607,6 @@ export function Canvas({ onContextMenu }: CanvasProps) {
     const doc = getDoc();
     const page = currentPage();
 
-  // Only artboards near the viewport get a live iframe. Each one is a real
-  // document with its own layout and style engine, so a page with dozens of
-  // them would otherwise cost hundreds of megabytes and stall panning. This is
-  // the mitigation the PRD calls for against the iframe-per-artboard risk.
-  const visibleArtboards = useMemo(() => {
-    const doc = getDoc();
-    if (!doc || !page) return new Set<NodeId>();
-
-    const stage = containerRef.current?.getBoundingClientRect();
-    if (!stage) return new Set(page.artboards);
-
-    // A generous margin so panning does not reveal blank frames.
-    const margin = Math.max(stage.width, stage.height);
-    const left = (stage.left - viewport.x - margin) / viewport.zoom;
-    const top = (stage.top - viewport.y - margin) / viewport.zoom;
-    const right = (stage.right - viewport.x + margin) / viewport.zoom;
-    const bottom = (stage.bottom - viewport.y + margin) / viewport.zoom;
-
-    const near = new Set<NodeId>();
-    for (const id of page.artboards) {
-      const node = doc.nodes[id];
-      if (!node) continue;
-      const pos = getArtboardPosition(node);
-      const size = getArtboardSize(node);
-      if (pos.x + size.width < left || pos.x > right) continue;
-      if (pos.y + size.height < top || pos.y > bottom) continue;
-      near.add(id);
-    }
-
-    // Never unmount an artboard that holds the selection: measuring it drives
-    // the overlay, and it must stay live even if the user pans it off screen.
-    for (const id of selection) {
-      const artboard = artboardOf(doc, id);
-      if (artboard) near.add(artboard);
-    }
-    return near;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, viewport.x, viewport.y, viewport.zoom, structureVersion, selection]);
     if (!doc || !page) return;
 
     const vp = useCanvas.getState().viewport;
@@ -657,6 +619,18 @@ export function Canvas({ onContextMenu }: CanvasProps) {
     const height = Math.max(h, tool === 'text' ? 0 : 24);
 
     if (!d.artboardId) {
+      // Only the frame tool means "new artboard" out here. Every other tool
+      // drew on empty canvas by mistake, and silently producing an artboard is
+      // a confusing answer to that.
+      if (tool !== 'frame') {
+        useCanvas.getState().toast(
+          'Draw inside an artboard — or press F to create one first.',
+          'info',
+        );
+        setTool('move');
+        return;
+      }
+
       // Empty canvas: the frame tool makes a new artboard, which is what the
       // gesture means out here.
       const start = toCanvasSpace(Math.min(d.startX, e.clientX), Math.min(d.startY, e.clientY), vp);
