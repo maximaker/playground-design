@@ -24,6 +24,10 @@
     {
       "source": "/d/(.*)",
       "destination": "/index.html"
+    },
+    {
+      "source": "/s/(.*)",
+      "destination": "/index.html"
     }
   ],
   "functions": {

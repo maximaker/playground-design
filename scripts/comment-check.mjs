@@ -108,8 +108,16 @@ const silent = await call('resolve_comment', { id: commentId });
 check('resolving without replying is refused', silent.isError, silent.text.slice(0, 60));
 
 await call('reply_to_comment', { id: commentId, text: 'Dropped it to 32px.' });
-await page.waitForTimeout(1200);
-const withReply = await page.evaluate(() => window.__playground.store.getState().doc.comments[0]);
+
+// Wait for it rather than sleeping: where WebSockets are impossible — which is
+// the deployed product — the tab is on the polling transport, whose interval is
+// longer than any fixed sleep worth writing.
+let withReply = null;
+for (let i = 0; i < 20; i++) {
+  withReply = await page.evaluate(() => window.__playground.store.getState().doc.comments[0]);
+  if (withReply?.replies?.length) break;
+  await page.waitForTimeout(500);
+}
 check('the reply arrives in the open editor live', withReply.replies.length === 1, withReply.replies[0]?.text ?? '');
 check('and is marked as coming from an agent', withReply.replies[0]?.kind === 'agent', withReply.replies[0]?.kind ?? '');
 
@@ -151,8 +159,12 @@ check('but still cannot edit', viewerResult.before === viewerResult.after,
 
 // The server is the authority: confirm the comment really landed, and that a
 // non-comment op from the same session is refused rather than merely hidden.
-await viewer.waitForTimeout(1200);
-const onServer = await (await fetch(`${BASE}/api/documents/${docId}`)).json();
+let onServer = null;
+for (let i = 0; i < 20; i++) {
+  onServer = await (await fetch(`${BASE}/api/documents/${docId}`)).json();
+  if ((onServer.document.comments ?? []).some((c) => c.author === 'Sam')) break;
+  await viewer.waitForTimeout(500);
+}
 check('the viewer’s comment reached the server',
   (onServer.document.comments ?? []).some((c) => c.author === 'Sam'),
   `${(onServer.document.comments ?? []).length} comment(s)`);

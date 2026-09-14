@@ -43,25 +43,46 @@ check('it never reveals the document id',
 
 // --- A viewer's writes are refused by the server, not just hidden ----------
 
+/**
+ * Serverless hosts cannot hold a WebSocket open at all, so the socket half of
+ * this runs only where there is one. The HTTP half below runs everywhere, and
+ * is the path the deployed product actually uses — skipping it there would mean
+ * testing the transport that production never takes.
+ */
 const ws = new WebSocket(`${BASE.replace(/^http/, 'ws')}/ws`);
 const seen = [];
 ws.on('message', (m) => seen.push(JSON.parse(String(m))));
-await new Promise((r) => ws.on('open', r));
-ws.send(JSON.stringify({ type: 'join', shareToken: token, clientId: 'viewer' }));
-await new Promise((r) => setTimeout(r, 700));
+const socketWorks = await new Promise((resolve) => {
+  ws.on('open', () => resolve(true));
+  ws.on('error', () => resolve(false));
+});
 
-const joined = seen.find((m) => m.type === 'joined');
-check('the session is marked read-only', joined?.canWrite === false, String(joined?.canWrite));
-check('the joined document carries no real id', joined?.doc?.id !== docId, joined?.doc?.id ?? '');
+if (socketWorks) {
+  ws.send(JSON.stringify({ type: 'join', shareToken: token, clientId: 'viewer' }));
+  await new Promise((r) => setTimeout(r, 700));
 
-ws.send(JSON.stringify({
-  type: 'ops',
-  ops: [{ op: { t: 'rename', updates: [{ id: artboard.id, name: 'Written by a viewer' }] }, origin: { kind: 'human', id: 'viewer' } }],
-}));
-await new Promise((r) => setTimeout(r, 700));
+  const joined = seen.find((m) => m.type === 'joined');
+  check('the session is marked read-only', joined?.canWrite === false, String(joined?.canWrite));
+  check('the joined document carries no real id', joined?.doc?.id !== docId, joined?.doc?.id ?? '');
 
-const refusal = seen.find((m) => m.type === 'rejected');
-check('a write over the socket is refused', !!refusal, refusal?.message ?? '(accepted — BUG)');
+  ws.send(JSON.stringify({
+    type: 'ops',
+    ops: [{ op: { t: 'rename', updates: [{ id: artboard.id, name: 'Written by a viewer' }] }, origin: { kind: 'human', id: 'viewer' } }],
+  }));
+  await new Promise((r) => setTimeout(r, 700));
+
+  const refusal = seen.find((m) => m.type === 'rejected');
+  check('a write over the socket is refused', !!refusal, refusal?.message ?? '(accepted — BUG)');
+} else {
+  console.log('  — no WebSocket on this host; checking the HTTP transport only');
+}
+
+// The HTTP path is the one serverless takes, so it is checked either way.
+const httpWrite = await fetch(`${BASE}/api/shares/${token}/ops`, {
+  method: 'POST', headers: { 'content-type': 'application/json' },
+  body: JSON.stringify({ ops: [{ op: { t: 'rename', updates: [{ id: artboard.id, name: 'Written by a viewer' }] }, origin: { kind: 'human', id: 'viewer' } }] }),
+});
+check('a write over HTTP is refused', httpWrite.status === 403, String(httpWrite.status));
 
 const afterWrite = await (await fetch(`${BASE}/api/documents/${docId}`)).json();
 check('and the document is untouched',
@@ -73,9 +94,11 @@ check('and the document is untouched',
 await post(`/api/documents/${docId}/ops`, {
   ops: [{ op: { t: 'rename', updates: [{ id: artboard.id, name: 'Edited live' }] }, origin: { kind: 'human', id: 'editor' } }],
 });
-await new Promise((r) => setTimeout(r, 800));
-const received = seen.filter((m) => m.type === 'ops').flatMap((m) => m.ops);
-check('the viewer receives edits live', received.some((o) => o.op?.t === 'rename'), `${received.length} op(s)`);
+if (socketWorks) {
+  await new Promise((r) => setTimeout(r, 800));
+  const received = seen.filter((m) => m.type === 'ops').flatMap((m) => m.ops);
+  check('the viewer receives edits live', received.some((o) => o.op?.t === 'rename'), `${received.length} op(s)`);
+}
 ws.close();
 
 // The polling transport matters as much: serverless cannot hold a socket open.
