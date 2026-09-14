@@ -1170,3 +1170,59 @@ code { font-family: var(--mono); font-size: 0.92em; }
 .review-node { font-size: 0.8rem; font-weight: 500; color: var(--fg); }
 .review-message { font-size: 0.78rem; line-height: 1.5; }
 .review-fix { font-size: 0.75rem; color: var(--fg-faint); line-height: 1.5; }
+
+/* --- Command palette ----------------------------------------------------- */
+
+.palette-backdrop { align-items: flex-start; padding-top: 12vh; }
+
+.palette {
+  width: min(38rem, calc(100vw - 2 * var(--s5)));
+  max-height: 60vh;
+  background: var(--bg-raised);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.palette-search {
+  display: flex; align-items: center; gap: var(--s3);
+  padding: var(--s4); border-bottom: 1px solid var(--border);
+  color: var(--fg-muted); flex: none;
+}
+.palette-search input {
+  flex: 1; background: none; border: 0; outline: none;
+  font-size: 1.05rem; color: var(--fg); min-width: 0;
+}
+
+.palette-list {
+  overflow-y: auto; padding: var(--s2);
+  scrollbar-width: none; min-height: 0;
+}
+.palette-list::-webkit-scrollbar { display: none; }
+
+.palette-group {
+  font-size: 0.72rem; text-transform: uppercase; letter-spacing: .08em;
+  color: var(--fg-faint); padding: var(--s3) var(--s3) var(--s1); font-weight: 600;
+}
+
+.palette-item {
+  display: flex; align-items: center; gap: var(--s3); width: 100%;
+  padding: 0.45rem var(--s3); background: none; border: 0;
+  border-radius: var(--radius-sm); color: var(--fg); text-align: left;
+}
+.palette-item.is-active { background: var(--accent); color: var(--accent-fg); }
+.palette-item.is-active kbd { border-color: rgba(255,255,255,.4); color: inherit; background: transparent; }
+.palette-item.is-active .palette-hint { color: rgba(255,255,255,.75); }
+.palette-label { flex: none; }
+.palette-hint {
+  flex: 1; color: var(--fg-muted); font-size: 0.8rem;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+@media (max-width: 700px) {
+  .palette-backdrop { padding-top: 0; align-items: flex-end; }
+  .palette { width: 100%; max-height: 80vh; border-radius: var(--radius-lg) var(--radius-lg) 0 0; }
+}

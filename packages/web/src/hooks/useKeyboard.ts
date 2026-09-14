@@ -27,7 +27,14 @@ function isTyping(target: EventTarget | null): boolean {
   return el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable;
 }
 
-export function useKeyboard(onExport?: () => void, onShortcuts?: () => void): void {
+export interface KeyboardActions {
+  onExport?: () => void;
+  onShortcuts?: () => void;
+  onPalette?: () => void;
+}
+
+export function useKeyboard(actions: KeyboardActions = {}): void {
+  const { onExport, onShortcuts, onPalette } = actions;
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       const state = useCanvas.getState();
@@ -44,6 +51,9 @@ export function useKeyboard(onExport?: () => void, onShortcuts?: () => void): vo
       const { selection, dispatch, select, setTool, setViewport, viewport } = state;
       const doc = getDoc();
       const ids = topLevelSelection(selection);
+
+      // --- Palette ---------------------------------------------------------
+      if (mod && key === 'k') { e.preventDefault(); onPalette?.(); return; }
 
       // --- History ---------------------------------------------------------
       if (mod && key === 'z') { e.preventDefault(); e.shiftKey ? state.redo() : state.undo(); return; }
@@ -173,7 +183,7 @@ export function useKeyboard(onExport?: () => void, onShortcuts?: () => void): vo
       window.removeEventListener('keyup', onKeyUp);
       window.removeEventListener('blur', onBlur);
     };
-  }, [onExport, onShortcuts]);
+  }, [onExport, onShortcuts, onPalette]);
 }
 
 async function copyAsCss(): Promise<void> {

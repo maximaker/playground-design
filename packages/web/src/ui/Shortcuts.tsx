@@ -17,6 +17,13 @@ const GROUPS: { title: string; items: [string, string][] }[] = [
     ],
   },
   {
+    title: 'Everything',
+    items: [
+      ['⌘K', 'Search layers, run any command'],
+      ['?', 'This sheet'],
+    ],
+  },
+  {
     title: 'Selection',
     items: [
       ['Click', 'Select the outermost layer'],

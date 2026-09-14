@@ -23,6 +23,7 @@ import { Icon, type IconName } from './ui/Icon.tsx';
 import { Logo } from './ui/Logo.tsx';
 import { Settings } from './ui/Settings.tsx';
 import { OverflowMenu } from './ui/OverflowMenu.tsx';
+import { CommandPalette } from './ui/CommandPalette.tsx';
 import { ScrollArea } from './ui/ScrollArea.tsx';
 import {
   type Appearance, applyAppearance, loadAppearance, saveAppearance, watchSystemTheme,
@@ -115,6 +116,7 @@ function Editor({ docId, onHome, appearance, onAppearance }: {
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [showOverflow, setShowOverflow] = useState(false);
+  const [showPalette, setShowPalette] = useState(false);
 
   const mode = useLayoutMode();
   const overlay = panelsOverlay(mode);
@@ -129,7 +131,11 @@ function Editor({ docId, onHome, appearance, onAppearance }: {
     if (overlay) setOpenPanel(null);
   }, [overlay]);
 
-  useKeyboard(() => setModal('export'), () => setModal('shortcuts'));
+  useKeyboard({
+    onExport: () => setModal('export'),
+    onShortcuts: () => setModal('shortcuts'),
+    onPalette: () => setShowPalette(true),
+  });
   useClipboard();
 
   useEffect(() => {
@@ -161,6 +167,13 @@ function Editor({ docId, onHome, appearance, onAppearance }: {
         <button className="logo" onClick={onHome} title="All documents" aria-label="All documents">
           <Logo size={17} variant={mode === 'narrow' ? 'mark' : 'full'} />
         </button>
+
+        <button
+          className="icon-button"
+          title="Search and commands (⌘K)"
+          aria-label="Search and commands"
+          onClick={() => setShowPalette(true)}
+        ><Icon name="search" size={15} /></button>
 
         {overlay && (
           <button
@@ -344,6 +357,20 @@ function Editor({ docId, onHome, appearance, onAppearance }: {
           </ScrollArea>
         </aside>
       </div>
+
+      {showPalette && (
+        <CommandPalette
+          onClose={() => setShowPalette(false)}
+          actions={{
+            openImport: () => setModal('import'),
+            openExport: () => setModal('export'),
+            openConnect: () => setModal('connect'),
+            openShortcuts: () => setModal('shortcuts'),
+            openPanel: (tab) => { setLeftTab(tab as LeftTab); if (overlay) setOpenPanel('left'); },
+            goHome: onHome,
+          }}
+        />
+      )}
 
       {contextMenu && (
         <ContextMenu
