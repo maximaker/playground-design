@@ -1,0 +1,26 @@
+{
+  "name": "@canvas/server",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "dev": "node --experimental-strip-types --experimental-sqlite --watch src/index.ts",
+    "start": "node --experimental-strip-types --experimental-sqlite src/index.ts",
+    "build": "tsc -p tsconfig.json --noEmit",
+    "test": "node --experimental-strip-types --experimental-sqlite --test --test-timeout=60000 src/mcp.test.ts src/fidelity.test.ts"
+  },
+  "dependencies": {
+    "@canvas/shared": "*",
+    "@hono/node-server": "^1.13.7",
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "hono": "^4.6.14",
+    "ws": "^8.18.0",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@types/ws": "^8.5.13",
+    "playwright": "^1.63.0",
+    "typescript": "^5.7.2"
+  }
+}
