@@ -11,7 +11,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
 import { z } from 'zod';
 import {
-  type CanvasDocument, type CanvasNode, type NodeId, type Op, type OpEnvelope, type StyleMap,
+  type CanvasDocument, type CanvasNode, type NodeId, type Op, type OpEnvelope, type Page, type StyleMap,
   applyOp, artboardOf, basicInfo, cloneSubtree, descendants, emitHtml, emitJsx, getNode,
   makeNode, makeNote, newId, parseHtml, treeSummary, describeNode, getArtboardPosition, getArtboardSize,
   batchId, tokenToCssVar, DEFAULT_ARTBOARD_STYLES, DEFINITIONS_PAGE,
@@ -61,9 +61,198 @@ async function guard<T>(fn: () => Promise<T> | T): Promise<T | ReturnType<typeof
 
 const StyleRecord = z.record(z.string(), z.string());
 
+// ---------------------------------------------------------------------------
+// Repeated shapes
+// ---------------------------------------------------------------------------
+
+/**
+ * What makes two subtrees "the same thing": tag, styles, variants, attributes
+ * and child shape. Never text — two buttons reading "Save" and "Cancel" are the
+ * same button — and never ids or layer names, which come from whatever wrote
+ * the HTML.
+ *
+ * `href` is excluded for the same reason as text: a link that goes somewhere
+ * else is still the same component, and the destination travels as an override.
+ */
+function shapeSignature(doc: CanvasDocument, id: NodeId): string {
+  const n = doc.nodes[id];
+  if (!n) return '';
+  const styles = Object.entries(n.styles).sort(([a], [b]) => a.localeCompare(b))
+    .map(([k, v]) => `${k}:${v}`).join(';');
+  const variants = (n.variants ?? []).map((v) =>
+    `${v.selector}{${Object.entries(v.styles).sort(([a], [b]) => a.localeCompare(b))
+      .map(([k, x]) => `${k}:${x}`).join(';')}}`).join('');
+  const attrs = Object.entries(n.attrs ?? {})
+    .filter(([k]) => k !== 'href' && k !== 'id' && !k.startsWith('data-x') && !k.startsWith('data-y'))
+    .sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => `${k}=${v}`).join(',');
+  return `${n.type}/${n.tag ?? ''}[${styles}][${variants}][${attrs}](${
+    n.children.map((c) => shapeSignature(doc, c)).join('|')})`;
+}
+
+function subtreeIdsOf(doc: CanvasDocument, id: NodeId, out: NodeId[] = []): NodeId[] {
+  out.push(id);
+  for (const c of doc.nodes[id]?.children ?? []) subtreeIdsOf(doc, c, out);
+  return out;
+}
+
+function depthOf(doc: CanvasDocument, id: NodeId): number {
+  const kids = doc.nodes[id]?.children ?? [];
+  return kids.length ? 1 + Math.max(...kids.map((c) => depthOf(doc, c))) : 1;
+}
+
+/** Every node inside an artboard — component definitions live elsewhere. */
+function artboardNodes(doc: CanvasDocument): NodeId[] {
+  const out: NodeId[] = [];
+  for (const page of doc.pages) {
+    for (const artboard of page.artboards) {
+      for (const id of subtreeIdsOf(doc, artboard)) if (id !== artboard) out.push(id);
+    }
+  }
+  return out;
+}
+
+interface ShapeGroup { sig: string; ids: NodeId[]; sample: NodeId; inComponent: boolean }
+
+function repeatedShapes(
+  doc: CanvasDocument, opts: { minCopies: number; minDepth: number },
+): ShapeGroup[] {
+  const inComponent = new Set(
+    Object.values(doc.components ?? {}).flatMap((c) => subtreeIdsOf(doc, c.root)));
+  const groups = new Map<string, ShapeGroup>();
+  for (const id of artboardNodes(doc)) {
+    const n = doc.nodes[id];
+    if (!n || n.type === 'instance') continue;
+    if (depthOf(doc, id) < opts.minDepth) continue;
+    const sig = shapeSignature(doc, id);
+    const g = groups.get(sig) ?? { sig, ids: [], sample: id, inComponent: false };
+    g.ids.push(id);
+    if (inComponent.has(id)) g.inComponent = true;
+    groups.set(sig, g);
+  }
+  return [...groups.values()]
+    .filter((g) => g.ids.length >= opts.minCopies)
+    // Outermost first: a card is a better component than each of its rows.
+    .sort((a, b) => subtreeIdsOf(doc, b.sample).length - subtreeIdsOf(doc, a.sample).length);
+}
+
+/** The first bit of text in a subtree, so a group is recognisable in a list. */
+function previewText(doc: CanvasDocument, id: NodeId): string | undefined {
+  for (const nodeId of subtreeIdsOf(doc, id)) {
+    const t = doc.nodes[nodeId]?.text?.trim();
+    if (t) return t.length > 60 ? `${t.slice(0, 57)}…` : t;
+  }
+  return undefined;
+}
+
+/**
+ * Every artboard's HTML, with generated class names stripped.
+ *
+ * An instance's emitted class encodes its own id, so a swap that changes
+ * nothing a reader can see still changes `class="c-n_abc"`. Comparing with
+ * those removed keeps the check about the page rather than the ids in it.
+ */
+function renderAll(doc: CanvasDocument): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const page of doc.pages) {
+    for (const artboard of page.artboards) {
+      const name = doc.nodes[artboard]?.name ?? artboard;
+      out[`${page.name} / ${name}`] = emitHtml(doc, artboard, { mode: 'inline' }).html
+        .replace(/ class="c-[^"]*"/g, '');
+    }
+  }
+  return out;
+}
+
+/**
+ * The ops that turn one subtree into a component and every copy into an
+ * instance of it.
+ *
+ * Pure: it plans, the caller decides whether to apply. Text *and* attributes
+ * travel as overrides — carrying only the text is how the first version of this
+ * pointed every button on a page at the definition's own href.
+ */
+function componentisePlan(
+  doc: CanvasDocument, id: NodeId, name: string, copies: NodeId[], description?: string,
+): { ops: Op[]; componentId: string; definitionRoot: NodeId } {
+  const source = doc.nodes[id]!;
+  const parent = source.parent!;
+  const index = doc.nodes[parent]!.children.indexOf(id);
+
+  const { nodes: definition } = cloneSubtree(doc, id);
+  const root = definition[0]!;
+  root.parent = null;
+  root.name = name;
+
+  const componentId = newId('cmp');
+  const ops: Op[] = [
+    { t: 'insert', nodes: definition, parent: null, index: 0, page: DEFINITIONS_PAGE },
+    { t: 'component', action: 'add', component: { id: componentId, name, description, root: root.id } },
+    { t: 'remove', ids: [id] },
+    { t: 'insert', nodes: [makeNode({ type: 'instance', name, componentRef: componentId })], parent, index },
+  ];
+
+  // The definition's nodes in document order, to line copies up against.
+  const defOrder = subtreeIdsOf({ ...doc, nodes: Object.fromEntries(definition.map((n) => [n.id, n])) } as CanvasDocument, root.id);
+
+  for (const copy of copies) {
+    const copyNode = doc.nodes[copy];
+    if (!copyNode?.parent) continue;
+    const copyParent = doc.nodes[copyNode.parent]!;
+    const at = copyParent.children.indexOf(copy);
+    const instance = makeNode({ type: 'instance', name, componentRef: componentId });
+    const copyOrder = subtreeIdsOf(doc, copy);
+
+    const overrides: Record<string, { text?: string; attrs?: Record<string, string> }> = {};
+    for (const [i, defId] of defOrder.entries()) {
+      const defNode = definition.find((n) => n.id === defId)!;
+      const other = doc.nodes[copyOrder[i] ?? ''];
+      if (!other) continue;
+      const patch: { text?: string; attrs?: Record<string, string> } = {};
+      if (typeof other.text === 'string' && other.text !== defNode.text) patch.text = other.text;
+      const attrs: Record<string, string> = {};
+      for (const [k, v] of Object.entries(other.attrs ?? {})) {
+        if (defNode.attrs?.[k] !== v) attrs[k] = v;
+      }
+      if (Object.keys(attrs).length) patch.attrs = attrs;
+      if (Object.keys(patch).length) overrides[defId] = patch;
+    }
+    if (Object.keys(overrides).length) instance.overrides = overrides;
+
+    ops.push({ t: 'remove', ids: [copy] });
+    ops.push({ t: 'insert', nodes: [instance], parent: copyParent.id, index: at });
+  }
+
+  return { ops, componentId, definitionRoot: root.id };
+}
+
 export interface McpContext {
   connection: Connection;
   baseUrl: string;
+}
+
+/**
+ * The page each connection is working on.
+ *
+ * Every page-shaped tool used to fall back to `pages[0]`, so an agent that
+ * created a second page went on being shown the first one — silently, which is
+ * the worst way for a tool to be wrong.
+ *
+ * Kept here rather than on the context because the HTTP transport is stateless:
+ * a fresh context is built per request, and the first version of this lost the
+ * page between the call that set it and the next one.
+ */
+const workingPage = new Map<string, string>();
+
+function setWorkingPage(ctx: McpContext, pageId: string | undefined): void {
+  if (pageId) workingPage.set(ctx.connection.code, pageId);
+  else workingPage.delete(ctx.connection.code);
+}
+
+/** The page a tool should act on: the one asked for, the session's, or the first. */
+function pageOf(ctx: McpContext, doc: CanvasDocument, pageId?: string): Page {
+  return doc.pages.find((p) => p.id === pageId)
+    ?? doc.pages.find((p) => p.id === workingPage.get(ctx.connection.code))
+    ?? doc.pages[0]!;
 }
 
 function requireDoc(ctx: McpContext): CanvasDocument {
@@ -141,15 +330,15 @@ function registerReadTools(server: McpServer, ctx: McpContext): void {
     title: 'Get document info',
     description:
       'File name, pages, node count, and the artboards on the current page with their sizes and canvas positions. Call this first.',
-    inputSchema: { pageId: z.string().optional().describe('Page to describe. Defaults to the first page.') },
+    inputSchema: { pageId: z.string().optional().describe('Page to describe. Defaults to the page this session is working on.') },
     annotations: { readOnlyHint: true },
   }, async ({ pageId }) => guard(() => {
     const doc = requireDoc(ctx);
-    const page = doc.pages.find((p) => p.id === pageId) ?? doc.pages[0];
+    const page = pageOf(ctx, doc, pageId);
     const notes = page?.notes ?? [];
     const queued = notes.filter((n) => n.status === 'queued');
     return json({
-      ...basicInfo(doc, pageId),
+      ...basicInfo(doc, page.id),
       liveTabConnected: hasLiveTab(doc.id),
       rev: doc.rev,
       notes: {
@@ -243,8 +432,10 @@ function registerReadTools(server: McpServer, ctx: McpContext): void {
       node(doc, id);
       return text(treeSummary(doc, id, { depth, includeStyles }));
     }
-    const page = doc.pages[0]!;
-    if (page.artboards.length === 0) return text('(document has no artboards yet — create one with create_artboard)');
+    const page = pageOf(ctx, doc);
+    if (page.artboards.length === 0) {
+      return text(`(page "${page.name}" has no artboards yet — create one with create_artboard)`);
+    }
     return text(page.artboards.map((a) => treeSummary(doc, a, { depth, includeStyles })).join('\n\n'));
   }));
 
@@ -556,6 +747,115 @@ async function lookupGoogleFont(family: string): Promise<GoogleFontInfo | null> 
 // ---------------------------------------------------------------------------
 
 function registerWriteTools(server: McpServer, ctx: McpContext): void {
+  // --- Pages ----------------------------------------------------------------
+  //
+  // A document can hold several pages — a landing page, a deck, a set of
+  // explorations — and until now an agent could not make one, see the list, or
+  // work on any but the first. Both scripts in this repo that needed a second
+  // page had to reach past MCP to the ops endpoint the editor uses.
+
+  server.registerTool('list_pages', {
+    title: 'List pages',
+    description:
+      'Pages in this document, with how many artboards each holds and which one this session is working on.',
+    annotations: { readOnlyHint: true },
+  }, async () => guard(() => {
+    const doc = requireDoc(ctx);
+    const current = pageOf(ctx, doc);
+    return json({
+      pages: doc.pages.map((p) => ({
+        id: p.id,
+        name: p.name,
+        artboards: p.artboards.length,
+        current: p.id === current.id,
+      })),
+      currentPage: current.id,
+    });
+  }));
+
+  server.registerTool('create_page', {
+    title: 'Create a page',
+    description:
+      'Adds a page and makes it the one this session works on. Use a page to separate whole ' +
+      'deliverables — a site and a deck about it — rather than to organise screens, which is what ' +
+      'artboards on one page are for.',
+    inputSchema: {
+      name: z.string().min(1).max(80),
+      switchTo: z.boolean().optional().default(true),
+    },
+    annotations: { destructiveHint: false },
+  }, async ({ name, switchTo }) => guard(() => {
+    const doc = requireDoc(ctx);
+    if (doc.pages.some((p) => p.name === name)) {
+      return fail(`This document already has a page called "${name}".`);
+    }
+    const page = { id: newId('p'), name, artboards: [] as NodeId[] };
+    commit(ctx, [{ t: 'page', action: 'add', page }]);
+    if (switchTo) setWorkingPage(ctx, page.id);
+    return json({
+      pageId: page.id,
+      name,
+      current: switchTo,
+      next: 'create_artboard puts a screen on it. Artboards are placed on the current page unless you pass pageId.',
+    });
+  }));
+
+  server.registerTool('set_current_page', {
+    title: 'Work on a page',
+    description:
+      'Chooses the page this session reads and writes by default. Other sessions are unaffected.',
+    inputSchema: { pageId: z.string() },
+    annotations: { destructiveHint: false, readOnlyHint: true },
+  }, async ({ pageId }) => guard(() => {
+    const doc = requireDoc(ctx);
+    const page = doc.pages.find((p) => p.id === pageId);
+    if (!page) {
+      return fail(`No page "${pageId}". Call list_pages — pages are ${doc.pages.map((p) => `${p.name} (${p.id})`).join(', ')}.`);
+    }
+    setWorkingPage(ctx, page.id);
+    return json({ currentPage: page.id, name: page.name, artboards: page.artboards.length });
+  }));
+
+  server.registerTool('rename_page', {
+    title: 'Rename a page',
+    description: 'Changes a page\'s name. Ids do not change, so nothing else has to be updated.',
+    inputSchema: { pageId: z.string(), name: z.string().min(1).max(80) },
+    annotations: { destructiveHint: false },
+  }, async ({ pageId, name }) => guard(() => {
+    const doc = requireDoc(ctx);
+    const page = doc.pages.find((p) => p.id === pageId);
+    if (!page) return fail(`No page "${pageId}". Call list_pages.`);
+    commit(ctx, [{ t: 'page', action: 'rename', page: { ...page, name } }]);
+    return json({ pageId, name });
+  }));
+
+  server.registerTool('delete_page', {
+    title: 'Delete a page',
+    description: 'Removes a page and everything on it. A document must keep at least one page.',
+    inputSchema: {
+      pageId: z.string(),
+      confirm: z.boolean().describe('Must be true. The artboards on the page go with it.'),
+    },
+  }, async ({ pageId, confirm }) => guard(() => {
+    const doc = requireDoc(ctx);
+    const page = doc.pages.find((p) => p.id === pageId);
+    if (!page) return fail(`No page "${pageId}". Call list_pages.`);
+    if (doc.pages.length === 1) return fail('This is the only page; a document must have one.');
+    if (!confirm) {
+      return fail(`"${page.name}" holds ${page.artboards.length} artboard(s). Pass confirm: true to delete it and them.`);
+    }
+    // The artboards first: removing the page alone would leave their nodes in
+    // the document with nothing pointing at them. The count is taken before the
+    // commit, which empties the live page object as it applies.
+    const artboards = [...page.artboards];
+    const ops: Op[] = [];
+    if (artboards.length) ops.push({ t: 'remove', ids: artboards });
+    ops.push({ t: 'page', action: 'remove', page: { ...page, artboards } });
+    commit(ctx, ops);
+    if (workingPage.get(ctx.connection.code) === pageId) setWorkingPage(ctx, undefined);
+    return json({ deleted: pageId, artboardsRemoved: artboards.length });
+  }));
+
   server.registerTool('create_artboard', {
     title: 'Create an artboard',
     description:
@@ -572,7 +872,7 @@ function registerWriteTools(server: McpServer, ctx: McpContext): void {
     annotations: { destructiveHint: false },
   }, async ({ name, width, height, x, y, styles, pageId }) => guard(() => {
     const doc = requireDoc(ctx);
-    const page = doc.pages.find((p) => p.id === pageId) ?? doc.pages[0]!;
+    const page = pageOf(ctx, doc, pageId);
 
     // Place to the right of the rightmost artboard so new work never lands on
     // top of existing work.
@@ -626,7 +926,7 @@ function registerWriteTools(server: McpServer, ctx: McpContext): void {
     const kit = getTemplate(template);
     if (!kit) return fail(`No template "${template}". Available: ${templateSummaries().map((t) => t.id).join(', ')}`);
 
-    const page = doc.pages[0]!;
+    const page = pageOf(ctx, doc);
     const existing = new Map(doc.tokens.map((t) => [t.name, t]));
     const added: typeof kit.tokens = [];
     const skipped: string[] = [];
@@ -682,7 +982,7 @@ function registerWriteTools(server: McpServer, ctx: McpContext): void {
   }, async ({ url, artboardId }) => guard(async () => {
     const doc = requireDoc(ctx);
     const result = await importUrl(url);
-    const page = doc.pages[0]!;
+    const page = pageOf(ctx, doc);
 
     let target = artboardId;
     if (target) node(doc, target);
@@ -869,7 +1169,7 @@ function registerWriteTools(server: McpServer, ctx: McpContext): void {
           const p = node(doc, parent);
           if (p.type === 'text') return fail(`Cannot move into text node ${parent}; text nodes have no children.`);
         }
-        const siblings = parent ? doc.nodes[parent]!.children : doc.pages[0]!.artboards;
+        const siblings = parent ? doc.nodes[parent]!.children : pageOf(ctx, doc).artboards;
         treeMoves.push({ id: m.id, parent: parent ?? null, index: m.index ?? siblings.length });
       } else if (m.index !== undefined) {
         treeMoves.push({ id: m.id, parent: n.parent, index: m.index });
@@ -911,7 +1211,7 @@ function registerWriteTools(server: McpServer, ctx: McpContext): void {
           'data-y': String(pos.y + (offset?.y ?? 0)),
         };
         root.name = `${src.name} copy`;
-        const page = doc.pages.find((p) => p.artboards.includes(id)) ?? doc.pages[0]!;
+        const page = doc.pages.find((p) => p.artboards.includes(id)) ?? pageOf(ctx, doc);
         ops.push({ t: 'insert', nodes, parent: null, index: page.artboards.length, page: page.id });
       } else {
         const target = parentId ?? src.parent;
@@ -1257,7 +1557,7 @@ function registerNoteTools(server: McpServer, ctx: McpContext): void {
     annotations: { readOnlyHint: true },
   }, async ({ status, pageId }) => guard(() => {
     const doc = requireDoc(ctx);
-    const page = doc.pages.find((p) => p.id === pageId) ?? doc.pages[0]!;
+    const page = pageOf(ctx, doc, pageId);
     const notes = (page.notes ?? []).filter((n) => status === 'all' || n.status === status);
 
     if (!notes.length) {
@@ -1297,7 +1597,7 @@ function registerNoteTools(server: McpServer, ctx: McpContext): void {
     inputSchema: { id: z.string(), pageId: z.string().optional() },
   }, async ({ id, pageId }) => guard(() => {
     const doc = requireDoc(ctx);
-    const page = doc.pages.find((p) => p.id === pageId) ?? doc.pages[0]!;
+    const page = pageOf(ctx, doc, pageId);
     const note = (page.notes ?? []).find((n) => n.id === id);
     if (!note) return fail(`No prompt card with id "${id}". Call list_notes for current ids.`);
     if (note.status === 'running' && note.claimedBy && note.claimedBy !== (ctx.connection.label ?? 'Agent')) {
@@ -1333,7 +1633,7 @@ function registerNoteTools(server: McpServer, ctx: McpContext): void {
     },
   }, async ({ id, response, status, pageId }) => guard(() => {
     const doc = requireDoc(ctx);
-    const page = doc.pages.find((p) => p.id === pageId) ?? doc.pages[0]!;
+    const page = pageOf(ctx, doc, pageId);
     const note = (page.notes ?? []).find((n) => n.id === id);
     if (!note) return fail(`No prompt card with id "${id}".`);
 
@@ -1365,7 +1665,7 @@ function registerNoteTools(server: McpServer, ctx: McpContext): void {
     },
   }, async ({ text: body, targets, x, y, color, pageId }) => guard(() => {
     const doc = requireDoc(ctx);
-    const page = doc.pages.find((p) => p.id === pageId) ?? doc.pages[0]!;
+    const page = pageOf(ctx, doc, pageId);
 
     let px = x;
     let py = y;
@@ -1495,6 +1795,88 @@ function registerComponentTools(server: McpServer, ctx: McpContext): void {
       definitionRoot: root.id,
       instanceId: instance.id,
       next: 'Insert more with insert_instance. Mark a layer in the definition with data-slot to let instances supply their own content.',
+    });
+  }));
+
+  server.registerTool('find_repeated_shapes', {
+    title: 'Find things built more than once',
+    description:
+      'Groups identical subtrees across the document: same tag, same styles, same structure, ' +
+      'whatever their text. This is what "should be a component" looks like before anyone has ' +
+      'named it. Pass a group id to componentise to turn one into a component.',
+    inputSchema: {
+      minCopies: z.number().int().min(2).max(50).optional().default(3),
+      minDepth: z.number().int().min(1).max(10).optional().default(1)
+        .describe('Ignore shapes with fewer than this many levels — 2 skips bare text and pills.'),
+      limit: z.number().int().min(1).max(50).optional().default(12),
+    },
+    annotations: { readOnlyHint: true },
+  }, async ({ minCopies, minDepth, limit }) => guard(() => {
+    const doc = requireDoc(ctx);
+    const groups = repeatedShapes(doc, { minCopies, minDepth });
+    return json({
+      groups: groups.slice(0, limit).map((g) => ({
+        group: g.sig,
+        copies: g.ids.length,
+        sample: g.sample,
+        name: doc.nodes[g.sample]?.name,
+        text: previewText(doc, g.sample),
+        alreadyComponent: g.inComponent,
+      })),
+      total: groups.length,
+      next: 'componentise with one of these sample ids registers it and swaps every copy for an instance.',
+    });
+  }));
+
+  server.registerTool('componentise', {
+    title: 'Turn a repeated shape into a component',
+    description:
+      'Registers one subtree as a component and replaces every identical copy in the document with ' +
+      'an instance, carrying each copy\'s own text and attributes across as overrides. Refuses and ' +
+      'changes nothing if the rendered HTML of any artboard would differ — instances are supposed ' +
+      'to be invisible in the output.',
+    inputSchema: {
+      id: z.string().describe('A node to build the component from; every copy of it is replaced.'),
+      name: z.string().min(1).max(60),
+      description: z.string().max(280).optional(),
+      dryRun: z.boolean().optional().default(false)
+        .describe('Report what would change without changing it.'),
+    },
+  }, async ({ id, name, description, dryRun }) => guard(() => {
+    const doc = requireDoc(ctx);
+    const source = node(doc, id);
+    if (source.type === 'instance') return fail(`${id} is already an instance.`);
+    if (source.type === 'artboard') return fail('Artboards cannot be components.');
+
+    const sig = shapeSignature(doc, id);
+    const copies = artboardNodes(doc).filter((n) => n !== id && shapeSignature(doc, n) === sig);
+    if (dryRun) {
+      return json({ wouldReplace: copies.length, copies: copies.slice(0, 20), name });
+    }
+
+    // Rehearsed on a copy, not on the document: the check is whether the pages
+    // still render the same, and finding that out by doing it and undoing it
+    // would leave a half-rewritten document if anything threw in between.
+    const plan = componentisePlan(doc, id, name, copies, description);
+    const rehearsal = structuredClone(doc);
+    for (const op of plan.ops) applyOp(rehearsal, op);
+
+    const before = renderAll(doc);
+    const after = renderAll(rehearsal);
+    const moved = Object.keys(before).filter((k) => before[k] !== after[k]);
+    if (moved.length) {
+      return fail(
+        `Refused: ${moved.join(', ')} would render differently, so these copies are not the same ` +
+        'thing after all. Nothing was changed.',
+      );
+    }
+
+    commit(ctx, plan.ops);
+    return json({
+      componentId: plan.componentId,
+      definitionRoot: plan.definitionRoot,
+      instances: copies.length + 1,
+      next: 'set_component_props and set_variant give it variants; get_instance shows what an instance can override.',
     });
   }));
 

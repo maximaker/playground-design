@@ -23,7 +23,18 @@ const VIEWPORTS = [
 ];
 
 const browser = await chromium.launch({ headless: true });
-const docId = DOC ?? (await (await fetch(`${BASE}/api/documents`)).json()).documents[0].id;
+/** Any document will do; one is made when the library is empty. */
+async function someDocument() {
+  if (DOC) return DOC;
+  const { documents } = await (await fetch(`${BASE}/api/documents`)).json();
+  if (documents.length) return documents[0].id;
+  const made = await (await fetch(`${BASE}/api/documents`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ name: 'Responsive check' }),
+  })).json();
+  return made.document.id;
+}
+const docId = await someDocument();
 let failures = 0;
 
 for (const vp of VIEWPORTS) {

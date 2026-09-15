@@ -161,13 +161,17 @@ need a real layout engine reach into a connected tab, and they say so plainly wh
 | `get_tokens` | Design tokens and themes |
 | `get_guide` | Workflow briefs: `layout`, `styling`, `responsive`, `components`, `export`, `figma-import` |
 | `list_templates` | Built-in starter design systems |
+| `list_pages` | Pages, their artboard counts, and which one this session is on |
+| `find_repeated_shapes` | Subtrees built more than once — "should be a component" before anyone named it |
 
 **Writing**
 
 | Tool | Notes |
 |---|---|
 | `write_html` | The main creation tool. HTML in, editable layers out |
-| `create_artboard` | New screen, placed clear of existing work |
+| `create_artboard` | New screen, placed clear of existing work, on the current page |
+| `create_page` / `set_current_page` / `rename_page` / `delete_page` | Pages. Each connection has its own current page |
+| `componentise` | Registers a shape and swaps every identical copy for an instance, text and links carried as overrides. Refuses if any artboard would render differently |
 | `update_styles` | Batch CSS, with `:hover` / `@media` variants via `selector` |
 | `set_text_content` | Batch text |
 | `rename_nodes` / `set_attributes` | Batch |
@@ -403,6 +407,11 @@ always creates; it never overwrites. Connection codes, share tokens and version 
 deliberately left out: the first two are credentials for one instance, and the third is the document's
 history rather than the document. `scripts/agent/transfer.mjs <fromBase> <docId> <toBase>` does the
 round trip between two instances in one command.
+
+**Working on a page.** Each MCP connection has a current page, and every page-shaped tool defaults to
+it. Before this, all of them fell back to `pages[0]`: an agent that created a second page went on
+being shown the first, with no error — the worst way for a tool to be wrong. Two scripts in this repo
+had to reach past MCP to the ops endpoint because there was no way to make a page at all.
 
 **Componentising a document.** `scripts/agent/componentise.mjs <base> <docId>` turns a foundations
 sheet's specimens into real components and replaces every structurally identical copy elsewhere with
