@@ -41,7 +41,18 @@ export async function session({ name = 'Agent brief', template = 'clean', fresh 
     body: JSON.stringify({ label: 'Claude Code' }),
   })).json();
 
-  const value = { base: BASE, docId: doc.document.id, url: conn.url, open: `${BASE}/d/${doc.document.id}` };
+  // The MCP URL is rebuilt from the base this client actually reached, not from
+  // the one the server echoes back. PLAYGROUND_PUBLIC_URL is the server's guess
+  // about how it is addressed, and on a fresh deployment it is usually still
+  // the default — so trusting it sends the client to localhost.
+  const code = conn.url.split('/mcp/')[1] ?? conn.connection.code;
+  const value = {
+    base: BASE,
+    docId: doc.document.id,
+    url: `${BASE}/mcp/${code}`,
+    serverSaid: conn.url,
+    open: `${BASE}/d/${doc.document.id}`,
+  };
   writeFileSync(SESSION, JSON.stringify(value, null, 2));
   return value;
 }
