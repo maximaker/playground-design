@@ -9,3 +9,6 @@ packages/*/dist
 .vercel
 api/
 .env*.local
+
+# Holds a Playground connection code, which is a write credential.
+.mcp.json
