@@ -2402,17 +2402,17 @@ code { font-family: var(--mono); font-size: 0.92em; }
 }
 
 /* --- Rail tabs ---------------------------------------------------------------- */
+/* The tab strip is a row, so the break between structure and activity is a
+   vertical rule. Written as a horizontal one first, which floated above the gap
+   as a stray dash — a divider that reads as a glitch is worse than none. */
 .rail-tab-divider {
-  width: 1.2rem; height: 1px; background: var(--border-strong); margin: var(--s2) auto;
-  display: block; flex: 0 0 auto;
+  flex: 0 0 auto; align-self: center;
+  width: 1px; height: 1.1rem; margin: 0 var(--s2);
+  background: var(--border-strong);
 }
-/* The right rail's tabs carry words: there are two of them and "Design" and
-   "Spec" are not obvious as icons. */
-.rail-tabs.is-wide { gap: var(--s2); padding: var(--s2) var(--s3); }
-.rail-tabs.is-wide button {
-  flex: 1 1 auto; display: inline-flex; align-items: center; justify-content: center;
-  gap: var(--s2); font-size: 0.85rem; padding: 0.3rem var(--s3); border-radius: var(--radius-sm);
-}
+/* The inspector's switch: the shared segmented control, given the rail's
+   padding and the same bottom rule the left rail's tabs sit on. */
+.rail-switch { flex: none; padding: var(--s3) var(--s4); border-bottom: 1px solid var(--border); }
 
 /* --- Lens highlights -----------------------------------------------------------
  *

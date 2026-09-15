@@ -53,9 +53,9 @@ type RightTab = 'properties' | 'spec';
 /** How many of the left tabs are about structure; the rest are about activity. */
 const STRUCTURE_TABS = 4;
 
-const RIGHT_TABS: { id: RightTab; icon: IconName; label: string; hint: string }[] = [
-  { id: 'properties', icon: 'settings', label: 'Design', hint: 'Edit the selected layer' },
-  { id: 'spec', icon: 'ruler', label: 'Spec', hint: 'Measured size, tokens, notes and code to paste' },
+const RIGHT_TABS: { id: RightTab; label: string; hint: string }[] = [
+  { id: 'properties', label: 'Design', hint: 'Edit the selected layer' },
+  { id: 'spec', label: 'Spec', hint: 'Measured size, tokens, notes and code to paste' },
 ];
 
 const LEFT_TABS: { id: LeftTab; icon: IconName; label: string; hint: string }[] = [
@@ -520,19 +520,25 @@ function Editor({ source, onHome, appearance, onAppearance, session }: {
         </main>
 
         <aside className={`rail rail-right${rightOpen ? ' is-open' : ''}`} {...hiddenWhenClosed(rightOpen)}>
-          <nav className="rail-tabs is-wide" aria-label="Inspector">
-            {RIGHT_TABS.map((t) => (
-              <button
-                key={t.id}
-                className={rightTab === t.id ? 'is-active' : ''}
-                onClick={() => setRightTab(t.id)}
-                title={`${t.label} — ${t.hint}`}
-                aria-pressed={rightTab === t.id}
-              >
-                <Icon name={t.icon} size={14} /> {t.label}
-              </button>
-            ))}
-          </nav>
+          {/*
+            * The app's segmented control, not a new kind of tab: this is two
+            * choices about one object, which is what `.segmented` already means
+            * everywhere else — including the Base/:hover row inside this very
+            * rail.
+            */}
+          <div className="rail-switch">
+            <div className="segmented">
+              {RIGHT_TABS.map((t) => (
+                <button
+                  key={t.id}
+                  className={rightTab === t.id ? 'is-active' : ''}
+                  onClick={() => setRightTab(t.id)}
+                  title={`${t.label} — ${t.hint}`}
+                  aria-pressed={rightTab === t.id}
+                >{t.label}</button>
+              ))}
+            </div>
+          </div>
           <ScrollArea className="rail-body">
             {rightTab === 'spec' ? <Spec /> : (
               /*

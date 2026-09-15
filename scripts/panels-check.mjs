@@ -51,10 +51,22 @@ const leftTabs = await page.$$eval('.rail-left .rail-tabs button',
   (els) => els.map((e) => e.getAttribute('aria-label')));
 check('the left rail is the document: structure then activity',
   leftTabs.join(',') === 'Layers,Pages,Components,Tokens,Comments,Review,History', leftTabs.join(', '));
-check('with a break between the two groups',
-  (await page.locator('.rail-tab-divider').count()) === 1);
+// Geometry, not just presence: written as a horizontal rule first, it rendered
+// as a stray dash floating above the row rather than as a break in it.
+const divider = await page.evaluate(() => {
+  const d = document.querySelector('.rail-tab-divider')?.getBoundingClientRect();
+  const strip = document.querySelector('.rail-left .rail-tabs')?.getBoundingClientRect();
+  if (!d || !strip) return null;
+  return {
+    upright: d.height > d.width,
+    inside: d.top >= strip.top && d.bottom <= strip.bottom,
+    centred: Math.abs((d.top + d.height / 2) - (strip.top + strip.height / 2)) < 4,
+  };
+});
+check('with an upright break sitting in the row, not above it',
+  !!divider && divider.upright && divider.inside && divider.centred, JSON.stringify(divider));
 
-const rightTabs = await page.$$eval('.rail-right .rail-tabs button',
+const rightTabs = await page.$$eval('.rail-switch .segmented button',
   (els) => els.map((e) => e.textContent?.trim()));
 check('the right rail is the selection: design and spec',
   rightTabs.join(',') === 'Design,Spec', rightTabs.join(', '));
@@ -69,12 +81,12 @@ const nodeId = await page.evaluate(() => {
 });
 await page.evaluate((id) => window.__playground.store.getState().select([id]), nodeId);
 await page.waitForTimeout(400);
-await page.click('.rail-right .rail-tabs button:has-text("Spec")');
+await page.click('.rail-switch .segmented button:has-text("Spec")');
 await page.waitForTimeout(600);
 check('switching to Spec inspects the same selection',
   (await page.locator('.rail-right .prop-header').innerText()).includes('×'),
   (await page.locator('.rail-right .prop-header').innerText()).replace(/\n/g, ' · '));
-await page.click('.rail-right .rail-tabs button:has-text("Design")');
+await page.click('.rail-switch .segmented button:has-text("Design")');
 
 // --- The lenses ------------------------------------------------------------------
 
@@ -144,7 +156,7 @@ await viewer.goto(share.url, { waitUntil: 'networkidle' });
 await viewer.waitForSelector('.artboard-frame iframe', { timeout: 30000 });
 await viewer.waitForTimeout(1200);
 check('a view-only visitor lands on the spec, not on controls they cannot use',
-  (await viewer.locator('.rail-right .rail-tabs button:has-text("Spec")[aria-pressed="true"]').count()) === 1);
+  (await viewer.locator('.rail-switch .segmented button:has-text("Spec")[aria-pressed="true"]').count()) === 1);
 await viewer.close();
 
 check('no runtime errors', errors.length === 0, errors[0] ?? '');
