@@ -112,8 +112,17 @@ function Entry({ author, text, at, agent }: { author: string; text: string; at: 
 }
 
 /** The name this browser comments under. No accounts, so it is just a label. */
+/**
+ * What to sign a comment with.
+ *
+ * The server overrides this for anyone signed in — a name a tab chooses for
+ * itself is not identity — but the optimistic copy the author sees should be
+ * right too, and `identity` is what the server said on join.
+ */
 export function authorName(): string {
-  return localStorage.getItem('canvas.name')?.trim() || 'Guest';
+  const { identity } = useCanvas.getState();
+  if (identity && identity !== 'Guest') return identity;
+  return localStorage.getItem('canvas.name')?.trim() || identity || 'Guest';
 }
 
 function initials(name: string): string {

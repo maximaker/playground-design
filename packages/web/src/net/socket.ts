@@ -171,6 +171,12 @@ export function connectDocument(source: Source): Connection {
   const handle = (msg: Record<string, unknown>) => {
     switch (msg.type) {
       case 'joined': {
+        // The server decides who you are — the name it sends back is the
+        // account's, or "Guest N" for a share-link viewer. Comments and replies
+        // are signed with it rather than with whatever the tab had in
+        // localStorage, which is how a signed-in person kept posting as Guest.
+        const peer = msg.peer as { name?: string } | undefined;
+        if (peer?.name) store.getState().setIdentity(peer.name);
         store.getState().loadDocument(msg.doc as CanvasDocument);
         store.getState().setConnection('open');
         store.getState().setTransport('websocket');

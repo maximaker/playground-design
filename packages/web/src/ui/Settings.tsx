@@ -16,6 +16,7 @@ const CANVAS_TOGGLES: { key: keyof CanvasPrefs; label: string; hint: string }[] 
   { key: 'grid', label: 'Dot grid', hint: 'The dotted background under the artboards.' },
   { key: 'rulers', label: 'Rulers', hint: 'Pixel rulers along the top and left edges.' },
   { key: 'snap', label: 'Snapping', hint: 'Dragging catches on edges and centres. Hold ⌘ to suspend it for one drag.' },
+  { key: 'comments', label: 'Comment pins', hint: 'Markers on the canvas. Off to look at the work; the comments stay in the panel.' },
 ];
 
 const THEMES: { value: Theme; icon: IconName; label: string }[] = [

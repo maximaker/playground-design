@@ -72,7 +72,13 @@ await page.waitForTimeout(600);
 
 const posted = await page.evaluate(() => window.__playground.store.getState().doc.comments ?? []);
 check('the comment is posted', posted.length === 1, posted[0]?.text ?? '');
-check('it records who said it', posted[0]?.author === 'Max', posted[0]?.author ?? '');
+// The tab asked to be called "Max" in localStorage and the server signed the
+// comment with the account instead. Identity is not a claim a tab gets to make
+// — the same rule presence follows — and this is why comments from signed-in
+// people were arriving as "Guest".
+check('it is signed with the account, not with what the tab asked to be called',
+  !!posted[0]?.author && posted[0].author !== 'Max' && posted[0].author !== 'Guest',
+  posted[0]?.author ?? '');
 check('and what it is about', !!posted[0]?.nodeId, posted[0]?.nodeId ?? '(canvas)');
 
 // Escape must discard rather than post an empty pin.
@@ -178,6 +184,80 @@ check('a non-comment op through the share endpoint is refused', refused.status =
 
 const stillNamed = await (await fetch(`${BASE}/api/documents/${docId}`)).json();
 check('and the document keeps its name', stillNamed.document.name === 'Comment check', stillNamed.document.name);
+
+// --- Commenting on the selection ----------------------------------------------
+//
+// With a layer selected, the comment tool should comment on *that*. Before, the
+// selection was decoration: the tool still waited for a click and pinned the
+// comment wherever the pointer happened to be.
+
+await page.evaluate((id) => window.__playground.store.getState().select([id]), frame.id);
+await page.waitForTimeout(300);
+await page.keyboard.press('c');
+await page.waitForTimeout(400);
+// Measured through the artboard, not the screen: the world layer's transform
+// animates, so a screen rect and the viewport the store reports disagree while
+// it is moving. That is what put the pin a thousand canvas pixels away.
+const placed = await page.evaluate((id) => {
+  const st = window.__playground.store.getState();
+  const d = st.draftComment;
+  if (!d) return null;
+  const doc = st.doc;
+  for (const f of document.querySelectorAll('.artboard-frame iframe')) {
+    const el = f.contentDocument?.querySelector(`[data-node-id="${id}"]`);
+    if (!el) continue;
+    const inner = el.getBoundingClientRect();
+    // The artboard this frame draws, and where it sits on the canvas.
+    const artboard = Object.values(doc.nodes).find((n) => n.type === 'artboard' && n.name === f.title);
+    const ax = Number(artboard?.attrs?.['data-x'] ?? 0);
+    const ay = Number(artboard?.attrs?.['data-y'] ?? 0);
+    return {
+      nodeId: d.nodeId,
+      pin: { x: d.x, y: d.y },
+      corner: { x: Math.round(ax + inner.right), y: Math.round(ay + inner.top) },
+    };
+  }
+  return { nodeId: d.nodeId, pin: { x: d.x, y: d.y }, corner: null };
+}, frame.id);
+
+check('with a layer selected, the tool comments on it without a click',
+  placed?.nodeId === frame.id, placed?.nodeId ?? '(nothing)');
+// The shortcut opens something that takes focus, so the keystroke itself must
+// not end up in it — the composer used to open containing the letter "c".
+check('and the shortcut key does not land in the composer',
+  (await page.locator('.comment-pin.is-draft textarea').inputValue()) === '',
+  JSON.stringify(await page.locator('.comment-pin.is-draft textarea').inputValue()));
+check('and pins it to the corner of that layer, not to the pointer',
+  !!placed?.corner
+  && Math.abs(placed.pin.x - placed.corner.x) <= 2
+  && Math.abs(placed.pin.y - placed.corner.y) <= 2,
+  `pin ${placed?.pin.x},${placed?.pin.y} vs corner ${placed?.corner?.x},${placed?.corner?.y}`);
+
+// The hover outline was being drawn across the thread being written in.
+await page.mouse.move(700, 500);
+await page.waitForTimeout(400);
+const chromeWhileWriting = await page.evaluate(() => window.__playground.store.getState().hovered);
+check('the canvas stops drawing hover chrome while a comment is open',
+  chromeWhileWriting === null, String(chromeWhileWriting));
+await page.keyboard.press('Escape');
+await page.waitForTimeout(300);
+
+// --- Hiding the pins ------------------------------------------------------------
+
+const pinsBefore = await page.locator('.comment-pin').count();
+await page.evaluate(() => window.__playground.store.getState().setCanvasPrefs({ comments: false }));
+await page.waitForTimeout(400);
+check('pins can be hidden to look at the work',
+  pinsBefore > 0 && (await page.locator('.comment-pin').count()) === 0, `${pinsBefore} → 0`);
+
+await page.click('.rail-left .rail-tabs button[aria-label="Comments"]');
+await page.waitForTimeout(400);
+check('and the comments are still in the panel',
+  (await page.locator('.comment-row').count()) > 0,
+  `${await page.locator('.comment-row').count()} rows`);
+check('the panel offers the toggle back',
+  (await page.locator('button', { hasText: 'Show pins' }).count()) === 1);
+await page.evaluate(() => window.__playground.store.getState().setCanvasPrefs({ comments: true }));
 
 check('no runtime errors', errors.length === 0, errors[0] ?? '');
 

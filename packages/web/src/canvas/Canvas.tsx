@@ -17,7 +17,7 @@ import { Overlay } from './Overlay.tsx';
 import { PeerCursors } from './PeerCursors.tsx';
 import { imageSize, insertImages } from '../hooks/useClipboard.ts';
 import { CommentPin, CommentComposer, authorName } from './CommentPin.tsx';
-import { hitTest, nodeRect } from './registry.ts';
+import { hitTest, nodeInnerRect, nodeRect } from './registry.ts';
 import { Rulers } from './Rulers.tsx';
 
 /**
@@ -80,6 +80,32 @@ export function Canvas({ onContextMenu }: CanvasProps) {
    * throttled for the network; a marker that lags the cursor reads as broken.
    */
   const [rulerPointer, setRulerPointer] = useState<{ x: number; y: number } | null>(null);
+
+  /**
+   * Picking the comment tool with something selected comments on *that*.
+   *
+   * Otherwise the selection is decoration: you have told the tool what you are
+   * talking about and it still asks you to click, and the pin lands wherever
+   * the pointer happened to be.
+   */
+  useEffect(() => {
+    if (tool !== 'comment') return;
+    const id = selection[0]?.split('::')[0];
+    const doc = getDoc();
+    const page = currentPage();
+    if (!id || !doc?.nodes[id] || !page) return;
+    const at = canvasBoxOf(id);
+    if (!at) return;
+    useCanvas.getState().setDraftComment(makeComment({
+      pageId: page.id,
+      nodeId: id,
+      x: Math.round(at.right),
+      y: Math.round(at.top),
+      author: authorName(),
+    }));
+    setTool('move');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tool]);
 
   /**
    * The selection's box in canvas space, banded on both rulers so you can read
@@ -318,7 +344,10 @@ export function Canvas({ onContextMenu }: CanvasProps) {
       const comment = makeComment({
         pageId: page.id,
         nodeId: hit?.nodeId,
-        x: Math.round(at.x), y: Math.round(at.y),
+        // Pinned to the corner of the thing it is about rather than to the
+        // exact pixel clicked: a pin floating in the middle of a card reads as
+        // being about the word underneath it.
+        ...cornerOf(hit?.nodeId, at),
         author: authorName(),
       });
       useCanvas.getState().setDraftComment(comment);
@@ -440,6 +469,13 @@ export function Canvas({ onContextMenu }: CanvasProps) {
       const { clientX, clientY, altKey } = e;
       cancelAnimationFrame(hoverRaf.current);
       hoverRaf.current = requestAnimationFrame(() => {
+        // While a comment is open, the canvas stops drawing hover chrome: the
+        // outline was being painted across the thread someone was reading.
+        if (useCanvas.getState().draftComment || useCanvas.getState().openComment) {
+          setHovered(null);
+          setMeasureTo(null);
+          return;
+        }
         const hit = hitTest(clientX, clientY);
         setHovered(hit?.nodeId ?? null);
         // Holding Alt over another node measures the distance to the selection.
@@ -884,7 +920,8 @@ export function Canvas({ onContextMenu }: CanvasProps) {
           <Artboard key={id} id={id} live={visibleArtboards.has(id)} />
         ))}
         {notesOf(page).map((note) => <NoteCard key={note.id} note={note} />)}
-        {doc && commentsOf(doc, page.id).map((c) => <CommentPin key={c.id} comment={c} />)}
+        {prefs.comments && doc
+          && commentsOf(doc, page.id).map((c) => <CommentPin key={c.id} comment={c} />)}
         <CommentComposer />
       </div>
 
@@ -906,6 +943,36 @@ export function Canvas({ onContextMenu }: CanvasProps) {
       {drawPreview && <div className="draw-preview" style={drawPreview} />}
     </div>
   );
+}
+
+/**
+ * Where a pin for a node should sit: its top-right corner, in canvas space.
+ *
+ * Computed from the artboard's canvas position plus the node's box *inside* its
+ * iframe, never from screen coordinates. The world layer's transform animates,
+ * so a screen rect measured mid-animation does not correspond to the viewport
+ * the store is reporting — which put pins a thousand canvas pixels from the
+ * thing they were about, but only sometimes.
+ *
+ * Falls back to the pointer when the comment is about the canvas rather than a
+ * layer; a pin floating in the middle of a card reads as being about whatever
+ * word happens to be underneath it.
+ */
+function cornerOf(nodeId: NodeId | undefined, fallback: { x: number; y: number }) {
+  const at = nodeId ? canvasBoxOf(nodeId) : null;
+  return at ? { x: Math.round(at.right), y: Math.round(at.top) }
+    : { x: Math.round(fallback.x), y: Math.round(fallback.y) };
+}
+
+/** A node's box in canvas space, via its artboard rather than via the screen. */
+function canvasBoxOf(nodeId: NodeId): { right: number; top: number } | null {
+  const doc = getDoc();
+  const artboardId = doc ? artboardOf(doc, nodeId) : null;
+  const artboard = artboardId ? doc?.nodes[artboardId] : null;
+  const inner = nodeInnerRect(nodeId);
+  if (!artboard || !inner) return null;
+  const pos = getArtboardPosition(artboard);
+  return { right: pos.x + inner.right, top: pos.y + inner.top };
 }
 
 function resolveContainer(key: string): NodeId {

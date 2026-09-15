@@ -1778,7 +1778,10 @@ code { font-family: var(--mono); font-size: 0.92em; }
  * 10% zoom is still a remark you have to find and click; scaling it with the
  * canvas would make it a few pixels wide.
  */
+/* Above the overlay (z-index 10), which draws selection and hover chrome: a
+   hairline outline was being painted across the thread being read. */
 .comment-pin { position: absolute; z-index: 9; }
+.comment-pin.is-open, .comment-pin.is-draft { z-index: 12; }
 
 .comment-marker {
   display: grid;
@@ -2289,31 +2292,30 @@ code { font-family: var(--mono); font-size: 0.92em; }
 
 /* --- Spec panel -------------------------------------------------------------
  *
- * A reference, not a form: dense rows, monospace values, and everything
- * copyable in one click because pasting is the reader's next move.
+ * Deliberately borrows the Properties panel's furniture — the same section
+ * headers, the same label/value rhythm, the same field sizes. The first version
+ * had its own small uppercase headings and its own spacing and read as a
+ * different application sitting in the same rail.
  */
-.spec { display: flex; flex-direction: column; gap: var(--s4); }
-.spec-head { display: flex; flex-direction: column; gap: 0.15rem; padding-bottom: var(--s3); border-bottom: 1px solid var(--border); }
-.spec-name { font-size: 0.95rem; }
-.spec-head .dim { font-size: 0.8rem; font-family: var(--font-mono, ui-monospace, monospace); }
+.spec { display: flex; flex-direction: column; }
+.spec .prop-header { padding: var(--s3) var(--s4); border-bottom: 1px solid var(--border); }
+.spec-section header button { justify-content: flex-start; }
+.spec-section header button .dim { margin-left: auto; font-size: 0.75rem; }
+.spec-section .prop-body { gap: var(--s2); }
+
 .spec-chip {
   display: inline-flex; align-items: center; gap: var(--s2); width: fit-content;
   margin-top: var(--s2); padding: 0.1rem var(--s2); border-radius: var(--radius-sm);
   background: var(--bg-input); color: var(--fg-muted); font-size: 0.75rem;
 }
 
-.spec-group { display: flex; flex-direction: column; gap: var(--s2); }
-.spec-group h4 {
-  margin: 0; font-size: 0.72rem; letter-spacing: 0.08em; text-transform: uppercase;
-  color: var(--fg-faint);
-}
-.spec-group dl { margin: 0; display: flex; flex-direction: column; gap: 1px; }
+.spec dl { margin: 0; display: flex; flex-direction: column; gap: 0.15rem; }
 .spec-row { display: flex; align-items: baseline; gap: var(--s3); min-width: 0; }
 .spec-row dt {
-  flex: 0 0 8.5rem; font-size: 0.78rem; color: var(--fg-muted);
+  flex: 0 0 7.5rem; font-size: 0.78rem; color: var(--fg-muted);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.spec-row dd { margin: 0; min-width: 0; flex: 1 1 auto; }
+.spec-row dd { margin: 0; min-width: 0; flex: 1 1 auto; font-size: 0.78rem; }
 .spec-value, .spec-token {
   background: none; border: 0; padding: 0.05rem 0.2rem; margin-left: -0.2rem; border-radius: 0.25rem;
   font: inherit; font-family: var(--font-mono, ui-monospace, monospace); font-size: 0.78rem;
@@ -2324,17 +2326,19 @@ code { font-family: var(--mono); font-size: 0.92em; }
 .spec-value:hover, .spec-token:hover { background: var(--bg-hover); }
 .spec-token .dim { font-size: 0.72rem; }
 
-.spec-variant { display: flex; flex-direction: column; gap: var(--s2); padding: var(--s2) 0; }
+.spec-variant { display: flex; flex-direction: column; gap: var(--s2); }
+.spec-variant + .spec-variant { margin-top: var(--s3); }
 .spec-when { font-size: 0.78rem; color: var(--fg); }
 
 .spec-notes { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--s3); }
+.spec-notes:empty { display: none; }
 .spec-notes li { display: flex; gap: var(--s3); align-items: flex-start; }
 .spec-notes li.is-resolved { opacity: 0.55; }
-.spec-notes p { margin: 0; font-size: 0.85rem; line-height: 1.5; }
+.spec-notes p { margin: 0; font-size: 0.82rem; line-height: 1.5; }
 .spec-notes .dim { font-size: 0.72rem; }
 .note-kind {
-  flex: 0 0 auto; font-size: 0.66rem; letter-spacing: 0.05em; text-transform: uppercase;
-  padding: 0.12rem 0.35rem; border-radius: 0.3rem; margin-top: 0.1rem;
+  flex: 0 0 auto; font-size: 0.62rem; letter-spacing: 0.05em; text-transform: uppercase;
+  padding: 0.1rem 0.3rem; border-radius: 0.3rem; margin-top: 0.15rem;
   background: var(--bg-input); color: var(--fg-muted); border: 1px solid var(--border);
 }
 /* Each kind has a colour, but the word is always there — the colour is a second
@@ -2345,16 +2349,18 @@ code { font-family: var(--mono); font-size: 0.92em; }
 .note-accessibility { color: #0b6fb8; border-color: color-mix(in srgb, #0b6fb8 40%, transparent); }
 .note-todo { color: #b3261e; border-color: color-mix(in srgb, #b3261e 40%, transparent); }
 
-.spec-add { display: flex; flex-direction: column; gap: var(--s2); }
-.spec-add textarea { resize: vertical; font: inherit; font-size: 0.85rem; line-height: 1.5; }
-.spec-empty { font-size: 0.8rem; line-height: 1.5; }
+.spec-add { display: flex; flex-direction: column; gap: var(--s2); margin-top: var(--s2); }
+.spec-add textarea { resize: vertical; font: inherit; font-size: 0.82rem; line-height: 1.5; }
+.spec-add-actions { display: flex; gap: var(--s2); justify-content: flex-end; }
+.spec-empty { font-size: 0.78rem; line-height: 1.5; margin: 0 0 var(--s2); }
 
 .spec-code-actions { display: flex; flex-wrap: wrap; gap: var(--s2); }
+.spec-code-actions .button { font-size: 0.75rem; padding: 0.15rem var(--s2); }
 .spec-code {
-  margin: 0; padding: var(--s3); border-radius: var(--radius-sm);
+  margin: var(--s2) 0 0; padding: var(--s3); border-radius: var(--radius-sm);
   background: var(--bg-input); border: 1px solid var(--border);
-  font-family: var(--font-mono, ui-monospace, monospace); font-size: 0.72rem; line-height: 1.5;
-  max-height: 22rem; overflow: auto; white-space: pre-wrap; word-break: break-word;
+  font-family: var(--font-mono, ui-monospace, monospace); font-size: 0.7rem; line-height: 1.5;
+  max-height: 20rem; overflow: auto; white-space: pre-wrap; word-break: break-word;
 }
 .spec-assets { list-style: none; margin: 0; padding: 0; font-size: 0.78rem; }
 

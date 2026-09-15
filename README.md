@@ -368,6 +368,9 @@ back to the token names they came from, what changes on hover and at other width
 and the HTML and JSX to paste. Change the padding and the spec changes with it; there is nothing to
 re-publish and nothing that can disagree with the document.
 
+The panel borrows the Properties panel's furniture — same section headers, same label/value rhythm —
+because a reference that looks like a different application in the same rail reads as broken.
+
 The only part worth *storing* is what CSS genuinely cannot say, so notes are typed — behaviour, data,
 constraint, accessibility, to-do — attached to a layer, gathered into the spec of anything containing
 it, and written or read by agents through `annotate` and `get_spec`. A developer opens all of it

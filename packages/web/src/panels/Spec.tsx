@@ -30,6 +30,7 @@ export function Spec() {
   const [kind, setKind] = useState<NoteKind>('behaviour');
   const [text, setText] = useState('');
   const [code, setCode] = useState<'html' | 'jsx' | null>(null);
+  const [adding, setAdding] = useState(false);
 
   const id = selection[0]?.split('::')[0];
 
@@ -70,6 +71,7 @@ export function Spec() {
     if (!body || !doc) return;
     const page = doc.pages.find((p) => p.id === useCanvas.getState().pageId) ?? doc.pages[0]!;
     const rect = nodeInnerRect(id);
+    setAdding(false);
     dispatch([{
       t: 'comment',
       action: 'add',
@@ -88,12 +90,14 @@ export function Spec() {
 
   return (
     <div className="spec">
-      <div className="spec-head">
-        <strong className="spec-name">{spec.name}</strong>
-        <span className="dim">
-          {spec.tag ? `<${spec.tag}>` : spec.type}
-          {spec.box ? ` · ${spec.box.width} × ${spec.box.height}` : ''}
-        </span>
+      <div className="prop-header">
+        <div className="prop-title">
+          {spec.name}
+          <span className="prop-type">
+            {spec.type}{spec.tag ? ` · ${spec.tag}` : ''}
+            {spec.box ? ` · ${spec.box.width} × ${spec.box.height}` : ''}
+          </span>
+        </div>
         {spec.component && (
           <span className="spec-chip">
             <Icon name="component" size={11} />
@@ -104,8 +108,7 @@ export function Spec() {
       </div>
 
       {spec.groups.map((group) => (
-        <section key={group.label} className="spec-group">
-          <h4>{group.label}</h4>
+        <Section key={group.label} label={group.label} count={group.entries.length}>
           <dl>
             {group.entries.map((e) => (
               <div key={e.label} className="spec-row">
@@ -131,12 +134,11 @@ export function Spec() {
               </div>
             ))}
           </dl>
-        </section>
+        </Section>
       ))}
 
       {spec.variants.length > 0 && (
-        <section className="spec-group">
-          <h4>Changes</h4>
+        <Section label="Changes" count={spec.variants.length}>
           {spec.variants.map((v) => (
             <div key={v.selector} className="spec-variant">
               <span className="spec-when">{v.when}</span>
@@ -150,15 +152,14 @@ export function Spec() {
               </dl>
             </div>
           ))}
-        </section>
+        </Section>
       )}
 
-      <section className="spec-group">
-        <h4>Notes</h4>
+      <Section label="Notes" count={spec.notes.length || undefined}>
         {spec.notes.length === 0 && (
           <p className="dim spec-empty">
-            Nothing yet. Measurements are above and always current — notes are for what the CSS
-            cannot say: behaviour, data, constraints.
+            For what the CSS cannot say — behaviour, data, constraints. The measurements above are
+            derived and always current.
           </p>
         )}
         <ul className="spec-notes">
@@ -177,7 +178,11 @@ export function Spec() {
           ))}
         </ul>
 
-        {!readOnly && (
+        {!readOnly && !adding && (
+          <button className="button subtle full" onClick={() => setAdding(true)}>+ Add a note</button>
+        )}
+
+        {!readOnly && adding && (
           <div className="spec-add">
             <select value={kind} onChange={(e) => setKind(e.target.value as NoteKind)} className="input">
               {NOTE_KINDS.filter((k) => k !== 'comment').map((k) => (
@@ -195,13 +200,17 @@ export function Spec() {
                 if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) addNote();
               }}
             />
-            <button className="button" onClick={addNote} disabled={!text.trim()}>Add note</button>
+            <div className="spec-add-actions">
+              <button className="button subtle" onClick={() => { setAdding(false); setText(''); }}>
+                Cancel
+              </button>
+              <button className="button primary" onClick={addNote} disabled={!text.trim()}>Add</button>
+            </div>
           </div>
         )}
-      </section>
+      </Section>
 
-      <section className="spec-group">
-        <h4>Code</h4>
+      <Section label="Code">
         <div className="spec-code-actions">
           <button className="button subtle" onClick={() => setCode(code === 'html' ? null : 'html')}>
             {code === 'html' ? 'Hide HTML' : 'Show HTML'}
@@ -225,11 +234,10 @@ export function Spec() {
               : emitJsx(doc, id, { format: 'tailwind' })}
           </pre>
         )}
-      </section>
+      </Section>
 
       {spec.assets.length > 0 && (
-        <section className="spec-group">
-          <h4>Assets</h4>
+        <Section label="Assets" count={spec.assets.length}>
           <ul className="spec-assets">
             {spec.assets.map((a) => (
               <li key={a}>
@@ -237,9 +245,34 @@ export function Spec() {
               </li>
             ))}
           </ul>
-        </section>
+        </Section>
       )}
     </div>
+  );
+}
+
+/**
+ * A section of the spec, collapsible and styled like the Properties panel's.
+ *
+ * The first version used its own small uppercase headings and its own spacing,
+ * which made the panel read as a different application sitting in the same
+ * rail.
+ */
+function Section(
+  { label, count, children }: { label: string; count?: number; children: React.ReactNode },
+) {
+  const [open, setOpen] = useState(true);
+  return (
+    <section className={`prop-section spec-section${open ? '' : ' is-closed'}`}>
+      <header>
+        <button onClick={() => setOpen(!open)} aria-expanded={open}>
+          <Icon name={open ? 'chevronDown' : 'chevronRight'} size={11} className="twisty" />
+          {label}
+          {count !== undefined && <span className="dim">{count}</span>}
+        </button>
+      </header>
+      {open && <div className="prop-body">{children}</div>}
+    </section>
   );
 }
 

@@ -158,7 +158,14 @@ export function useKeyboard(actions: KeyboardActions = {}): void {
       if (e.key === '?' || (e.shiftKey && e.key === '/')) { e.preventDefault(); onShortcuts?.(); return; }
 
       // --- Tools ------------------------------------------------------------
-      if (!mod && TOOL_KEYS[key]) { setTool(TOOL_KEYS[key]!); return; }
+      if (!mod && TOOL_KEYS[key]) {
+        // Prevented, because a tool can open something that takes focus: `c`
+        // opens a comment composer on the selection, and without this the `c`
+        // itself was the first character of the comment.
+        e.preventDefault();
+        setTool(TOOL_KEYS[key]!);
+        return;
+      }
     };
 
     const onKeyUp = (e: KeyboardEvent) => {

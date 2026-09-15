@@ -18,11 +18,22 @@ export interface CanvasPrefs {
   rulers: boolean;
   /** Snap to the edges and centres of neighbouring boxes while dragging. */
   snap: boolean;
+  /**
+   * Comment pins on the canvas.
+   *
+   * Off is for looking at the work: a design under review collects pins over
+   * the thing they are about, and there was no way to see it without them.
+   * Hiding them changes nothing about the comments themselves, which are still
+   * in the panel.
+   */
+  comments: boolean;
 }
 
 const KEY = 'playground.canvas';
 
-export const DEFAULT_CANVAS_PREFS: CanvasPrefs = { grid: true, rulers: false, snap: true };
+export const DEFAULT_CANVAS_PREFS: CanvasPrefs = {
+  grid: true, rulers: false, snap: true, comments: true,
+};
 
 export function loadCanvasPrefs(): CanvasPrefs {
   try {
@@ -35,6 +46,7 @@ export function loadCanvasPrefs(): CanvasPrefs {
       grid: typeof parsed.grid === 'boolean' ? parsed.grid : DEFAULT_CANVAS_PREFS.grid,
       rulers: typeof parsed.rulers === 'boolean' ? parsed.rulers : DEFAULT_CANVAS_PREFS.rulers,
       snap: typeof parsed.snap === 'boolean' ? parsed.snap : DEFAULT_CANVAS_PREFS.snap,
+      comments: typeof parsed.comments === 'boolean' ? parsed.comments : DEFAULT_CANVAS_PREFS.comments,
     };
   } catch {
     // Private mode, blocked storage, corrupt value — the defaults are fine.

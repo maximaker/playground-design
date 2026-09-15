@@ -132,12 +132,14 @@ check('the panel asks for a selection before it has one',
 
 await page.evaluate((id) => window.__playground.store.getState().select([id]), cta.id);
 await page.waitForTimeout(900);
-const groups = await page.$$eval('.spec-group h4', (els) => els.map((e) => e.textContent));
+const groups = await page.$$eval('.spec-section header button', (els) =>
+  els.map((e) => e.textContent?.replace(/\d+$/, '').trim() ?? ''));
 check('selecting a layer fills it in', groups.includes('Layout') && groups.includes('Notes'),
   groups.join(', '));
-check('the measured size is in the header',
-  (await page.locator('.spec-head').innerText()).includes('×'),
-  (await page.locator('.spec-head').innerText()).replace(/\n/g, ' · '));
+// The header is the Properties panel's, which is the point: the spec should not
+// look like a different application sitting in the same rail.
+const header = await page.locator('.spec .prop-header').innerText();
+check('the measured size is in the header', header.includes('×'), header.replace(/\n/g, ' · '));
 // `background`, not `padding`: the edit above deliberately replaced the padding
 // token with a literal, so asserting on it here would be asserting on the
 // previous state.
@@ -146,9 +148,11 @@ check('tokens are shown by name, not as hexes',
   shownTokens.some((t) => t.includes('color.brand')), shownTokens.join(' | ').slice(0, 90));
 
 // Adding a note from the panel must land in the document an agent reads.
+await page.click('.spec button:has-text("Add a note")');
+await page.waitForTimeout(300);
 await page.selectOption('.spec-add select', 'constraint');
 await page.fill('.spec-add textarea', 'Must clear 44px on touch.');
-await page.click('.spec-add .button');
+await page.click('.spec-add-actions .button.primary');
 await page.waitForTimeout(800);
 const fromPanel = JSON.parse(await call('get_spec', { id: cta.id, measure: false }));
 check('a note added in the panel reaches the agent\'s spec',
@@ -178,7 +182,8 @@ await specTab.click();
 await viewer.evaluate((id) => window.__playground.store.getState().select([id]), cta.id);
 await viewer.waitForTimeout(900);
 check('and can read the spec and the notes',
-  (await viewer.$$eval('.spec-group h4', (els) => els.map((e) => e.textContent ?? ''))).includes('Notes')
+  (await viewer.$$eval('.spec-section header button', (els) => els.map((e) => e.textContent ?? '')))
+    .some((t) => t.includes('Notes'))
   && (await viewer.locator('.spec-notes li').count()) > 0);
 check('but cannot add one', (await viewer.locator('.spec-add').count()) === 0);
 await viewer.close();

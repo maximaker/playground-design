@@ -69,7 +69,8 @@ const count = (sel) => view.$$eval(sel, (els) => els.length);
 await open();
 const pressed = await view.$$eval('.settings-toggle',
   (els) => Object.fromEntries(els.map((e) => [e.textContent.split('.')[0].slice(0, 8), e.getAttribute('aria-pressed')])));
-check('the settings panel offers all three', Object.keys(pressed).length === 3, JSON.stringify(pressed));
+check('the settings panel offers the canvas switches', Object.keys(pressed).length === 4,
+  JSON.stringify(pressed));
 
 check('the dot grid is on by default', (await count('.canvas-grid')) === 1);
 await toggle('Dot grid');

@@ -162,7 +162,12 @@ interface CanvasState {
   editingVariant: { componentId: string; match: Record<string, string> } | null;
 
   viewport: Viewport;
-  /** Dot grid, edge rulers and snapping — a per-person preference, stored locally. */
+  /**
+   * What this person is called, as the server knows them: their account name,
+   * or the guest name a share-link viewer gets. Comments are signed with it.
+   */
+  identity: string;
+  /** Dot grid, edge rulers, snapping and comment pins — per-person, stored locally. */
   canvasPrefs: CanvasPrefs;
   tool: Tool;
   spacePanning: boolean;
@@ -225,6 +230,7 @@ interface CanvasActions {
 
   setViewport(v: Partial<Viewport>): void;
   setCanvasPrefs(v: Partial<CanvasPrefs>): void;
+  setIdentity(name: string): void;
   setTool(t: Tool): void;
   setSpacePanning(v: boolean): void;
   setPage(id: string): void;
@@ -337,6 +343,7 @@ export const useCanvas = create<CanvasState & CanvasActions>((set, get) => ({
   activeVariant: null,
   editingVariant: null,
   viewport: { x: 80, y: 80, zoom: 0.55 },
+  identity: 'Guest',
   canvasPrefs: loadCanvasPrefs(),
   tool: 'move',
   spacePanning: false,
@@ -605,6 +612,7 @@ export const useCanvas = create<CanvasState & CanvasActions>((set, get) => ({
   },
 
   setViewport(v) { set({ viewport: { ...get().viewport, ...v } }); },
+  setIdentity(identity) { set({ identity }); },
   setCanvasPrefs(v) {
     const next = { ...get().canvasPrefs, ...v };
     set({ canvasPrefs: next });

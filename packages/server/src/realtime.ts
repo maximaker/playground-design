@@ -159,6 +159,26 @@ export function attachRealtime(server: Server): WebSocketServer {
   return wss;
 }
 
+/**
+ * Stamps a comment or reply with the account that actually sent it.
+ *
+ * The client fills in a name, and for a share-link viewer that is all there is.
+ * For someone signed in it is a claim the server can check, and the same rule
+ * applies as to presence: a name a tab can choose for itself is not identity.
+ * This is also the fix for comments arriving as "Guest" from people who were
+ * signed in the whole time.
+ */
+function attributed(op: OpEnvelope['op'], session: Session): OpEnvelope['op'] {
+  if (!session.peer.userId || op.t !== 'comment') return op;
+  if (op.action === 'add') {
+    return { ...op, comment: { ...op.comment, author: session.peer.name } };
+  }
+  if (op.action === 'reply' && op.reply) {
+    return { ...op, reply: { ...op.reply, author: session.peer.name } };
+  }
+  return op;
+}
+
 function handleJoin(
   ws: WebSocket,
   msg: Record<string, unknown>,
@@ -215,6 +235,7 @@ function handleOps(session: Session, envelopes: OpEnvelope[]): void {
   try {
     applyOps(session.docId, envelopes.map((e) => ({
       ...e,
+      op: attributed(e.op, session),
       origin: e.origin ?? { kind: 'human', id: session.peer.clientId, label: session.peer.name },
     })));
   } catch (err) {
