@@ -522,6 +522,8 @@ that export emits the import rather than the markup.
   surface the way an agent does, including the error paths
 - `packages/server/src/fidelity.test.ts` — the export-fidelity gate: render an artboard, export it,
   re-import the export into a fresh document, render that, and pixel-diff the two
+- `scripts/multipage-check.mjs` — the same trip for a document with three pages: page order and names,
+  which artboards belong to which page, and the page switcher in the copy
 - `scripts/bundle-check.mjs` — the document bundle end to end: export, import, and compare tokens,
   components, variants and asset bytes against the original, including the trip through the home screen
 
