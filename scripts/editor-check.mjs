@@ -415,6 +415,44 @@ const artboardSpot = (fx, fy) => () => page.evaluate(([ax, ay]) => {
   check('the layout never reflowed', await page.locator('.rail').count() === 2);
 }
 
+// --- Undo and redo controls ----------------------------------------------
+
+{
+  // These were keyboard-only, which is backwards: undo is what people reach for
+  // when they are unsure of a tool, and that is exactly when they are least
+  // likely to know the shortcut.
+  const buttons = () => page.evaluate(() => ({
+    undo: document.querySelector('[aria-label="Undo"]')?.disabled,
+    redo: document.querySelector('[aria-label="Redo"]')?.disabled,
+  }));
+  const artboardName = () => page.evaluate(() => {
+    const s = window.__playground.store.getState();
+    return Object.values(s.doc.nodes).find((n) => n.type === 'artboard')?.name;
+  });
+
+  const before = await artboardName();
+  await page.evaluate(() => {
+    const s = window.__playground.store.getState();
+    const a = Object.values(s.doc.nodes).find((n) => n.type === 'artboard');
+    s.dispatch([{ t: 'rename', updates: [{ id: a.id, name: 'Renamed for the check' }] }]);
+  });
+  await page.waitForTimeout(400);
+  const afterEdit = await buttons();
+  check('undo becomes available after an edit', afterEdit.undo === false, JSON.stringify(afterEdit));
+
+  await page.click('[aria-label="Undo"]');
+  await page.waitForTimeout(400);
+  check('clicking it reverts the edit', (await artboardName()) === before, String(await artboardName()));
+  check('and redo becomes available', (await buttons()).redo === false);
+
+  await page.click('[aria-label="Redo"]');
+  await page.waitForTimeout(400);
+  check('clicking redo reapplies it', (await artboardName()) === 'Renamed for the check');
+
+  await page.click('[aria-label="Undo"]');
+  await page.waitForTimeout(400);
+}
+
 // --- Interface size stepping ---------------------------------------------
 
 {

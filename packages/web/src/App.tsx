@@ -151,6 +151,12 @@ function Editor({ source, onHome, appearance, onAppearance }: {
   useClipboard();
 
   const readOnly = source.kind === 'share';
+  // Subscribed to the depths rather than the arrays, so a new entry only
+  // re-renders the header when it changes whether the buttons are usable.
+  const canUndo = useCanvas((s) => s.undoStack.length > 0);
+  // Tooltips name the key the reader actually has.
+  const modKey = typeof navigator !== 'undefined' && /Mac|iP(hone|ad)/.test(navigator.platform) ? '⌘' : 'Ctrl+';
+  const canRedo = useCanvas((s) => s.redoStack.length > 0);
 
   useEffect(() => {
     useCanvas.getState().setReadOnly(readOnly);
@@ -196,6 +202,34 @@ function Editor({ source, onHome, appearance, onAppearance }: {
           aria-label="Search and commands"
           onClick={() => setShowPalette(true)}
         ><Icon name="search" size={15} /></button>
+
+        {/*
+          * Undo and redo were keyboard-only. They are the two actions people
+          * reach for most when they are unsure of a tool, which is exactly when
+          * they are least likely to know the shortcut. Hidden for a viewer:
+          * their only writable action is a comment, and undoing one would send
+          * a removal the server refuses.
+          */}
+        {/* Only narrow drops them, where they move into the overflow menu;
+            compact still has the width. */}
+        {!readOnly && mode !== 'narrow' && (
+          <span className="topbar-group">
+            <button
+              className="icon-button"
+              title={canUndo ? `Undo (${modKey}Z)` : 'Nothing to undo'}
+              aria-label="Undo"
+              disabled={!canUndo}
+              onClick={() => useCanvas.getState().undo()}
+            ><Icon name="undo" size={15} /></button>
+            <button
+              className="icon-button"
+              title={canRedo ? `Redo (${modKey}⇧Z)` : 'Nothing to redo'}
+              aria-label="Redo"
+              disabled={!canRedo}
+              onClick={() => useCanvas.getState().redo()}
+            ><Icon name="redo" size={15} /></button>
+          </span>
+        )}
 
         {overlay && (
           <button
@@ -246,6 +280,8 @@ function Editor({ source, onHome, appearance, onAppearance }: {
                 onClose={() => setShowOverflow(false)}
                 items={[
                   ...(readOnly ? [] : [
+                    { label: 'Undo', icon: 'undo' as IconName, run: () => useCanvas.getState().undo() },
+                    { label: 'Redo', icon: 'redo' as IconName, run: () => useCanvas.getState().redo() },
                     { label: 'Import a webpage', icon: 'download' as IconName, run: () => setModal('import') },
                     { label: 'Share a link', icon: 'share' as IconName, run: () => setModal('share') },
                   ]),

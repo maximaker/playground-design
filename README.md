@@ -227,6 +227,12 @@ HTML is the format models are most fluent in, so one tool covers what would othe
 to suspend it. Option-hover measures the distance from the selection to whatever is under the
 cursor. Right-click menu, and shortcuts that follow Figma (press `?` for the sheet).
 
+**Undo and redo** sit in the header, disabled when there is nothing to take back, and move into the
+overflow menu on a phone. They were keyboard-only, which is backwards: undo is what people reach for
+when they are unsure of a tool, and that is exactly when they are least likely to know the shortcut.
+A view-only session does not get them — its one writable action is a comment, and undoing one would
+send a removal the server refuses.
+
 **Alignment.** An align row sits at the top of the properties panel for every selection, grouped
 three horizontal and three vertical with distribute set apart. It is permanent on purpose: a control
 that appears only for a multi-selection cannot be reached for, because you have to find it first.
