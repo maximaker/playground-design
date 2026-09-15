@@ -127,7 +127,25 @@ const boards = JSON.parse(await call('get_basic_info')).artboards;
 const fit = boards.filter((b) => heights[b.name])
   .map((b) => ({ id: b.id, styles: { height: `${heights[b.name]}px` } }));
 if (fit.length) await call('update_styles', { updates: fit });
-log('artboards fitted:', JSON.stringify(heights));
+
+/*
+ * Read the heights back rather than trusting the call returned cleanly.
+ *
+ * This step silently failed to land on one deployment and the script reported
+ * success anyway, because it logged the heights it had *measured* rather than
+ * the ones the document ended up with. The phone artboard was left more than a
+ * thousand pixels short and quietly clipped the bottom of the page — and
+ * because clipped nodes cannot be measured, the linter could not see the
+ * problem either and also reported clean.
+ */
+const applied = JSON.parse(await call('get_basic_info')).artboards;
+const unfitted = applied.filter((b) => heights[b.name] && b.height !== heights[b.name]);
+if (unfitted.length) {
+  console.log('\n  Artboard heights did not take:');
+  for (const b of unfitted) console.log(`    ${b.name}: ${b.height}, expected ${heights[b.name]}`);
+  process.exit(1);
+}
+log('artboards fitted:', applied.map((b) => `${b.name} ${b.width}×${b.height}`).join(' | '));
 
 // --- Check the result rather than assume it -------------------------------
 
