@@ -34,6 +34,8 @@ import { getTemplate, templateSummaries, type Template } from './templates.ts';
 import { renderNode } from './render.ts';
 import { persistence } from './persistence.ts';
 import { DB_PATH } from './persistence-sqlite.ts';
+import { isOnMountedVolume } from './volume.ts';
+import { dirname } from 'node:path';
 
 const PORT = Number(process.env.PORT ?? 4000);
 const PUBLIC_URL =
@@ -112,7 +114,13 @@ api.get('/health', async (c) => {
     publicUrl: PUBLIC_URL,
     publicUrlConfigured: !!process.env.PLAYGROUND_PUBLIC_URL,
     storage: store.kind,
-    ...(store.kind === 'sqlite' ? { database: DB_PATH } : {}),
+    ...(store.kind === 'sqlite' ? {
+      database: DB_PATH,
+      // null where it cannot be determined — anywhere without /proc. False is
+      // the one worth acting on: the data is in the container layer and the
+      // next redeploy will take it.
+      databaseOnVolume: isOnMountedVolume(dirname(DB_PATH)),
+    } : {}),
   });
 });
 
