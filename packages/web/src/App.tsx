@@ -1,6 +1,6 @@
 /** Application shell: routing, layout, panels and global interactions. */
 
-import { Fragment, useEffect, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import { useCanvas } from './state/store.ts';
 import { type Source, connectDocument } from './net/socket.ts';
 import { useKeyboard } from './hooks/useKeyboard.ts';
@@ -18,6 +18,8 @@ import { HistoryBar } from './ui/HistoryBar.tsx';
 import { Crumbs } from './ui/Crumbs.tsx';
 import { ConnectAgent } from './panels/ConnectAgent.tsx';
 import { Share } from './panels/Share.tsx';
+import { Present } from './Present.tsx';
+import { artboardOf } from '@playground/shared';
 import { Export } from './panels/Export.tsx';
 import { Import } from './panels/Import.tsx';
 import { Toolbar } from './ui/Toolbar.tsx';
@@ -200,6 +202,66 @@ function Editor({ source, onHome, appearance, onAppearance, session }: {
   // A command can ask for a panel — "go to component" selects a node that lives
   // in no page, and doing that without showing where would look like nothing
   // happened.
+  /*
+   * Presenting starts on the frame you are looking at.
+   *
+   * Starting at the first frame every time is the behaviour that makes people
+   * stop using the button: you are usually presenting the thing you have open,
+   * not the deck from the top.
+   */
+  const startPresenting = () => {
+    const state = useCanvas.getState();
+    const page = state.doc?.pages.find((p) => p.id === state.pageId) ?? state.doc?.pages[0];
+    if (!page || !page.artboards.length) { state.toast('This page has no frames to present', 'error'); return; }
+    const selected = state.selection[0]?.split('::')[0];
+    const board = selected ? artboardOf(state.doc!, selected) : null;
+    const index = board ? Math.max(0, page.artboards.indexOf(board)) : 0;
+    state.setPresent({ pageId: page.id, index });
+  };
+
+  const present = useCanvas((s) => s.present);
+
+  // The presentation is in the URL, so it survives a reload and can be sent to
+  // someone: a link that opens on frame four opens on frame four.
+  // Skipped on the first run: this effect and the one below it both fire after
+  // the first render, and this one would strip the parameters out of the URL
+  // before the other had read them.
+  const urlSynced = useRef(false);
+  useEffect(() => {
+    if (!urlSynced.current) {
+      urlSynced.current = true;
+      if (!present) return;
+    }
+    const url = new URL(window.location.href);
+    const had = url.searchParams.has('present');
+    if (present) {
+      url.searchParams.set('present', present.pageId);
+      url.searchParams.set('frame', String(present.index + 1));
+    } else {
+      if (!had) return;
+      url.searchParams.delete('present');
+      url.searchParams.delete('frame');
+    }
+    window.history.replaceState(null, '', url.toString());
+  }, [present]);
+
+  // And read back on arrival, once the document is there to check it against.
+  const docReady = !!doc;
+  useEffect(() => {
+    if (!docReady) return;
+    const url = new URL(window.location.href);
+    const pageId = url.searchParams.get('present');
+    if (!pageId) return;
+    const state = useCanvas.getState();
+    const page = state.doc?.pages.find((p) => p.id === pageId) ?? state.doc?.pages[0];
+    if (!page) return;
+    const frame = Math.max(1, Number(url.searchParams.get('frame') ?? 1)) - 1;
+    state.setPresent({ pageId: page.id, index: frame });
+    // Once: re-running would drag a presenter back to the linked frame every
+    // time the document changed under them.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [docReady]);
+
   const panelRequest = useCanvas((s) => s.panelRequest);
   useEffect(() => {
     if (!panelRequest) return;
@@ -399,6 +461,13 @@ function Editor({ source, onHome, appearance, onAppearance, session }: {
           </>
         )}
 
+        {/* Present is for everyone, including a viewer on a share link: showing
+            the work is most of what a link is for. */}
+        <button className="button" onClick={startPresenting} title="Present this page (P)">
+          <Icon name="play" size={14} />
+          <span className="button-label">Present</span>
+        </button>
+
         {!readOnly && (
           <>
             <button className="button" onClick={() => setModal('share')} title="Create a read-only link">
@@ -587,6 +656,9 @@ function Editor({ source, onHome, appearance, onAppearance, session }: {
 
       {modal === 'connect' && <ConnectAgent onClose={() => setModal(null)} />}
       {modal === 'share' && <Share onClose={() => setModal(null)} />}
+
+      {/* Over everything, including the modals: presenting is the whole window. */}
+      <Present />
       {modal === 'export' && <Export onClose={() => setModal(null)} />}
       {modal === 'import' && <Import onClose={() => setModal(null)} />}
       {modal === 'shortcuts' && <Shortcuts onClose={() => setModal(null)} />}

@@ -9,6 +9,7 @@
 import { useEffect } from 'react';
 import { useCanvas, getDoc, currentPage, topLevelSelection } from '../state/store.ts';
 import { reorder } from '../canvas/arrange.ts';
+import { artboardOf } from '@playground/shared';
 import {
   copyProperties, duplicateSelection, moveInParent, nudge, pasteProperties, selectChildren,
   selectParent, selectSibling, toggleLock, toggleVisibility, wrapInFrame,
@@ -125,6 +126,22 @@ export function useKeyboard(actions: KeyboardActions = {}): void {
 
       // --- Export ----------------------------------------------------------
       if (mod && e.shiftKey && key === 'e') { e.preventDefault(); onExport?.(); return; }
+
+      // --- Present ---------------------------------------------------------
+      if (!mod && key === 'p') {
+        e.preventDefault();
+        const doc = getDoc();
+        const page = currentPage();
+        if (page?.artboards.length && doc) {
+          const selected = selection[0]?.split('::')[0];
+          const board = selected ? artboardOf(doc, selected) : null;
+          state.setPresent({
+            pageId: page.id,
+            index: board ? Math.max(0, page.artboards.indexOf(board)) : 0,
+          });
+        } else state.toast('This page has no frames to present', 'error');
+        return;
+      }
 
       // --- Rename ----------------------------------------------------------
       if (e.key === 'F2' && selection.length === 1) {

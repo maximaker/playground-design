@@ -68,6 +68,7 @@ const GROUPS: { title: string; items: [string, string][] }[] = [
       ['+ / −', 'Zoom in / out'],
       ['⇧0', 'Zoom to 100%'],
       ['⌘ Scroll', 'Zoom at the cursor'],
+      ['P', 'Present this page'],
       ['⌘⇧E', 'Export'],
     ],
   },

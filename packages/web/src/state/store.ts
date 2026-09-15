@@ -226,6 +226,15 @@ interface CanvasState {
   renaming: NodeId | null;
 
   /**
+   * The presentation, when one is running: which page, and how far into it.
+   *
+   * In the store rather than in a route so that a share-link viewer, the
+   * presenter and a deep link all reach the same state, and so leaving a
+   * presentation puts you back exactly where the canvas was.
+   */
+  present: { pageId: string; index: number } | null;
+
+  /**
    * What this person is called, as the server knows them: their account name,
    * or the guest name a share-link viewer gets. Comments are signed with it.
    */
@@ -301,6 +310,7 @@ interface CanvasActions {
   setReplaceTarget(ids: NodeId[] | null): void;
   openContextMenu(at: { x: number; y: number; nodeId: NodeId | null } | null): void;
   setRenaming(id: NodeId | null): void;
+  setPresent(v: { pageId: string; index: number } | null): void;
   setTool(t: Tool): void;
   setSpacePanning(v: boolean): void;
   setPage(id: string): void;
@@ -421,6 +431,7 @@ export const useCanvas = create<CanvasState & CanvasActions>((set, get) => ({
   replaceTarget: null,
   contextMenu: null,
   renaming: null,
+  present: null,
   canvasPrefs: loadCanvasPrefs(),
   tool: 'move',
   spacePanning: false,
@@ -694,6 +705,7 @@ export const useCanvas = create<CanvasState & CanvasActions>((set, get) => ({
   setReplaceTarget(replaceTarget) { set({ replaceTarget }); },
   openContextMenu(contextMenu) { set({ contextMenu }); },
   setRenaming(renaming) { set({ renaming }); },
+  setPresent(present) { set({ present }); },
   setDeepHover(deepHover) {
     if (get().deepHover !== deepHover) set({ deepHover });
   },

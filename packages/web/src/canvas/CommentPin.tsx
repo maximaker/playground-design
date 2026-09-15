@@ -16,8 +16,18 @@ import { type Comment, type CommentReply, newId } from '@playground/shared';
 import { useCanvas } from '../state/store.ts';
 import { Icon } from '../ui/Icon.tsx';
 
-export const CommentPin = memo(function CommentPin({ comment }: { comment: Comment }) {
-  const zoom = useCanvas((s) => s.viewport.zoom);
+/**
+ * `scale` overrides the canvas zoom for surfaces that place the same pins at
+ * their own size — the presentation view renders one frame scaled to the
+ * window, and a comment left there is the same comment in the same place.
+ */
+export const CommentPin = memo(function CommentPin({ comment, scale }: {
+  comment: Comment; scale?: number;
+}) {
+  // Always subscribed, then overridden: `scale ?? useCanvas(...)` would make
+  // the hook call conditional, and the order of hooks is not negotiable.
+  const canvasZoom = useCanvas((s) => s.viewport.zoom);
+  const zoom = scale ?? canvasZoom;
   const dispatch = useCanvas((s) => s.dispatch);
   const openComment = useCanvas((s) => s.openComment);
   const setOpenComment = useCanvas((s) => s.setOpenComment);
@@ -144,11 +154,12 @@ function relative(ts: number): string {
  * where you clicked *is* the context — pulling the writing away from the thing
  * being talked about is how comments end up vague.
  */
-export const CommentComposer = memo(function CommentComposer() {
+export const CommentComposer = memo(function CommentComposer({ scale }: { scale?: number } = {}) {
   const draft = useCanvas((s) => s.draftComment);
   const setDraft = useCanvas((s) => s.setDraftComment);
   const dispatch = useCanvas((s) => s.dispatch);
-  const zoom = useCanvas((s) => s.viewport.zoom);
+  const canvasZoom = useCanvas((s) => s.viewport.zoom);
+  const zoom = scale ?? canvasZoom;
   const setOpenComment = useCanvas((s) => s.setOpenComment);
 
   const [text, setText] = useState('');

@@ -53,6 +53,7 @@ interface CanvasProps {
 }
 
 export function Canvas({ onContextMenu }: CanvasProps) {
+  const presenting = !!useCanvas((s) => s.present);
   const structureVersion = useCanvas((s) => s.structureVersion);
   const styleEpoch = useCanvas((s) => s.styleEpoch);
   const viewport = useCanvas((s) => s.viewport);
@@ -941,9 +942,12 @@ export function Canvas({ onContextMenu }: CanvasProps) {
         className="comment-layer"
         style={{ transform: `translate(${viewport.x - origin.x}px, ${viewport.y - origin.y}px)` }}
       >
-        {(prefs.comments || commentLens) && doc
+        {/* Not while presenting: the presentation places the same pins and the
+            same composer at its own scale, and two composers on one draft is
+            two textareas fighting over the focus. */}
+        {!presenting && (prefs.comments || commentLens) && doc
           && commentsOf(doc, page.id).map((c) => <CommentPin key={c.id} comment={c} />)}
-        <CommentComposer />
+        {!presenting && <CommentComposer />}
       </div>
 
       {prefs.rulers && (
