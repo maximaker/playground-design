@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createEmptyDocument, makeComment, makeNode } from './model.ts';
 import { applyOp } from './ops.ts';
-import { describeSelector, notesFor, resolveValue, specFor } from './spec.ts';
+import { cssFor, describeSelector, notesFor, resolveValue, specFor } from './spec.ts';
 
 function docWithCard() {
   const doc = createEmptyDocument('Spec');
@@ -117,4 +117,29 @@ test('an instance says which component it came from', () => {
   doc.components = { cmp_1: { id: 'cmp_1', name: 'Card', root: 'n_def', createdAt: Date.now() } };
   doc.nodes[cardId]!.componentRef = 'cmp_1';
   assert.deepEqual(specFor(doc, cardId).component, { id: 'cmp_1', name: 'Card', role: 'instance' });
+});
+
+test('the CSS for a node is a rule you can paste', () => {
+  const { doc, cardId } = docWithCard();
+  const css = cssFor(doc, cardId);
+  assert.ok(css.startsWith('.card {'));
+  assert.ok(css.includes('  padding: 32px;'));
+  // Token references survive: a hex here would be the wrong thing to paste.
+  assert.ok(css.includes('gap: var(--space-6);'));
+});
+
+test('states and widths come with it', () => {
+  const { doc, cardId } = docWithCard();
+  doc.nodes[cardId]!.variants.push({
+    selector: '@media (max-width: 600px)', styles: { padding: '12px' },
+  });
+  const css = cssFor(doc, cardId);
+  assert.ok(css.includes('.card:hover {'));
+  assert.ok(css.includes('@media (max-width: 600px) {\n  .card {'));
+});
+
+test('a layer name that is not a class name is made into one', () => {
+  const { doc, cardId } = docWithCard();
+  doc.nodes[cardId]!.name = '2 columns!';
+  assert.ok(cssFor(doc, cardId).startsWith('.layer-2-columns {'));
 });

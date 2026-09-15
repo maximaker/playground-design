@@ -8,7 +8,7 @@
  * second, because a keystroke anywhere rebuilt this panel.
  */
 
-import { memo, useCallback, useState } from 'react';
+import { memo, useCallback, useEffect, useState } from 'react';
 import type { NodeId } from '@playground/shared';
 import { isAncestorOf } from '@playground/shared';
 import { useCanvas, getDoc, getNodeById, currentPage, topLevelSelection } from '../state/store.ts';
@@ -33,6 +33,45 @@ export function Layers() {
       return next;
     });
   }, []);
+
+  /**
+   * Reveal whatever is selected.
+   *
+   * Selecting on the canvas and then looking for the row in a collapsed tree is
+   * the same hunt as finding the layer in the first place. Ancestors of the
+   * selection are opened and the row is scrolled to — without touching what the
+   * person has expanded themselves, which is why this adds and never removes.
+   */
+  const selection = useCanvas((s) => s.selection);
+  useEffect(() => {
+    const doc = getDoc();
+    const id = selection[0]?.split('::')[0];
+    if (!doc || !id) return;
+    const ancestors: NodeId[] = [];
+    for (let node = doc.nodes[id]?.parent ? doc.nodes[doc.nodes[id]!.parent!] : undefined;
+      node; node = node.parent ? doc.nodes[node.parent] : undefined) {
+      ancestors.push(node.id);
+    }
+    if (ancestors.length) {
+      setExpanded((prev) => {
+        const next = new Set(prev);
+        for (const a of ancestors) {
+          // Artboards start open, so for them the set means *collapsed* — the
+          // first version of this added every ancestor and closed the artboard,
+          // which hid the whole tree instead of revealing a row in it.
+          if (doc.nodes[a]?.type === 'artboard') next.delete(a);
+          else next.add(a);
+        }
+        return [...next].join() === [...prev].join() ? prev : next;
+      });
+    }
+    // After the rows for those ancestors have rendered.
+    const timer = window.setTimeout(() => {
+      document.querySelector(`.layer-row[data-layer-id="${CSS.escape(id)}"]`)
+        ?.scrollIntoView({ block: 'nearest' });
+    }, 60);
+    return () => window.clearTimeout(timer);
+  }, [selection]);
 
   if (!page) return null;
 
@@ -131,6 +170,8 @@ const LayerRow = memo(function LayerRow({
           !node.visible ? 'is-hidden' : '',
           dropHint?.id === id ? `drop-${dropHint.where}` : '',
         ].filter(Boolean).join(' ')}
+        // Addressable, so selecting on the canvas can scroll this row into view.
+        data-layer-id={id}
         style={{ paddingLeft: `calc(${depth} * 0.85rem + 0.4rem)` }}
         draggable={!renaming}
         onDragStart={(e) => {

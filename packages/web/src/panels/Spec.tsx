@@ -14,7 +14,10 @@
  */
 
 import { useMemo, useState } from 'react';
-import { NOTE_KINDS, NOTE_KIND_HINTS, NOTE_KIND_LABELS, type NoteKind, emitHtml, emitJsx, makeComment, specFor } from '@playground/shared';
+import {
+  NOTE_KINDS, NOTE_KIND_HINTS, NOTE_KIND_LABELS, type NoteKind, type SpecValue,
+  cssFor, emitHtml, emitJsx, makeComment, specFor,
+} from '@playground/shared';
 import { getDoc, useCanvas } from '../state/store.ts';
 import { nodeInnerRect } from '../canvas/registry.ts';
 import { Icon } from '../ui/Icon.tsx';
@@ -29,7 +32,8 @@ export function Spec() {
 
   const [kind, setKind] = useState<NoteKind>('behaviour');
   const [text, setText] = useState('');
-  const [code, setCode] = useState<'html' | 'jsx' | null>(null);
+  // CSS first: the most common thing to want is this layer's declarations.
+  const [code, setCode] = useState<'css' | 'html' | 'jsx'>('css');
   const [adding, setAdding] = useState(false);
 
   const id = selection[0]?.split('::')[0];
@@ -65,6 +69,13 @@ export function Spec() {
       </p>
     );
   }
+
+  const codeFor = (kind: 'css' | 'html' | 'jsx'): string => {
+    if (!doc || !id) return '';
+    if (kind === 'css') return cssFor(doc, id);
+    if (kind === 'html') return emitHtml(doc, id, { mode: 'inline' }).html;
+    return emitJsx(doc, id, { format: 'tailwind' });
+  };
 
   const addNote = () => {
     const body = text.trim();
@@ -107,6 +118,8 @@ export function Spec() {
         )}
       </div>
 
+      <BoxModel spec={spec} />
+
       {spec.groups.map((group) => (
         <Section key={group.label} label={group.label} count={group.entries.length}>
           <dl>
@@ -114,8 +127,12 @@ export function Spec() {
               <div key={e.label} className="spec-row">
                 <dt>{e.label}</dt>
                 <dd>
-                  {/* The token name is the thing to build with; the literal is
-                      shown after it so nobody has to look it up. */}
+                  {/* A colour is a colour before it is a string: the swatch is
+                      the fastest way to know you are looking at the right one,
+                      and the token name is still the thing to build with. */}
+                  {swatchFor(e.value) && (
+                    <span className="spec-swatch" style={{ background: swatchFor(e.value)! }} aria-hidden />
+                  )}
                   {e.value.token ? (
                     <button
                       className="spec-token"
@@ -211,29 +228,28 @@ export function Spec() {
       </Section>
 
       <Section label="Code">
-        <div className="spec-code-actions">
-          <button className="button subtle" onClick={() => setCode(code === 'html' ? null : 'html')}>
-            {code === 'html' ? 'Hide HTML' : 'Show HTML'}
-          </button>
-          <button className="button subtle" onClick={() => setCode(code === 'jsx' ? null : 'jsx')}>
-            {code === 'jsx' ? 'Hide JSX' : 'Show JSX'}
-          </button>
-          <button
-            className="button subtle"
-            onClick={() => copy(emitHtml(doc, id, { mode: 'inline' }).html, 'HTML')}
-          >Copy HTML</button>
-          <button
-            className="button subtle"
-            onClick={() => copy(emitJsx(doc, id, { format: 'tailwind' }), 'JSX')}
-          >Copy JSX</button>
+        {/*
+          * Three languages, one at a time, CSS first: "just the CSS" is the
+          * commonest thing to want and it was the one thing this could not give
+          * you. The segmented control is the app's, not a new kind of tab.
+          */}
+        <div className="segmented spec-code-tabs">
+          {(['css', 'html', 'jsx'] as const).map((k) => (
+            <button
+              key={k}
+              className={code === k ? 'is-active' : ''}
+              onClick={() => setCode(k)}
+              aria-pressed={code === k}
+            >{k.toUpperCase()}</button>
+          ))}
         </div>
-        {code && (
-          <pre className="spec-code">
-            {code === 'html'
-              ? emitHtml(doc, id, { mode: 'inline' }).html
-              : emitJsx(doc, id, { format: 'tailwind' })}
-          </pre>
-        )}
+        <div className="spec-code-actions">
+          <button className="button subtle" onClick={() => copy(codeFor(code), `${code.toUpperCase()}`)}>
+            Copy {code.toUpperCase()}
+          </button>
+          <span className="dim">{codeFor(code).split('\n').length} lines</span>
+        </div>
+        <pre className="spec-code">{codeFor(code)}</pre>
       </Section>
 
       {spec.assets.length > 0 && (
@@ -278,4 +294,58 @@ function Section(
 
 function round(n: number): number {
   return Math.round(n * 100) / 100;
+}
+
+/** The colour a value paints, for the swatch. Null when it does not paint one. */
+function swatchFor(value: SpecValue): string | null {
+  const v = (value.resolved ?? value.value).trim();
+  if (/^(#|rgb|hsl|oklch|color\()/i.test(v)) return v;
+  if (/gradient\(/i.test(v)) return v;
+  return null;
+}
+
+/**
+ * The box, drawn.
+ *
+ * Padding as a ring around the content with the numbers on the sides, the way
+ * every inspector shows it — because "padding: 12px 24px" is four numbers in an
+ * order people misread, and a picture of it is not.
+ */
+function BoxModel({ spec }: { spec: ReturnType<typeof specFor> }) {
+  const style = (prop: string) =>
+    spec.groups.flatMap((g) => g.entries).find((e) => e.label === prop)?.value;
+  const padding = style('padding')?.resolved ?? style('padding')?.value;
+  const sides = expandSides(padding);
+  const radius = style('border-radius')?.resolved ?? style('border-radius')?.value;
+  if (!spec.box && !padding) return null;
+
+  return (
+    <div className="spec-box" aria-hidden>
+      <div className="spec-box-outer">
+        <span className="spec-box-side is-top">{sides.top}</span>
+        <span className="spec-box-side is-right">{sides.right}</span>
+        <span className="spec-box-side is-bottom">{sides.bottom}</span>
+        <span className="spec-box-side is-left">{sides.left}</span>
+        <div className="spec-box-inner" style={radius ? { borderRadius: clampRadius(radius) } : undefined}>
+          {spec.box ? `${Math.round(spec.box.width)} × ${Math.round(spec.box.height)}` : 'content'}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** `12px 24px` → the four sides, the way CSS means them. */
+function expandSides(value: string | undefined): Record<'top' | 'right' | 'bottom' | 'left', string> {
+  const parts = (value ?? '0').trim().split(/\s+/);
+  const [a, b, c, d] = parts;
+  if (parts.length === 1) return { top: a!, right: a!, bottom: a!, left: a! };
+  if (parts.length === 2) return { top: a!, right: b!, bottom: a!, left: b! };
+  if (parts.length === 3) return { top: a!, right: b!, bottom: c!, left: b! };
+  return { top: a!, right: b!, bottom: c!, left: d! };
+}
+
+/** A 999px pill radius on a 40px diagram is a circle; the drawing is schematic. */
+function clampRadius(value: string): string {
+  const px = parseFloat(value);
+  return Number.isFinite(px) ? `${Math.min(px, 10)}px` : '4px';
 }

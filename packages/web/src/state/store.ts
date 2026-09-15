@@ -183,6 +183,15 @@ interface CanvasState {
   commentLens: boolean;
 
   /**
+   * The deepest layer under the pointer, when a plain click would select an
+   * ancestor of it instead.
+   *
+   * Only used to say so: the hover badge offers ⌘ as the way down, because
+   * otherwise the modifier is a thing you either know or never find.
+   */
+  deepHover: NodeId | null;
+
+  /**
    * What this person is called, as the server knows them: their account name,
    * or the guest name a share-link viewer gets. Comments are signed with it.
    */
@@ -253,6 +262,7 @@ interface CanvasActions {
   setIdentity(name: string): void;
   setHighlight(highlight: { ids: NodeId[]; kind: 'review' | 'comments' | 'changes' } | null): void;
   setCommentLens(on: boolean): void;
+  setDeepHover(id: NodeId | null): void;
   setTool(t: Tool): void;
   setSpacePanning(v: boolean): void;
   setPage(id: string): void;
@@ -368,6 +378,7 @@ export const useCanvas = create<CanvasState & CanvasActions>((set, get) => ({
   identity: 'Guest',
   highlight: null,
   commentLens: false,
+  deepHover: null,
   canvasPrefs: loadCanvasPrefs(),
   tool: 'move',
   spacePanning: false,
@@ -637,6 +648,9 @@ export const useCanvas = create<CanvasState & CanvasActions>((set, get) => ({
 
   setViewport(v) { set({ viewport: { ...get().viewport, ...v } }); },
   setIdentity(identity) { set({ identity }); },
+  setDeepHover(deepHover) {
+    if (get().deepHover !== deepHover) set({ deepHover });
+  },
   setCommentLens(commentLens) {
     if (get().commentLens !== commentLens) set({ commentLens });
   },

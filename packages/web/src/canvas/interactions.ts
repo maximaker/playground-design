@@ -8,6 +8,7 @@ import {
   getArtboardPosition, getArtboardSize, isAncestorOf,
 } from '@playground/shared';
 import { nodeRect, nodeInnerRect, hitTest } from './registry.ts';
+import { treeNodeId } from '../state/keys.ts';
 import { parsePx } from './styles.ts';
 import { type Box, type SnapGuide, boxOf, computeSnap, snapResize } from '@playground/shared';
 
@@ -73,6 +74,31 @@ export function siblingBoxes(
     boxes,
     container: boxOf(parentId, 0, 0, parentRect.width, parentRect.height),
   };
+}
+
+/**
+ * What a plain click on `hit` will actually select.
+ *
+ * The outermost element inside the artboard, or the instance when the hit is
+ * inside one — the same rule every design tool uses, so that clicking a card
+ * selects the card rather than the word under the pointer. ⌘-click skips this
+ * and takes the deepest node.
+ *
+ * Shared because the canvas and the overlay must agree: the hover badge names
+ * what a click would select, and a badge naming something else is worse than no
+ * badge.
+ */
+export function clickTarget(
+  doc: CanvasDocument,
+  hit: { nodeId: NodeId; artboardId: NodeId },
+  selection: readonly NodeId[] = [],
+): NodeId {
+  let targetId = treeNodeId(hit.nodeId);
+  let node = doc.nodes[targetId];
+  while (node?.parent && node.parent !== hit.artboardId && !selection.includes(node.id)) {
+    node = doc.nodes[node.parent];
+  }
+  return node?.id ?? targetId;
 }
 
 export function snapMove(

@@ -42,6 +42,7 @@ export const Overlay = memo(function Overlay({ version, dropTarget, guides, live
   // this does not re-measure on every unrelated store update.
   const changedIds = useCanvas((s) => s.agentChange?.nodeIds);
   const highlight = useCanvas((s) => s.highlight);
+  const deepHover = useCanvas((s) => s.deepHover);
 
   const [rects, setRects] = useState<Rects>({
     selection: {}, hovered: null, peers: [], changed: [], highlight: [],
@@ -131,11 +132,33 @@ export const Overlay = memo(function Overlay({ version, dropTarget, guides, live
         <div key={`peer-${i}`} className="overlay-peer" style={boxStyle(p.rect, p.color)} />
       ))}
 
-      {rects.hovered && <div className="overlay-hover" style={boxStyle(rects.hovered)} />}
+      {rects.hovered && (
+        <>
+          <div className="overlay-hover" style={boxStyle(rects.hovered)} />
+          {/*
+            * What a click would select, named.
+            * A hairline rectangle answers "something is under the pointer" and
+            * not "which thing" — and in a deep tree the thing a plain click
+            * lands on is usually an ancestor of what the pointer is over.
+            */}
+          <div className="overlay-tag is-hover" style={tagStyle(rects.hovered)}>
+            {getNodeById(hovered!)?.name ?? 'Layer'}
+            {deepHover && (
+              <span className="overlay-tag-hint">⌘ {getNodeById(deepHover)?.name}</span>
+            )}
+          </div>
+        </>
+      )}
 
       {Object.entries(rects.selection).map(([id, rect]) => (
         <div key={id} className="overlay-selected" style={boxStyle(rect)} />
       ))}
+
+      {singleRect && single && editingText !== single && (
+        <div className="overlay-tag is-selected" style={tagStyle(singleRect)}>
+          {getNodeById(single)?.name ?? 'Layer'}
+        </div>
+      )}
 
       {singleRect && singleNode && editingText !== single && (
         <>
@@ -270,6 +293,21 @@ function Measurements({ fromId, toId }: { fromId: NodeId; toId: NodeId }) {
       ))}
     </>
   );
+}
+
+/**
+ * A name badge sitting just above a box, pinned inside the viewport.
+ *
+ * Above by default, because that is where a label belongs; flipped inside the
+ * box when the box is against the top of the window, where an outside label
+ * would be clipped off-screen and the selection would look unlabelled.
+ */
+function tagStyle(rect: DOMRect): React.CSSProperties {
+  const above = rect.top > 22;
+  return {
+    left: Math.round(rect.left),
+    top: Math.round(above ? rect.top - 20 : rect.top + 2),
+  };
 }
 
 function boxStyle(rect: DOMRect, color?: string): React.CSSProperties {

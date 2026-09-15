@@ -128,6 +128,75 @@ check('the three lenses are told apart by colour and by kind',
   (await page.locator('.overlay-highlight.is-review').count()) === 0
   && (await page.locator('.overlay-highlight.is-comments').count()) === 0);
 
+// --- Knowing what you are about to select -------------------------------------
+//
+// A plain click takes the outermost layer inside the artboard, which is right —
+// and leaves "did I select the thing I pointed at?" unanswered in a deep tree.
+
+const deep = await page.evaluate(() => {
+  const d = window.__playground.store.getState().doc;
+  const p = Object.values(d.nodes).find((n) => n.tag === 'p');
+  return p ? { id: p.id, name: p.name } : null;
+});
+const at = await page.evaluate((id) => {
+  for (const f of document.querySelectorAll('.artboard-frame iframe')) {
+    const el = f.contentDocument?.querySelector(`[data-node-id="${id}"]`);
+    if (!el) continue;
+    const r = el.getBoundingClientRect();
+    const box = f.getBoundingClientRect();
+    const scale = box.width / (f.offsetWidth || box.width || 1);
+    return { x: box.left + (r.left + r.width / 2) * scale, y: box.top + (r.top + r.height / 2) * scale };
+  }
+  return null;
+}, deep.id);
+
+await page.mouse.move(at.x, at.y);
+await page.waitForTimeout(600);
+const hoverBadge = (await page.locator('.overlay-tag.is-hover').innerText()).replace(/\n/g, ' ');
+check('hovering names what a click would select', hoverBadge.length > 0, hoverBadge);
+check('and offers the modifier that reaches the layer under the pointer',
+  hoverBadge.includes('⌘') && hoverBadge.includes(deep.name), hoverBadge);
+
+await page.mouse.click(at.x, at.y);
+await page.waitForTimeout(500);
+check('the selection is named on the canvas too',
+  (await page.locator('.overlay-tag.is-selected').count()) === 1,
+  await page.locator('.overlay-tag.is-selected').innerText());
+
+await page.keyboard.down('Meta');
+await page.mouse.click(at.x, at.y);
+await page.keyboard.up('Meta');
+await page.waitForTimeout(500);
+check('⌘-click reaches the layer itself',
+  (await page.locator('.overlay-tag.is-selected').innerText()).includes(deep.name),
+  await page.locator('.overlay-tag.is-selected').innerText());
+
+// The breadcrumb belongs to the panels that are about the selection, so switch
+// back to one of them before looking for it.
+await page.click('.rail-right .rail-tabs button[aria-label="Design"]');
+await page.waitForTimeout(400);
+const crumbs = await page.$$eval('.crumbs button', (els) => els.map((e) => e.textContent?.trim()));
+check('and the inspector shows the path to it', crumbs.length >= 3, crumbs.join(' › '));
+
+// Climbing back up by clicking a crumb.
+await page.locator('.crumbs button').first().click();
+await page.waitForTimeout(400);
+check('clicking a crumb selects that ancestor',
+  !(await page.locator('.overlay-tag.is-selected').innerText()).includes(deep.name));
+
+// And the layer tree does not make you go looking for the row.
+await page.evaluate((id) => window.__playground.store.getState().select([id]), deep.id);
+await page.waitForTimeout(700);
+const row = await page.evaluate((id) => {
+  const el = document.querySelector(`.layer-row[data-layer-id="${id}"]`);
+  if (!el) return null;
+  const r = el.getBoundingClientRect();
+  const rail = document.querySelector('.rail-left').getBoundingClientRect();
+  return { selected: el.className.includes('is-selected'), inView: r.top >= rail.top - 1 && r.bottom <= rail.bottom + 1 };
+}, deep.id);
+check('selecting on the canvas reveals the row in the layer tree',
+  !!row?.selected && !!row?.inView, JSON.stringify(row));
+
 await page.screenshot({ path: '/tmp/panels.png' });
 await page.close();
 

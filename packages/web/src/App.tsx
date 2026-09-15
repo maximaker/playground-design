@@ -15,6 +15,7 @@ import { Review } from './panels/Review.tsx';
 import { Spec } from './panels/Spec.tsx';
 import { Comments } from './panels/Comments.tsx';
 import { HistoryBar } from './ui/HistoryBar.tsx';
+import { Crumbs } from './ui/Crumbs.tsx';
 import { ConnectAgent } from './panels/ConnectAgent.tsx';
 import { Share } from './panels/Share.tsx';
 import { Export } from './panels/Export.tsx';
@@ -517,6 +518,9 @@ function Editor({ source, onHome, appearance, onAppearance, session }: {
           <div className="rail-heading">
             {RIGHT_TABS.find((t) => t.id === rightTab)?.label}
           </div>
+
+          {/* Where the selection sits, for the two panels that are about it. */}
+          {(rightTab === 'properties' || rightTab === 'spec') && <Crumbs />}
 
           <ScrollArea className="rail-body">
             {rightTab === 'spec' && <Spec />}

@@ -29,7 +29,8 @@ const snapOn = () => useCanvas.getState().canvasPrefs.snap;
 import {
   type DropTarget, type Handle, type ResizeStart,
   artboardBoxes, beginResize, buildMoveOps, computeDropTarget, nextArtboardPosition,
-  nodesInRect, resizeBox, resizeStyles, siblingBoxes, snapMove, snapResizeEdges, toCanvasSpace,
+  clickTarget, nodesInRect, resizeBox, resizeStyles, siblingBoxes, snapMove, snapResizeEdges,
+  toCanvasSpace,
 } from './interactions.ts';
 import { parsePx } from './styles.ts';
 
@@ -426,18 +427,9 @@ export function Canvas({ onContextMenu }: CanvasProps) {
     // reaches the deepest one, matching how every other design tool behaves.
     // Inside a component instance the outermost thing is the instance itself,
     // so a plain click selects that and ⌘-click reaches the part to override.
-    let targetId = hit.nodeId;
-    if (!e.metaKey && !e.ctrlKey) {
-      const instanceId = treeNodeId(targetId);
-      if (instanceId !== targetId) {
-        targetId = instanceId;
-      }
-      let node = doc.nodes[targetId];
-      while (node?.parent && node.parent !== hit.artboardId && !selection.includes(node.id)) {
-        node = doc.nodes[node.parent];
-      }
-      if (node) targetId = node.id;
-    }
+    const targetId = (e.metaKey || e.ctrlKey)
+      ? hit.nodeId
+      : clickTarget(doc, hit, selection);
 
     const already = selection.includes(targetId);
     if (e.shiftKey) {
@@ -472,15 +464,23 @@ export function Canvas({ onContextMenu }: CanvasProps) {
       const { clientX, clientY, altKey } = e;
       cancelAnimationFrame(hoverRaf.current);
       hoverRaf.current = requestAnimationFrame(() => {
-        // While a comment is open, the canvas stops drawing hover chrome: the
-        // outline was being painted across the thread someone was reading.
-        if (useCanvas.getState().draftComment || useCanvas.getState().openComment) {
+        // Only while a comment is being *written*. Suppressing it for any open
+        // thread meant that posting one — which leaves its thread open — turned
+        // off hover feedback for the whole canvas until you clicked the pin
+        // again. The outline no longer crosses the thread anyway: comments are
+        // in a layer above the overlay.
+        if (useCanvas.getState().draftComment) {
           setHovered(null);
           setMeasureTo(null);
           return;
         }
         const hit = hitTest(clientX, clientY);
-        setHovered(hit?.nodeId ?? null);
+        // The hover outline follows the pointer; the badge names what a plain
+        // click would select, which in a deep tree is usually an ancestor.
+        setHovered(hit ? clickTarget(doc, hit, selection) : null);
+        useCanvas.getState().setDeepHover(
+          hit && clickTarget(doc, hit, selection) !== hit.nodeId ? hit.nodeId : null,
+        );
         // Holding Alt over another node measures the distance to the selection.
         setMeasureTo(altKey && hit ? hit.nodeId : null);
       });

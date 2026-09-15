@@ -2362,7 +2362,39 @@ code { font-family: var(--mono); font-size: 0.92em; }
 .spec-add-actions { display: flex; gap: var(--s2); justify-content: flex-end; }
 .spec-empty { font-size: 0.78rem; line-height: 1.5; margin: 0 0 var(--s2); }
 
-.spec-code-actions { display: flex; flex-wrap: wrap; gap: var(--s2); }
+/* --- Spec: the visual half ------------------------------------------------- */
+.spec-swatch {
+  display: inline-block; width: 0.8rem; height: 0.8rem; margin-right: 0.35rem;
+  border-radius: 0.2rem; border: 1px solid var(--border-strong);
+  vertical-align: -0.1rem; flex: 0 0 auto;
+}
+.spec-row dd { display: flex; align-items: baseline; }
+
+/* The box, drawn: "padding: 12px 24px" is four numbers in an order people
+   misread, and a picture of it is not. */
+.spec-box { padding: var(--s3) var(--s4) 0; }
+.spec-box-outer {
+  position: relative; display: grid; place-items: center;
+  padding: 1.1rem; border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+  border: 1px dashed color-mix(in srgb, var(--accent) 35%, transparent);
+}
+.spec-box-inner {
+  width: 100%; min-height: 2.2rem; display: grid; place-items: center;
+  background: var(--bg-input); border: 1px solid var(--border-strong);
+  font-family: var(--font-mono, ui-monospace, monospace); font-size: 0.72rem; color: var(--fg-muted);
+}
+.spec-box-side {
+  position: absolute; font-size: 0.62rem; color: var(--fg-faint);
+  font-family: var(--font-mono, ui-monospace, monospace);
+}
+.spec-box-side.is-top { top: 0.15rem; left: 50%; transform: translateX(-50%); }
+.spec-box-side.is-bottom { bottom: 0.15rem; left: 50%; transform: translateX(-50%); }
+.spec-box-side.is-left { left: 0.2rem; top: 50%; transform: translateY(-50%); }
+.spec-box-side.is-right { right: 0.2rem; top: 50%; transform: translateY(-50%); }
+
+.spec-code-tabs { margin-bottom: var(--s2); }
+.spec-code-actions { display: flex; flex-wrap: wrap; gap: var(--s2); align-items: baseline; }
 .spec-code-actions .button { font-size: 0.75rem; padding: 0.15rem var(--s2); }
 .spec-code {
   margin: var(--s2) 0 0; padding: var(--s3); border-radius: var(--radius-sm);
@@ -2468,4 +2500,47 @@ code { font-family: var(--mono); font-size: 0.92em; }
 /* --- Review ---------------------------------------------------------------- */
 .review-about {
   margin: 0 0 var(--s3); font-size: 0.78rem; line-height: 1.55; color: var(--fg-muted);
+}
+
+/* --- Layer name badges ---------------------------------------------------------
+ *
+ * What is under the pointer, and what is selected, said in words. An outline
+ * alone answers "something" and not "which thing", which in a deep tree is the
+ * whole question — and a plain click lands on an ancestor of whatever the
+ * pointer is over, so the two are often different.
+ */
+.overlay-tag {
+  position: absolute; pointer-events: none; z-index: 2;
+  max-width: 14rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  padding: 0.05rem 0.3rem; border-radius: 0.25rem;
+  font-size: 0.68rem; line-height: 1.5; font-weight: 500;
+  color: #fff; background: var(--accent);
+}
+.overlay-tag.is-hover { background: color-mix(in srgb, var(--accent) 70%, transparent); }
+.overlay-tag-hint {
+  margin-left: 0.35rem; padding-left: 0.35rem; opacity: 0.85;
+  border-left: 1px solid rgba(255, 255, 255, 0.4);
+}
+
+/* --- Breadcrumb ----------------------------------------------------------------
+ *
+ * The path from the artboard down to what is selected, and the way back up.
+ * A click selects an ancestor of what you pointed at, which is right — but it
+ * leaves "where am I, and how do I get to the thing inside" unanswered.
+ */
+.crumbs {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 0.1rem;
+  padding: var(--s2) var(--s4); border-bottom: 1px solid var(--border);
+  font-size: 0.74rem; color: var(--fg-faint);
+}
+.crumbs button {
+  background: none; border: 0; padding: 0.1rem 0.2rem; border-radius: 0.25rem;
+  color: var(--fg-muted); font: inherit; font-size: 0.74rem; cursor: pointer;
+  max-width: 8rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.crumbs button:hover { background: var(--bg-hover); color: var(--fg); }
+.crumbs button.is-current { color: var(--fg); font-weight: 500; }
+.crumbs .crumb-sep { opacity: 0.5; }
+.crumbs .crumb-children {
+  margin-left: auto; display: inline-flex; align-items: center; gap: 0.15rem;
 }

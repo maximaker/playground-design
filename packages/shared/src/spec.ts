@@ -250,6 +250,39 @@ export function specFor(
   };
 }
 
+/**
+ * The CSS for one node, as a rule you can paste.
+ *
+ * Not the whole stylesheet the exporter emits — a developer copying a spec
+ * wants this layer's declarations and the states and widths that change them,
+ * with the token references intact rather than flattened to hex. The class name
+ * comes from the layer name, because that is what the person reading it calls
+ * the thing.
+ */
+export function cssFor(doc: CanvasDocument, id: NodeId): string {
+  const node = getNode(doc, id);
+  if (!node) return '';
+  const selector = `.${slugForClass(node.name)}`;
+  const block = (styles: StyleMap, indent = '  ') => Object.entries(styles)
+    .map(([k, v]) => `${indent}${k}: ${v};`)
+    .join('\n');
+
+  const parts = [`${selector} {\n${block(node.styles)}\n}`];
+  for (const variant of node.variants ?? []) {
+    const media = variant.selector.trim().startsWith('@media');
+    parts.push(media
+      ? `${variant.selector} {\n  ${selector} {\n${block(variant.styles, '    ')}\n  }\n}`
+      : `${selector}${variant.selector} {\n${block(variant.styles)}\n}`);
+  }
+  return parts.join('\n\n');
+}
+
+function slugForClass(name: string): string {
+  const slug = name.toLowerCase().replace(/[^\w-]+/g, '-').replace(/^-+|-+$/g, '');
+  // A class cannot start with a digit, and an empty one is not a class at all.
+  return /^[a-z_-]/.test(slug) ? slug : `layer-${slug || 'unnamed'}`;
+}
+
 /** The note kinds a spec understands. `comment` is an ordinary conversation. */
 export const NOTE_KINDS = ['comment', 'behaviour', 'data', 'constraint', 'accessibility', 'todo'] as const;
 export type NoteKind = typeof NOTE_KINDS[number];

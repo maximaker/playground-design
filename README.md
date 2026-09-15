@@ -373,6 +373,13 @@ comparison outlines what moved. Dashed and tinted, never solid, so a lens never 
 a selection is a thing you are about to change. "Two to fix" that points at nothing is a list you
 click through one row at a time.
 
+**Knowing what you are about to select.** A plain click takes the outermost layer inside the artboard,
+which is what every design tool does and what you want nine times in ten. The tenth time it looks
+broken, so: hovering names the layer a click would take *and* offers `⌘` with the name of the layer
+actually under the pointer; the selection is named on the canvas; the inspector shows the path from
+artboard to selection with every step clickable; and selecting on the canvas opens the layer tree to
+that row and scrolls it into view.
+
 **Handover, without redlines.** Every design tool grows a redlining mode: arrows and labels someone
 types over a picture, saying what the padding is. That exists because in those tools the design *is* a
 picture — the values are unreadable, so a human transcribes them, and the transcription is wrong the
@@ -381,6 +388,12 @@ measured size from the live frame (`width: fit-content` is not a width), colours
 back to the token names they came from, what changes on hover and at other widths in plain language,
 and the HTML and JSX to paste. Change the padding and the spec changes with it; there is nothing to
 re-publish and nothing that can disagree with the document.
+
+Colours carry a swatch, the box is drawn with a number on each side — `padding: 12px 24px` is four
+numbers in an order people misread — and the code comes in three tabs, CSS first, because "just the
+CSS" is the commonest thing to want and was the one thing the panel could not give you. The CSS is
+this layer's rule with its states and widths, token references left intact rather than flattened to
+hex.
 
 The panel borrows the Properties panel's furniture — same section headers, same label/value rhythm —
 because a reference that looks like a different application in the same rail reads as broken.

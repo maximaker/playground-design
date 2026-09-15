@@ -150,6 +150,39 @@ const shownTokens = await page.$$eval('.spec-token', (els) => els.map((e) => e.t
 check('tokens are shown by name, not as hexes',
   shownTokens.some((t) => t.includes('color.brand')), shownTokens.join(' | ').slice(0, 90));
 
+// --- The visual half --------------------------------------------------------------
+
+check('colours carry a swatch', (await page.locator('.spec-swatch').count()) > 0,
+  `${await page.locator('.spec-swatch').count()} swatches`);
+
+const sides = await page.$$eval('.spec-box-side', (els) => els.map((e) => e.textContent));
+check('the box is drawn, with a number on each side',
+  sides.length === 4 && sides.every((v) => !!v), sides.join(' · '));
+check('and the content box carries the measured size',
+  (await page.locator('.spec-box-inner').innerText()).includes('×'),
+  await page.locator('.spec-box-inner').innerText());
+
+// --- Three languages, CSS first ----------------------------------------------------
+
+const tabs = await page.$$eval('.spec-code-tabs button', (els) => els.map((e) => e.textContent));
+check('code comes in three tabs', tabs.join(',') === 'CSS,HTML,JSX', tabs.join(', '));
+
+const shown = () => page.locator('.spec-code').innerText();
+const css = await shown();
+check('CSS is what opens, as a rule you can paste',
+  css.trimStart().startsWith('.') && css.includes('padding:') && css.includes('}'),
+  css.split('\n')[0]);
+check('with token references left intact rather than flattened',
+  css.includes('var(--color-brand)'));
+
+await page.click('.spec-code-tabs button:has-text("HTML")');
+await page.waitForTimeout(250);
+check('HTML is a tab away', (await shown()).trimStart().startsWith('<'));
+await page.click('.spec-code-tabs button:has-text("JSX")');
+await page.waitForTimeout(250);
+check('and JSX after it', (await shown()).includes('className'));
+await page.click('.spec-code-tabs button:has-text("CSS")');
+
 // Adding a note from the panel must land in the document an agent reads.
 await page.click('.spec button:has-text("Add a note")');
 await page.waitForTimeout(300);
