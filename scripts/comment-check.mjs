@@ -239,8 +239,28 @@ await page.waitForTimeout(400);
 const chromeWhileWriting = await page.evaluate(() => window.__playground.store.getState().hovered);
 check('the canvas stops drawing hover chrome while a comment is open',
   chromeWhileWriting === null, String(chromeWhileWriting));
-await page.keyboard.press('Escape');
-await page.waitForTimeout(300);
+// An open thread must be above the selection chrome as well as the hover kind.
+// The pins used to live inside the world layer, which has a transform and is
+// therefore its own stacking context: everything in it painted under the
+// overlay no matter what z-index a pin carried, so the selection outline was
+// drawn across the thread being read.
+// The composer from the previous step is still open on the selected layer.
+await page.fill('.comment-pin.is-draft textarea', 'about this layer');
+await page.keyboard.press('Enter');
+await page.waitForTimeout(900);
+await page.evaluate((id) => window.__playground.store.getState().select([id]), frame.id);
+await page.waitForTimeout(600);
+const painted = await page.evaluate(() => {
+  const thread = document.querySelector('.comment-pin.is-open .comment-thread');
+  if (!thread) return null;
+  const box = thread.getBoundingClientRect();
+  return [[0.15, 0.15], [0.5, 0.08], [0.85, 0.5], [0.5, 0.92]].map(([fx, fy]) => {
+    const el = document.elementFromPoint(box.left + box.width * fx, box.top + box.height * fy);
+    return el?.closest('.comment-pin') ? 'thread' : (el?.className || el?.tagName || 'none');
+  });
+});
+check('nothing is painted over an open thread',
+  !!painted && painted.every((what) => what === 'thread'), (painted ?? []).join(', '));
 
 // --- Hiding the pins ------------------------------------------------------------
 

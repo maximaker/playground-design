@@ -1743,6 +1743,10 @@ code { font-family: var(--mono); font-size: 0.92em; }
 /* Peer cursors ----------------------------------------------------------- */
 
 .peer-cursors { position: absolute; inset: 0; pointer-events: none; z-index: 11; }
+/* Above the overlay's chrome (10) and the peer cursors (11). The layer itself
+   is transparent to the pointer; the pins inside it are not. */
+.comment-layer { position: absolute; inset: 0; pointer-events: none; z-index: 14; }
+.comment-layer > * { pointer-events: auto; }
 
 .peer-cursor {
   position: fixed;
@@ -1778,10 +1782,10 @@ code { font-family: var(--mono); font-size: 0.92em; }
  * 10% zoom is still a remark you have to find and click; scaling it with the
  * canvas would make it a few pixels wide.
  */
-/* Above the overlay (z-index 10), which draws selection and hover chrome: a
-   hairline outline was being painted across the thread being read. */
-.comment-pin { position: absolute; z-index: 9; }
-.comment-pin.is-open, .comment-pin.is-draft { z-index: 12; }
+.comment-pin { position: absolute; z-index: 1; }
+/* An open thread above its neighbours, so two pins close together do not
+   overlap the one being read. */
+.comment-pin.is-open, .comment-pin.is-draft { z-index: 2; }
 
 .comment-marker {
   display: grid;

@@ -920,12 +920,28 @@ export function Canvas({ onContextMenu }: CanvasProps) {
           <Artboard key={id} id={id} live={visibleArtboards.has(id)} />
         ))}
         {notesOf(page).map((note) => <NoteCard key={note.id} note={note} />)}
+      </div>
+
+      <Overlay version={structureVersion} dropTarget={dropTarget} guides={guides} live={dragging} />
+
+      {/*
+        * Comments sit in their own layer above the overlay, translated with the
+        * world so the pins stay on the design.
+        *
+        * Inside the world they were below the selection chrome no matter what
+        * z-index they carried: the world has a transform, which makes it a
+        * stacking context, so everything in it paints as one layer under the
+        * overlay. A hairline selection outline drawn across the thread someone
+        * is reading is exactly the sort of thing that looks broken.
+        */}
+      <div
+        className="comment-layer"
+        style={{ transform: `translate(${viewport.x - origin.x}px, ${viewport.y - origin.y}px)` }}
+      >
         {prefs.comments && doc
           && commentsOf(doc, page.id).map((c) => <CommentPin key={c.id} comment={c} />)}
         <CommentComposer />
       </div>
-
-      <Overlay version={structureVersion} dropTarget={dropTarget} guides={guides} live={dragging} />
 
       {prefs.rulers && (
         <Rulers origin={origin} pointer={rulerPointer} highlight={rulerHighlight} />
