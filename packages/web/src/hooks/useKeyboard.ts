@@ -21,6 +21,13 @@ const TOOL_KEYS: Record<string, Tool> = {
   r: 'rect', o: 'ellipse', i: 'image', n: 'note', c: 'comment',
 };
 
+/** True when the keystroke belongs to the canvas rather than to the chrome. */
+function onCanvas(target: EventTarget | null): boolean {
+  const el = target as HTMLElement | null;
+  if (!el || el === document.body || el === document.documentElement) return true;
+  return !!el.closest?.('.stage');
+}
+
 function isTyping(target: EventTarget | null): boolean {
   const el = target as HTMLElement | null;
   if (!el) return false;
@@ -119,10 +126,20 @@ export function useKeyboard(actions: KeyboardActions = {}): void {
       // --- Export ----------------------------------------------------------
       if (mod && e.shiftKey && key === 'e') { e.preventDefault(); onExport?.(); return; }
 
+      // --- Rename ----------------------------------------------------------
+      if (e.key === 'F2' && selection.length === 1) {
+        e.preventDefault();
+        state.requestPanel('layers');
+        state.setRenaming(selection[0]!.split('::')[0]!);
+        return;
+      }
+
       // --- Zoom and pan ----------------------------------------------------
-      if (!mod && e.key === '1') { e.preventDefault(); zoomToFit(); return; }
-      if (!mod && e.key === '2') { e.preventDefault(); zoomToSelection(); return; }
-      if (!mod && e.key === '3') { e.preventDefault(); zoomToSelection(); return; }
+      // Both spellings: the bare digits this tool started with, and Figma's
+      // shifted ones, which is what a hand arriving from Figma will press.
+      if (!mod && (e.key === '1' || e.key === '!')) { e.preventDefault(); zoomToFit(); return; }
+      if (!mod && (e.key === '2' || e.key === '@')) { e.preventDefault(); zoomToSelection(); return; }
+      if (!mod && (e.key === '3' || e.key === '#')) { e.preventDefault(); zoomToSelection(); return; }
 
       // --- Selection navigation --------------------------------------------
       if (e.key === 'Enter' && !mod) {
@@ -138,7 +155,26 @@ export function useKeyboard(actions: KeyboardActions = {}): void {
         else if (selection.length) selectParent();
         return;
       }
-      if (e.key === 'Tab') { e.preventDefault(); selectSibling(e.shiftKey ? -1 : 1); return; }
+      /*
+       * Tab selects the next sibling *on the canvas*, and is left alone
+       * everywhere else.
+       *
+       * It used to be taken globally, which meant the interface could not be
+       * traversed by keyboard at all: every press was swallowed before it
+       * reached a panel, so nothing in the rails could be focused, and the
+       * focus ring drawn for everything was unreachable in practice.
+       *
+       * A selection is the second condition, and it is what makes the two
+       * meanings coexist: with something selected on the canvas, Tab walks the
+       * siblings the way a design tool should; with nothing selected, or with
+       * focus already in a panel, it traverses the interface the way the
+       * platform should.
+       */
+      if (e.key === 'Tab' && selection.length && onCanvas(e.target)) {
+        e.preventDefault();
+        selectSibling(e.shiftKey ? -1 : 1);
+        return;
+      }
       if (e.key === '\\' && !mod) { e.preventDefault(); selectParent(); return; }
 
       // --- Delete and nudge -------------------------------------------------

@@ -45,13 +45,13 @@ export function Toolbar({ compact }: { compact?: boolean }) {
       {!readOnly && !compact && (
         <>
           <button
-            title="Undo (⌘Z)"
+            className="tip is-top" data-tip="Undo  ⌘Z"
             aria-label="Undo"
             disabled={!canUndo}
             onClick={() => undo()}
           ><Icon name="undo" size={16} /></button>
           <button
-            title="Redo (⌘⇧Z)"
+            className="tip is-top" data-tip="Redo  ⌘⇧Z"
             aria-label="Redo"
             disabled={!canRedo}
             onClick={() => redo()}
@@ -63,8 +63,8 @@ export function Toolbar({ compact }: { compact?: boolean }) {
       {TOOLS.filter((t) => !readOnly || ['move', 'hand', 'comment'].includes(t.tool)).map((t) => (
         <button
           key={t.tool}
-          className={tool === t.tool ? 'is-active' : ''}
-          title={`${t.title} (${t.key})`}
+          className={`tip is-top${tool === t.tool ? ' is-active' : ''}`}
+          data-tip={`${t.title}  ${t.key}`}
           onClick={() => setTool(t.tool)}
           aria-label={t.title}
           aria-pressed={tool === t.tool}
@@ -74,17 +74,17 @@ export function Toolbar({ compact }: { compact?: boolean }) {
       ))}
       {!compact && <span className="toolbar-divider" />}
       {!compact && (
-      <button title="Zoom out" aria-label="Zoom out" onClick={() => setViewport({ zoom: Math.max(0.02, zoom / 1.25) })}>
+      <button className="tip is-top" data-tip="Zoom out" aria-label="Zoom out" onClick={() => setViewport({ zoom: Math.max(0.02, zoom / 1.25) })}>
         <Icon name="minus" size={16} />
       </button>
       )}
       {!compact && (
-        <button className="zoom-readout" title="Reset zoom" onClick={() => setViewport({ zoom: 1 })}>
+        <button className="zoom-readout tip is-top" data-tip="Reset zoom  ⌘0" onClick={() => setViewport({ zoom: 1 })}>
           {Math.round(zoom * 100)}%
         </button>
       )}
       {!compact && (
-      <button title="Zoom in" aria-label="Zoom in" onClick={() => setViewport({ zoom: Math.min(8, zoom * 1.25) })}>
+      <button className="tip is-top" data-tip="Zoom in" aria-label="Zoom in" onClick={() => setViewport({ zoom: Math.min(8, zoom * 1.25) })}>
         <Icon name="plus" size={16} />
       </button>
       )}

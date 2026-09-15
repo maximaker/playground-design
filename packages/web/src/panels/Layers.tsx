@@ -105,6 +105,26 @@ interface RowProps {
   structureVersion: number;
 }
 
+/**
+ * Select every row between the current selection and this one.
+ *
+ * The run is read off the rendered tree rather than recomputed from the
+ * document, because what "between" means to the person holding shift is what
+ * they can see: rows inside a collapsed group are not part of the run.
+ */
+function selectRangeTo(id: NodeId): void {
+  const { selection, select } = useCanvas.getState();
+  const rows = [...document.querySelectorAll<HTMLElement>('[data-layer-id]')]
+    .map((el) => el.dataset.layerId!)
+    .filter(Boolean);
+  const anchorId = selection[selection.length - 1]?.split('::')[0];
+  const from = anchorId ? rows.indexOf(anchorId) : -1;
+  const to = rows.indexOf(id);
+  if (from < 0 || to < 0) { select([id]); return; }
+  const [a, b] = from < to ? [from, to] : [to, from];
+  select(rows.slice(a, b + 1));
+}
+
 const LayerRow = memo(function LayerRow({
   id, depth, defaultOpen, expanded, toggle, dropHint, setDropHint, structureVersion,
 }: RowProps) {
@@ -117,7 +137,10 @@ const LayerRow = memo(function LayerRow({
   const select = useCanvas((s) => s.select);
   const dispatch = useCanvas((s) => s.dispatch);
   const setHovered = useCanvas((s) => s.setHovered);
-  const [renaming, setRenaming] = useState(false);
+  // In the store, not in the row: the right-click menu offers Rename, and it
+  // has no way to reach one row's useState.
+  const renaming = useCanvas((s) => s.renaming === id);
+  const setRenaming = (on: boolean) => useCanvas.getState().setRenaming(on ? id : null);
 
   const node = getNodeById(id);
   if (!node) return null;
@@ -186,8 +209,18 @@ const LayerRow = memo(function LayerRow({
         onPointerEnter={() => setHovered(id)}
         onPointerLeave={() => setHovered(null)}
         onClick={(e) => {
-          if (e.shiftKey) useCanvas.getState().toggleSelect(id);
+          // Figma's division, which is what people's hands expect: shift takes
+          // the run between the last selection and this row, the platform
+          // modifier adds or removes one, a plain click replaces.
+          if (e.shiftKey) selectRangeTo(id);
+          else if (e.metaKey || e.ctrlKey) useCanvas.getState().toggleSelect(id);
           else select([id]);
+        }}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          if (!isSelected) select([id]);
+          useCanvas.getState().openContextMenu({ x: e.clientX, y: e.clientY, nodeId: id });
         }}
         onDoubleClick={() => setRenaming(true)}
       >

@@ -48,6 +48,7 @@ const GROUPS: { title: string; items: [string, string][] }[] = [
       ['⌫', 'Delete'],
       ['Arrows', 'Nudge 1px (⇧ for 10px)'],
       ['⌘/Ctrl + Arrows', 'Move one place along inside the parent'],
+      ['F2', 'Rename the selected layer'],
     ],
   },
   {
@@ -62,8 +63,8 @@ const GROUPS: { title: string; items: [string, string][] }[] = [
   {
     title: 'View',
     items: [
-      ['1', 'Zoom to fit'],
-      ['2', 'Zoom to selection'],
+      ['1 or ⇧1', 'Zoom to fit'],
+      ['2 or ⇧2', 'Zoom to selection'],
       ['⌘0', 'Zoom to 100%'],
       ['⌘+ / ⌘−', 'Zoom in / out'],
       ['⌘ Scroll', 'Zoom at the cursor'],

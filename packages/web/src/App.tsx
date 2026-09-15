@@ -215,7 +215,8 @@ function Editor({ source, onHome, appearance, onAppearance, session }: {
   // controls they cannot use: the inspector opens on the spec for them.
   const [rightTab, setRightTab] = useState<RightTab>(source.kind === 'share' ? 'spec' : 'properties');
   const [modal, setModal] = useState<'connect' | 'share' | 'export' | 'import' | 'shortcuts' | null>(null);
-  const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+  const contextMenu = useCanvas((s) => s.contextMenu) as ContextMenuState | null;
+  const setContextMenu = useCanvas((s) => s.openContextMenu);
   const [showSettings, setShowSettings] = useState(false);
   const [showOverflow, setShowOverflow] = useState(false);
   const [showPalette, setShowPalette] = useState(false);
@@ -451,9 +452,9 @@ function Editor({ source, onHome, appearance, onAppearance, session }: {
             {LEFT_TABS.map((t) => (
               <button
                 key={t.id}
-                className={leftTab === t.id ? 'is-active' : ''}
+                className={`tip is-bottom${leftTab === t.id ? ' is-active' : ''}`}
                 onClick={() => setLeftTab(t.id)}
-                title={`${t.label} — ${t.hint}`}
+                data-tip={`${t.label} — ${t.hint}`}
                 aria-label={t.label}
                 aria-pressed={leftTab === t.id}
               >
@@ -462,6 +463,9 @@ function Editor({ source, onHome, appearance, onAppearance, session }: {
             ))}
           </nav>
 
+          {/* Heading and content are one card on the rail's plate: the rail is
+              furniture, the panel is content, and nesting says so without a rule. */}
+          <div className="rail-panel">
           <div className="rail-heading">
             {LEFT_TABS.find((t) => t.id === leftTab)?.label}
           </div>
@@ -494,6 +498,7 @@ function Editor({ source, onHome, appearance, onAppearance, session }: {
             {leftTab === 'components' && <Components />}
             {leftTab === 'tokens' && <Tokens />}
           </ScrollArea>
+          </div>
         </aside>
 
         <main className="stage">
@@ -519,9 +524,9 @@ function Editor({ source, onHome, appearance, onAppearance, session }: {
             {RIGHT_TABS.map((t) => (
               <button
                 key={t.id}
-                className={rightTab === t.id ? 'is-active' : ''}
+                className={`tip is-bottom${rightTab === t.id ? ' is-active' : ''}`}
                 onClick={() => setRightTab(t.id)}
-                title={`${t.label} — ${t.hint}`}
+                data-tip={`${t.label} — ${t.hint}`}
                 aria-label={t.label}
                 aria-pressed={rightTab === t.id}
               >
@@ -530,6 +535,7 @@ function Editor({ source, onHome, appearance, onAppearance, session }: {
             ))}
           </nav>
 
+          <div className="rail-panel">
           <div className="rail-heading">
             {RIGHT_TABS.find((t) => t.id === rightTab)?.label}
           </div>
@@ -553,6 +559,7 @@ function Editor({ source, onHome, appearance, onAppearance, session }: {
               </fieldset>
             )}
           </ScrollArea>
+          </div>
         </aside>
       </div>
 

@@ -213,6 +213,19 @@ interface CanvasState {
   replaceTarget: NodeId[] | null;
 
   /**
+   * The open right-click menu.
+   *
+   * In the store rather than in the shell's own state because the menu is not
+   * the canvas's: a layer row in the tree offers the same operations on the
+   * same selection, and in every other tool right-clicking one is the same
+   * gesture as right-clicking the other.
+   */
+  contextMenu: { x: number; y: number; nodeId: NodeId | null } | null;
+
+  /** The layer whose name is being edited in the tree, if any. */
+  renaming: NodeId | null;
+
+  /**
    * What this person is called, as the server knows them: their account name,
    * or the guest name a share-link viewer gets. Comments are signed with it.
    */
@@ -286,6 +299,8 @@ interface CanvasActions {
   setDeepHover(id: NodeId | null): void;
   requestPanel(name: string | null): void;
   setReplaceTarget(ids: NodeId[] | null): void;
+  openContextMenu(at: { x: number; y: number; nodeId: NodeId | null } | null): void;
+  setRenaming(id: NodeId | null): void;
   setTool(t: Tool): void;
   setSpacePanning(v: boolean): void;
   setPage(id: string): void;
@@ -404,6 +419,8 @@ export const useCanvas = create<CanvasState & CanvasActions>((set, get) => ({
   deepHover: null,
   panelRequest: null,
   replaceTarget: null,
+  contextMenu: null,
+  renaming: null,
   canvasPrefs: loadCanvasPrefs(),
   tool: 'move',
   spacePanning: false,
@@ -675,6 +692,8 @@ export const useCanvas = create<CanvasState & CanvasActions>((set, get) => ({
   setIdentity(identity) { set({ identity }); },
   requestPanel(panelRequest) { set({ panelRequest }); },
   setReplaceTarget(replaceTarget) { set({ replaceTarget }); },
+  openContextMenu(contextMenu) { set({ contextMenu }); },
+  setRenaming(renaming) { set({ renaming }); },
   setDeepHover(deepHover) {
     if (get().deepHover !== deepHover) set({ deepHover });
   },

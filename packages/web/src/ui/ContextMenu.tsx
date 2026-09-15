@@ -78,6 +78,16 @@ export function ContextMenu({ state, onClose, onExport }: {
     { label: 'Copy as HTML', run: () => void copy('html'), disabled: !has },
     { label: 'Copy as CSS', shortcut: '⌘⇧C', run: () => void copy('css'), disabled: !has },
     { label: '', separator: true },
+    {
+      label: 'Rename',
+      shortcut: 'F2',
+      run: () => {
+        if (!state.nodeId) return;
+        useCanvas.getState().requestPanel('layers');
+        useCanvas.getState().setRenaming(state.nodeId);
+      },
+      disabled: !state.nodeId,
+    },
     { label: 'Duplicate', shortcut: '⌘D', run: duplicateSelection, disabled: !has },
     { label: 'Wrap in frame', shortcut: '⌘G', run: wrapInFrame, disabled: !has },
     { label: 'Create component', run: createComponentFromSelection, disabled: !has },
