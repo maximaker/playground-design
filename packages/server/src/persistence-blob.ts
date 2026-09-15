@@ -10,6 +10,14 @@
  * Everything is stored with private access and read back through the SDK's
  * authenticated `get`, so a document is reachable only through the app — not by
  * anyone who guesses a blob URL.
+ *
+ * Blob meters operations, and a `list` plus a `get` per entry is the expensive
+ * shape. Listing the library was doing exactly that on every request — and
+ * `/api/projects` did it twice, once for the projects and once to count the
+ * documents in them — which is enough to burn a month's allowance in an
+ * afternoon of testing. The collection listings are therefore cached for a few
+ * seconds. Single-document reads are never cached: a document is read straight
+ * after it is written and a stale copy there would be a lost edit.
  */
 
 import type { CanvasDocument } from '@playground/shared';
@@ -23,6 +31,30 @@ export class BlobPersistence implements Persistence {
   readonly kind = 'blob' as const;
   readonly durable = true;
   private blobPromise: Promise<BlobModule> | null = null;
+
+  /**
+   * Short-lived cache for collection listings.
+   *
+   * Deliberately brief: long enough to collapse the several listings a single
+   * page load makes, short enough that a document created in one tab shows up
+   * in another without anyone waiting. Invalidated outright on any write to the
+   * collection, so it never hides your own change from you.
+   */
+  private listCache = new Map<string, { at: number; value: unknown }>();
+
+  private static readonly LIST_TTL_MS = 4000;
+
+  private async cachedList<T>(key: string, load: () => Promise<T>): Promise<T> {
+    const hit = this.listCache.get(key);
+    if (hit && Date.now() - hit.at < BlobPersistence.LIST_TTL_MS) return hit.value as T;
+    const value = await load();
+    this.listCache.set(key, { at: Date.now(), value });
+    return value;
+  }
+
+  private invalidate(key: string): void {
+    this.listCache.delete(key);
+  }
 
   constructor(private token: string) {}
 
@@ -61,6 +93,7 @@ export class BlobPersistence implements Persistence {
   async loadDocument(id: string) { return this.getJson<CanvasDocument>(`docs/${id}.json`); }
 
   async saveDocument(doc: CanvasDocument) {
+    this.invalidate('documents');
     await this.putJson(`docs/${doc.id}.json`, doc);
     await this.putJson(`index/${doc.id}.json`, {
       id: doc.id, name: doc.name, rev: doc.rev, updatedAt: Date.now(),
@@ -70,18 +103,41 @@ export class BlobPersistence implements Persistence {
   }
 
   async deleteDocument(id: string) {
-    const { del } = await this.blob();
+    this.invalidate('documents');
+    const { del, list } = await this.blob();
     await Promise.allSettled([
       del(`docs/${id}.json`, { token: this.token }),
       del(`index/${id}.json`, { token: this.token }),
     ]);
+
+    // Assets belong to the document, and nothing else will ever reach them
+    // again — SQLite deletes them by foreign key, and without this Blob simply
+    // accumulated them. A bundled code component is well over a hundred
+    // kilobytes, so a few abandoned documents is most of a small store.
+    try {
+      const { blobs } = await list({ prefix: 'assets/', token: this.token, limit: 1000 });
+      const metas = blobs.filter((b) => b.pathname.endsWith('.meta.json'));
+      const mine: string[] = [];
+      for (const meta of metas) {
+        const value = await this.getJson<{ id: string; docId: string | null }>(meta.pathname);
+        if (value?.docId === id) mine.push(value.id);
+      }
+      await Promise.allSettled(mine.flatMap((assetId) => [
+        del(`assets/${assetId}`, { token: this.token }),
+        del(`assets/${assetId}.meta.json`, { token: this.token }),
+      ]));
+    } catch {
+      // Best effort. Failing to tidy up must not fail the deletion itself.
+    }
   }
 
   async listDocuments(): Promise<DocSummary[]> {
-    const { list } = await this.blob();
-    const { blobs } = await list({ prefix: 'index/', token: this.token, limit: 200 });
-    const summaries = await Promise.all(blobs.map((b) => this.getJson<DocSummary>(b.pathname)));
-    return summaries.filter((s): s is DocSummary => !!s).sort((a, b) => b.updatedAt - a.updatedAt);
+    return this.cachedList('documents', async () => {
+      const { list } = await this.blob();
+      const { blobs } = await list({ prefix: 'index/', token: this.token, limit: 200 });
+      const summaries = await Promise.all(blobs.map((b) => this.getJson<DocSummary>(b.pathname)));
+      return summaries.filter((s): s is DocSummary => !!s).sort((a, b) => b.updatedAt - a.updatedAt);
+    });
   }
 
   async saveConnection(c: StoredConnection) { await this.putJson(`connections/${c.code}.json`, c); }
@@ -94,32 +150,42 @@ export class BlobPersistence implements Persistence {
     return all.filter((c): c is StoredConnection => !!c && (!docId || c.docId === docId));
   }
 
-  async saveProject(p: StoredProject) { await this.putJson(`projects/${p.id}.json`, p); }
+  async saveProject(p: StoredProject) {
+    this.invalidate('projects');
+    await this.putJson(`projects/${p.id}.json`, p);
+  }
 
   async loadProjects(): Promise<StoredProject[]> {
-    const { list } = await this.blob();
-    const { blobs } = await list({ prefix: 'projects/', token: this.token, limit: 200 });
-    const all = await Promise.all(blobs.map((b) => this.getJson<StoredProject>(b.pathname)));
-    return all.filter((p): p is StoredProject => !!p).sort((a, b) => a.name.localeCompare(b.name));
+    return this.cachedList('projects', async () => {
+      const { list } = await this.blob();
+      const { blobs } = await list({ prefix: 'projects/', token: this.token, limit: 200 });
+      const all = await Promise.all(blobs.map((b) => this.getJson<StoredProject>(b.pathname)));
+      return all.filter((p): p is StoredProject => !!p).sort((a, b) => a.name.localeCompare(b.name));
+    });
   }
 
   async deleteProject(id: string): Promise<boolean> {
     const { del } = await this.blob();
     if (!(await this.getJson<StoredProject>(`projects/${id}.json`))) return false;
+    this.invalidate('projects');
     await del(`projects/${id}.json`, { token: this.token });
     return true;
   }
 
-  async saveShare(s: StoredShare) { await this.putJson(`shares/${s.token}.json`, s); }
+  async saveShare(s: StoredShare) {
+    this.invalidate('shares');
+    await this.putJson(`shares/${s.token}.json`, s);
+  }
   async loadShare(token: string) { return this.getJson<StoredShare>(`shares/${token}.json`); }
 
   async loadShares(docId: string): Promise<StoredShare[]> {
-    const { list } = await this.blob();
-    const { blobs } = await list({ prefix: 'shares/', token: this.token, limit: 500 });
-    const all = await Promise.all(blobs.map((b) => this.getJson<StoredShare>(b.pathname)));
-    return all
-      .filter((s): s is StoredShare => !!s && s.docId === docId)
-      .sort((a, b) => b.createdAt - a.createdAt);
+    const all = await this.cachedList('shares', async () => {
+      const { list } = await this.blob();
+      const { blobs } = await list({ prefix: 'shares/', token: this.token, limit: 500 });
+      const loaded = await Promise.all(blobs.map((b) => this.getJson<StoredShare>(b.pathname)));
+      return loaded.filter((s): s is StoredShare => !!s);
+    });
+    return all.filter((s) => s.docId === docId).sort((a, b) => b.createdAt - a.createdAt);
   }
 
   async saveAsset(a: StoredAsset) {

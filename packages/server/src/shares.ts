@@ -20,6 +20,9 @@ import { persistence, type ShareRole, type StoredShare } from './persistence.ts'
 import { ensureLoaded, getDocument } from './store.ts';
 import type { CanvasDocument, OpEnvelope } from '@playground/shared';
 
+/** How stale `lastUsedAt` may get before it is worth another write. */
+const LAST_USED_THROTTLE_MS = 60_000;
+
 export interface Share {
   token: string;
   docId: string;
@@ -82,7 +85,14 @@ export async function resolveShare(token: string): Promise<Share | null> {
 
   // Last-used is best-effort: it is for the owner's benefit in the share list,
   // and a failed write here must not stop someone opening the link.
-  void store.saveShare({ ...found, lastUsedAt: Date.now() }).catch(() => {});
+  //
+  // Throttled, because a viewer on the polling transport resolves the token
+  // several times a minute and this is a storage write each time — precise
+  // timestamps are not worth that, and "opened 3m ago" is the same sentence
+  // either way.
+  if (!found.lastUsedAt || Date.now() - found.lastUsedAt > LAST_USED_THROTTLE_MS) {
+    void store.saveShare({ ...found, lastUsedAt: Date.now() }).catch(() => {});
+  }
   return toShare(found);
 }
 

@@ -346,6 +346,13 @@ browser the server can drive, so they are a self-hosted capability.
 Blob has no transactions, so two people editing the same document on the hosted version can clobber
 one another. Self-host for real collaborative work.
 
+Blob also meters operations, and `list` plus a `get` per entry is the expensive shape — which is what
+listing the library does. Collection listings are cached for a few seconds and invalidated on any
+write, so a page load costs one listing rather than several; single-document reads are never cached,
+because a document is read straight after it is written. Deleting a document now deletes its assets
+too (SQLite did this by foreign key all along), since a bundled code component is well over a hundred
+kilobytes and abandoned ones were simply accumulating.
+
 The op log is in memory, and consecutive serverless requests reach different instances, so a poll
 there sometimes returns a whole-document resync rather than a list of ops. The change is applied
 correctly either way, but a resync carries no origins — so that batch cannot be attributed and gets
