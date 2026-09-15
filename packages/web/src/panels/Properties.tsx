@@ -20,6 +20,8 @@ import { ArrangeBar } from '../ui/ArrangeBar.tsx';
 import { GradientEditor } from '../ui/GradientEditor.tsx';
 import { Icon } from '../ui/Icon.tsx';
 import { AlignExtras, AlignPad } from '../ui/AlignPad.tsx';
+import { BoxEditor } from '../ui/BoxEditor.tsx';
+import { nodeInnerRect } from '../canvas/registry.ts';
 
 const MIXED = '—'; // em dash: "these nodes disagree"
 
@@ -115,6 +117,23 @@ export function Properties() {
   const isRow = (read('flex-direction') || 'row').startsWith('row');
   const parent = first.parent ? doc?.nodes[first.parent] : undefined;
   const parentIsFlex = (parent?.styles.display ?? '').includes('flex');
+
+  /*
+   * What the box diagram shows.
+   *
+   * The size comes from the rendered element rather than from the style value,
+   * for the same reason the spec does: a hugging frame has no width in the
+   * document at all, and "content" with no number is less use than the number
+   * the browser arrived at.
+   */
+  const boxValues = {
+    margin: read('margin') === MIXED ? '' : read('margin'),
+    padding: read('padding') === MIXED ? '' : read('padding'),
+    size: nodes.length === 1 ? (() => {
+      const rect = nodeInnerRect(resolved[0]?.key ?? first.id);
+      return rect ? { width: rect.width, height: rect.height } : undefined;
+    })() : undefined,
+  };
 
   // Base merged with the variant being edited: a variant that only overrides
   // alignment still needs the base's direction to know which CSS property that
@@ -412,9 +431,6 @@ export function Properties() {
                 <Field label="Gap" prop="gap" wide>
                   <NumberInput value={read('gap')} onCommit={set('gap')} min={0} />
                 </Field>
-                <Field label="Padding" prop="padding" wide>
-                  <TextInput value={read('padding')} placeholder="16px or 8px 16px" onCommit={set('padding')} mono />
-                </Field>
                 {isFlex && (
                   <Field label="Wrap" prop="flex-wrap" wide>
                     <SegmentedControl
@@ -489,15 +505,16 @@ export function Properties() {
             </Row>
           )}
 
-          {/* Padding sits beside the pad for a flex or grid container; for
-              anything else this is the only place it appears. */}
-          {!((isFlex || display === 'grid') && nodes.length === 1) && (
-            <Row>
-              <Field label="Padding" prop="padding" wide>
-                <TextInput value={read('padding')} placeholder="16px or 8px 16px" onCommit={set('padding')} mono />
-              </Field>
-            </Row>
-          )}
+          {/* Full width, and always: the diagram needs the room, and spacing is
+              not a property of containers — everything sits in a box. */}
+          <Row>
+            <Field label="Spacing" prop="padding / margin" wide>
+              <BoxEditor
+                values={boxValues}
+                onCommit={(prop, v, opts) => write({ [prop]: v }, opts)}
+              />
+            </Field>
+          </Row>
         </Section>
       )}
 

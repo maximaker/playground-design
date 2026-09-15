@@ -2858,3 +2858,71 @@ code { font-family: var(--mono); font-size: 0.92em; }
   background: linear-gradient(to top, var(--bg-panel), transparent);
   pointer-events: none;
 }
+
+
+/* --- Box model ------------------------------------------------------------
+ *
+ * Three nested rings: margin outside, padding inside, the measured content in
+ * the middle. Neutral greys rather than devtools' orange and green — those
+ * colours mean brand and state here — so the reading comes from the nesting,
+ * which is the same rule the rest of the interface follows.
+ */
+
+.box-editor { padding: var(--s2) var(--s4) var(--s3); }
+
+.box-ring {
+  position: relative;
+  border-radius: var(--radius);
+  padding: 1.4rem 2.4rem;
+}
+.box-ring.is-margin { background: var(--bg-sunken); border: 1px dashed var(--border-strong); }
+.box-ring.is-padding { background: var(--bg-panel); border: 1px solid var(--border); }
+
+.box-ring-label {
+  position: absolute; top: 0.18rem; left: 0.4rem;
+  font-size: 0.6rem; letter-spacing: 0.07em; text-transform: uppercase;
+  color: var(--fg-faint); pointer-events: none;
+}
+
+.box-content {
+  display: grid; place-items: center; min-height: 1.9rem; white-space: nowrap;
+  border-radius: var(--radius-sm); background: var(--bg-hover);
+  font-size: 0.75rem; color: var(--fg-muted); font-variant-numeric: tabular-nums;
+  padding: 0 var(--s3);
+}
+
+/* Each number sits on the edge it describes, which is the whole point of
+   drawing this rather than listing four fields. */
+.box-field {
+  position: absolute; z-index: 1;
+  min-width: 1.5rem; padding: 0.05rem 0.2rem;
+  background: none; border: 1px solid transparent; border-radius: var(--radius-xs);
+  font: inherit; font-size: 0.72rem; font-variant-numeric: tabular-nums;
+  color: var(--fg-muted); text-align: center; cursor: ew-resize;
+  transition: background var(--transition), color var(--transition);
+}
+.box-field:hover:not(:disabled) { background: var(--bg-active); color: var(--fg); }
+.box-field.is-scrubbing { background: var(--accent-soft); color: var(--fg); }
+.box-field:disabled { cursor: default; }
+.box-field.is-editing {
+  background: var(--bg-input); border-color: var(--accent); color: var(--fg);
+  cursor: text; width: 3rem;
+}
+.box-field.is-top { top: 0.12rem; left: 50%; transform: translateX(-50%); cursor: ns-resize; }
+.box-field.is-bottom { bottom: 0.12rem; left: 50%; transform: translateX(-50%); cursor: ns-resize; }
+.box-field.is-left { left: 0.2rem; top: 50%; transform: translateY(-50%); }
+.box-field.is-right { right: 0.2rem; top: 50%; transform: translateY(-50%); }
+/* The ring's label and its link toggle live on the top edge too, so the top
+   field steps aside rather than overlapping either. */
+.box-ring > .box-field.is-top { left: 58%; }
+
+.box-link {
+  position: absolute; top: 0.1rem; right: 0.2rem; z-index: 2;
+  display: grid; place-items: center; width: 1.05rem; height: 1.05rem;
+  background: none; border: 0; border-radius: var(--radius-xs);
+  color: var(--fg-faint);
+}
+.box-link:hover { background: var(--bg-active); color: var(--fg); }
+.box-link.is-on { color: var(--accent); }
+
+.box-editor.is-disabled { opacity: 0.6; }

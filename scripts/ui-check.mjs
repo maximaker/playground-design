@@ -254,6 +254,63 @@ const tipContent = await view.evaluate(() => {
 check('the tooltip is drawn by the system, not by the platform',
   (tipContent ?? '').length > 2, tipContent);
 
+// --- The box model ---------------------------------------------------------
+
+await view.evaluate((id) => window.__playground.store.getState().select([id]), row);
+await view.waitForTimeout(500);
+await view.evaluate((id) => window.__playground.store.getState()
+  .setNodeStyles([id], { padding: '12px 20px', margin: '' }), row);
+await view.waitForTimeout(400);
+await view.locator('.box-editor').first().scrollIntoViewIfNeeded();
+
+const shown = await view.$$eval('.box-ring.is-padding > .box-field', (els) =>
+  els.map((e) => `${[...e.classList].find((c) => c.startsWith('is-')) }:${e.textContent}`));
+check('the box shows each side of the padding shorthand where it applies',
+  shown.includes('is-top:12') && shown.includes('is-right:20')
+  && shown.includes('is-bottom:12') && shown.includes('is-left:20'), shown.join(' '));
+
+// Linked by default, because a card has one padding and not four.
+await view.locator('.box-ring.is-padding > .box-field.is-top').dblclick();
+await view.waitForTimeout(200);
+await view.keyboard.press('Meta+a');
+await view.keyboard.type('24');
+await view.keyboard.press('Enter');
+await view.waitForTimeout(400);
+const linked = await view.evaluate((id) =>
+  window.__playground.store.getState().doc.nodes[id].styles.padding, row);
+check('editing one side with the sides linked sets all four', linked === '24px', linked);
+
+// Unlinked, one side is one side — and the shorthand collapses to the shortest
+// spelling that says the same thing.
+await view.locator('.box-ring.is-padding .box-link').click();
+await view.waitForTimeout(200);
+await view.locator('.box-ring.is-padding > .box-field.is-top').dblclick();
+await view.waitForTimeout(200);
+await view.keyboard.press('Meta+a');
+await view.keyboard.type('40');
+await view.keyboard.press('Enter');
+await view.waitForTimeout(400);
+const unlinked = await view.evaluate((id) =>
+  window.__playground.store.getState().doc.nodes[id].styles.padding, row);
+check('and with them unlinked it sets only that side', unlinked === '40px 24px 24px', unlinked);
+
+// Margin had no control at all before this; it is the same diagram.
+await view.locator('.box-ring.is-margin > .box-field.is-left').dblclick();
+await view.waitForTimeout(200);
+await view.keyboard.type('16');
+await view.keyboard.press('Enter');
+await view.waitForTimeout(400);
+const margin = await view.evaluate((id) =>
+  window.__playground.store.getState().doc.nodes[id].styles.margin, row);
+check('margin is editable in the same place', margin === '16px', margin);
+
+const content = await view.locator('.box-content').first().innerText();
+check('the middle reports the measured box, not the style value',
+  /\d+ × \d+/.test(content), content);
+
+await view.evaluate((id) => window.__playground.store.getState()
+  .setNodeStyles([id], { margin: '', padding: '40px' }), row);
+
 // Zoom belongs to the canvas, and the browser owns ⌘+ on most platforms — so
 // the bare keys are the ones that have to work.
 await view.mouse.click(750, 500);
