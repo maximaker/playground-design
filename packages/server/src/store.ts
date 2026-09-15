@@ -127,6 +127,15 @@ export async function touchDocument(id: string): Promise<void> {
 
 export async function createDocument(name = 'Untitled', seed?: CanvasDocument): Promise<CanvasDocument> {
   const doc = seed ?? createEmptyDocument(name);
+  // A seed carrying an id that is already in use would replace that document
+  // instead of creating one. Importing a bundle back into the instance it came
+  // from did exactly that, and the only symptom was the original quietly
+  // taking the new name.
+  if (seed && (cache.has(seed.id) || (await (await persistence()).loadDocument(seed.id)))) {
+    throw new StoreError(
+      `A document with id ${seed.id} already exists. Give the seed a fresh id rather than overwriting it.`,
+    );
+  }
   doc.name = name;
   cache.set(doc.id, doc);
   const store = await persistence();

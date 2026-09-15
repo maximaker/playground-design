@@ -47,7 +47,7 @@ let playwrightAvailable = true;
 
 before(async () => {
   const doc = createEmptyDocument('Fidelity');
-  createDocument('Fidelity', doc);
+  await createDocument('Fidelity', doc);
   const artboard = doc.pages[0]!.artboards[0]!;
 
   const parsed = parseHtml(SOURCE);
@@ -71,7 +71,7 @@ before(async () => {
   const exported = `<style>${css}</style>${html}`;
 
   const rebuilt = createEmptyDocument('Rebuilt');
-  createDocument('Rebuilt', rebuilt);
+  await createDocument('Rebuilt', rebuilt);
   const rebuiltArtboard = rebuilt.pages[0]!.artboards[0]!;
   // Match the source artboard's own box so the comparison is like-for-like.
   applyOp(rebuilt, { t: 'styles', updates: [{ id: rebuiltArtboard, styles: live.nodes[artboard]!.styles }] });

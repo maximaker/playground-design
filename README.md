@@ -341,6 +341,17 @@ thing an HTML-native model can do that a vector tool cannot — it is not a conv
 kind of document. SSRF-guarded: private and loopback addresses are refused, redirects bounded,
 responses size-capped.
 
+**Move a whole document.** HTML export is a projection: it carries structure and styles, and drops
+what it has no place for. Tokens come out as `var(--name)` and resolve to whatever the destination
+means by that name, or to nothing; components are flattened into copies of their markup. A *bundle*
+(`GET /api/documents/:id/bundle`, `POST /api/documents/import`, or the buttons in the Export panel and
+on the home screen) is the document itself — nodes, pages, tokens, components, code components,
+breakpoints and comments, with every asset inlined and re-stored under fresh ids on arrival. An import
+always creates; it never overwrites. Connection codes, share tokens and version snapshots are
+deliberately left out: the first two are credentials for one instance, and the third is the document's
+history rather than the document. `scripts/agent/transfer.mjs <fromBase> <docId> <toBase>` does the
+round trip between two instances in one command.
+
 **Starter design systems.** Four kits — Clean, Editorial, Brutalist, Soft — each a token set plus a
 foundations sheet. Mostly so that neither you nor an agent starts from a blank canvas inventing hex
 codes.
@@ -511,6 +522,8 @@ that export emits the import rather than the markup.
   surface the way an agent does, including the error paths
 - `packages/server/src/fidelity.test.ts` — the export-fidelity gate: render an artboard, export it,
   re-import the export into a fresh document, render that, and pixel-diff the two
+- `scripts/bundle-check.mjs` — the document bundle end to end: export, import, and compare tokens,
+  components, variants and asset bytes against the original, including the trip through the home screen
 
 ## Projects
 

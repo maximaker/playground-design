@@ -17,7 +17,7 @@ import {
 } from '@playground/shared';
 import {
   applyOps, createDocument, deleteDocument, ensureLoaded, getDocument, history, listDocuments,
-  createSnapshot, listSnapshots, opsSince, restoreSnapshot, StoreError,
+  createSnapshot, listSnapshots, opsSince, restoreSnapshot, touchDocument, StoreError,
 } from './store.ts';
 import { peersOf, hasLiveTab } from './realtime.ts';
 import { createConnection, listConnections, resolveConnection, revokeConnection } from './connections.ts';
@@ -29,6 +29,10 @@ import {
 import {
   ProjectError, createProject, deleteProject, fileDocument, listProjects, renameProject,
 } from './projects.ts';
+import {
+  type BundleAsset, type DocumentBundle,
+  BUNDLE_FORMAT, newId, referencedAssets, remapAssets, stripLocalState, validateBundle,
+} from '@playground/shared';
 import { importUrl, ImportError } from './import.ts';
 import { getTemplate, templateSummaries, type Template } from './templates.ts';
 import { renderNode } from './render.ts';
@@ -396,6 +400,91 @@ api.post('/documents/:id/connections', async (c) => {
 
 api.delete('/connections/:code', async (c) =>
   (await revokeConnection(c.req.param('code'))) ? c.json({ ok: true }) : c.json({ error: 'not found' }, 404));
+
+// ---------------------------------------------------------------------------
+// Whole-document export and import
+// ---------------------------------------------------------------------------
+
+/** A filename someone can find again, from a document name that may be anything. */
+function bundleFilename(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60) || 'document';
+}
+
+/** Assets inline as base64, so a bundle is one file you can email or commit. */
+const MAX_BUNDLE_ASSET_BYTES = 40 * 1024 * 1024;
+
+api.get('/documents/:id/bundle', async (c) => {
+  const doc = await requireDocument(c.req.param('id'));
+  const includeAssets = c.req.query('assets') !== 'false';
+
+  const assets: BundleAsset[] = [];
+  if (includeAssets) {
+    let total = 0;
+    for (const id of referencedAssets(doc)) {
+      const asset = await getAsset(id);
+      if (!asset) continue;
+      total += asset.bytes.length;
+      if (total > MAX_BUNDLE_ASSET_BYTES) {
+        return c.json({
+          error: `This document's assets exceed ${MAX_BUNDLE_ASSET_BYTES / 1e6}MB. ` +
+            `Export with ?assets=false and move them separately.`,
+        }, 413);
+      }
+      assets.push({ id, mime: asset.mime, name: asset.name, data: asset.bytes.toString('base64') });
+    }
+  }
+
+  const bundle: DocumentBundle = {
+    format: BUNDLE_FORMAT,
+    exportedAt: new Date().toISOString(),
+    source: { id: doc.id, url: `${PUBLIC_URL}/d/${doc.id}` },
+    document: stripLocalState(doc),
+    assets,
+  };
+  return c.json(bundle, 200, {
+    'Content-Disposition': `attachment; filename="${bundleFilename(doc.name)}.playground.json"`,
+  });
+});
+
+api.post('/documents/import', async (c) => {
+  const body = await c.req.json<unknown>().catch(() => null);
+  const checked = validateBundle(body);
+  if (!checked.ok) {
+    return c.json({ error: 'That is not a document bundle this can read.', problems: checked.problems }, 400);
+  }
+
+  const { document, assets } = checked.bundle;
+  const name = (c.req.query('name') ?? document.name ?? 'Imported').trim() || 'Imported';
+
+  // Assets are stored first: their ids are unique to this instance, so the
+  // document has to be pointed at the new copies before it is saved.
+  const remap = new Map<string, string>();
+  for (const asset of assets ?? []) {
+    try {
+      const stored = await storeAsset(null, asset.mime, asset.name ?? 'asset', Buffer.from(asset.data, 'base64'));
+      remap.set(asset.id, stored);
+    } catch (err) {
+      return c.json({ error: `Asset ${asset.id} was rejected: ${err instanceof Error ? err.message : String(err)}` }, 400);
+    }
+  }
+
+  // A fresh id, always: the bundle carries the id it had where it was made, and
+  // reusing it replaces that document when the two happen to be on the same
+  // instance. An import creates; it never overwrites.
+  const doc = await createDocument(name, { ...structuredClone(document), id: newId('doc'), name });
+  remapAssets(doc, remap);
+  if (c.req.query('projectId')) {
+    try { await fileDocument(doc.id, c.req.query('projectId')!); } catch { /* an unknown project just leaves it unfiled */ }
+  }
+  await touchDocument(doc.id);
+
+  return c.json({
+    document: getDocument(doc.id),
+    url: `${PUBLIC_URL}/d/${doc.id}`,
+    assets: remap.size,
+    notes: checked.problems ?? [],
+  }, 201);
+});
 
 // ---------------------------------------------------------------------------
 // Projects

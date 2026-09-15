@@ -37,6 +37,7 @@ export function Home({ onOpen, appearance, onAppearance }: {
   const [templates, setTemplates] = useState<TemplateSummary[]>([]);
   const [filter, setFilter] = useState<Filter>(null);
   const [creating, setCreating] = useState(false);
+  const [importing, setImporting] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState<Filter | undefined>(undefined);
@@ -111,6 +112,31 @@ export function Home({ onOpen, appearance, onAppearance }: {
       onOpen(document.id);
     } finally {
       setCreating(false);
+    }
+  };
+
+  /** Recreates a document from a bundle file, on this instance. */
+  const importBundle = async (file: File) => {
+    setImporting(true);
+    try {
+      const text = await file.text();
+      const query = typeof filter === 'string' && filter !== 'unfiled' ? `?projectId=${filter}` : '';
+      const res = await fetch(`/api/documents/import${query}`, {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: text,
+      });
+      const body = (await res.json()) as { document?: { id: string }; error?: string; problems?: string[]; notes?: string[] };
+      if (!res.ok) {
+        // The validator says which reference is dangling; passing that on is
+        // the difference between a fixable file and a mysterious one.
+        setNote([body.error, ...(body.problems ?? [])].filter(Boolean).join(' — '));
+        return;
+      }
+      for (const n of body.notes ?? []) setNote(n.replace(/^NOTE /, ''));
+      if (body.document) onOpen(body.document.id);
+    } catch (err) {
+      setNote(err instanceof Error ? `Could not read that file: ${err.message}` : 'Could not read that file');
+    } finally {
+      setImporting(false);
     }
   };
 
@@ -201,6 +227,28 @@ export function Home({ onOpen, appearance, onAppearance }: {
           <button className="button primary" onClick={() => void create()} disabled={creating}>
             <Icon name="plus" size={14} /> Blank document
           </button>
+
+          {/*
+            * A label rather than a button: a file input cannot be opened from
+            * script without a user gesture on it, and hiding the input behind a
+            * label is the only way to have both a real picker and a styled
+            * control.
+            */}
+          <label className={`button${importing ? ' is-busy' : ''}`}>
+            <Icon name="upload" size={14} />
+            {importing ? 'Importing…' : 'Import a bundle'}
+            <input
+              type="file"
+              accept="application/json,.json"
+              style={{ display: 'none' }}
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                // Reset first: picking the same file twice must fire again.
+                e.target.value = '';
+                if (file) void importBundle(file);
+              }}
+            />
+          </label>
           <button
             className="icon-button"
             title="Appearance"

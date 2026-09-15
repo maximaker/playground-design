@@ -14,3 +14,4 @@ export * from './code-components.ts';
 export * from './sanitize.ts';
 export * from './numeric.ts';
 export * from './align.ts';
+export * from './bundle.ts';

@@ -131,6 +131,27 @@ export function Export({ onClose }: { onClose: () => void }) {
               </p>
             </>
           )}
+
+          {/*
+            * Everything above is a projection into code, which is what you want
+            * for building the thing. Moving the document itself is a different
+            * job: code drops the tokens, the components and the assets, because
+            * there is nowhere in HTML to put them.
+            */}
+          <div className="export-whole">
+            <h3>Move the whole document</h3>
+            <p className="panel-hint">
+              One file with the nodes, tokens, components, breakpoints, comments and every asset —
+              enough to recreate this document on another Playground, or to keep as a backup.
+              Connection codes and share links are never included.
+            </p>
+            <div className="export-actions">
+              <a className="button" href={`/api/documents/${docId}/bundle`} download>
+                <Icon name="download" size={14} /> Download bundle
+              </a>
+              <span className="dim">Import it from the home screen.</span>
+            </div>
+          </div>
         </div>
       </div>
     </div>
