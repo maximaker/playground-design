@@ -1,0 +1,49 @@
+# Self-hosted Playground.
+#
+# Works as-is with `docker compose up --build`, and is the file to point Coolify
+# at if you would rather review the deployment as code than click it together.
+
+services:
+  playground:
+    build:
+      context: .
+      args:
+        # Roughly 400MB of Chromium, which is what lets agents screenshot their
+        # own work. Set to "false" for a lean image; get_screenshot then says it
+        # is unavailable rather than failing obscurely.
+        WITH_BROWSER: "true"
+    restart: unless-stopped
+
+    environment:
+      # The one setting that must be right. Connection codes and share links are
+      # built from it, so if it is wrong or missing, every link an agent is
+      # handed will point at localhost and quietly fail on someone else's
+      # machine. No trailing slash.
+      PLAYGROUND_PUBLIC_URL: ${PLAYGROUND_PUBLIC_URL:?set this to the public https:// URL}
+      PORT: "4000"
+      PLAYGROUND_DB: /data/playground.db
+      NODE_ENV: production
+
+    volumes:
+      # Documents, version snapshots and every uploaded asset live in this one
+      # SQLite file. Back up the volume and you have backed up everything.
+      - playground-data:/data
+
+    # Coolify assigns the domain and proxies to the container itself, so this
+    # publish is really for running the same file locally. Harmless either way.
+    ports:
+      - "4000:4000"
+
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:4000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+
+volumes:
+  playground-data:

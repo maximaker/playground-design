@@ -1,0 +1,19 @@
+# Everything the image builds for itself, plus everything it must never carry.
+node_modules
+**/node_modules
+packages/web/dist
+api
+.git
+.github
+.vercel
+
+# The local database and anything uploaded into it. Copying a development
+# database into an image would ship someone else's documents to a server.
+packages/server/data
+*.db
+*.db-wal
+*.db-shm
+
+scripts/agent/session*.json
+.DS_Store
+*.log

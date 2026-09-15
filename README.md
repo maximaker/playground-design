@@ -36,6 +36,46 @@ npm i -D playwright --workspace=@canvas/server && npx playwright install chromiu
 Without it, screenshots fall back to rasterizing inside a connected browser tab, which is less
 faithful (text can re-wrap) and needs someone to have the document open.
 
+## Self-host it
+
+A box with a disk is the better home for this, not a fallback from the serverless deployment: it gets
+SQLite instead of metered blob storage, WebSockets — so presence and live cursors work — and a real
+browser the server can drive, so agents can screenshot their own work. None of those are possible on
+a serverless host.
+
+```bash
+docker compose up --build        # PLAYGROUND_PUBLIC_URL must be set
+```
+
+### With Coolify
+
+1. **New Resource → Application → Public or Private Repository**, pointing at this repo.
+2. Build pack: **Dockerfile** (or **Docker Compose** if you would rather review `docker-compose.yml`).
+3. **Port**: `4000`.
+4. **Persistent storage**: mount a volume at `/data`. Everything durable — documents, version
+   snapshots, and every uploaded asset — is in one SQLite file there, so that volume is the whole
+   backup.
+5. **Environment variables**:
+
+   | | |
+   |---|---|
+   | `PLAYGROUND_PUBLIC_URL` | `https://your.domain` — **required**, no trailing slash |
+   | `PLAYGROUND_DB` | `/data/playground.db` |
+   | `PORT` | `4000` |
+
+6. Set the domain, and leave Coolify's proxy to terminate TLS.
+
+`PLAYGROUND_PUBLIC_URL` is the one that bites. Connection codes and share links are built from it, so
+if it is missing, every link you hand an agent points at `localhost` and fails silently on their
+machine. Set it before you generate any codes.
+
+Websockets need no special configuration — Coolify's proxy forwards the upgrade — but if presence and
+live cursors do not appear, that is the first thing to check: the client falls back to polling without
+complaining, so a blocked upgrade looks like a missing feature rather than an error.
+
+Build with `--build-arg WITH_BROWSER=false` for an image roughly 400MB smaller. `get_screenshot` then
+reports that it is unavailable instead of failing obscurely, and everything else works.
+
 ## Connect an agent
 
 Open a document, click **Connect agent**, generate a code, and run the line it gives you:
