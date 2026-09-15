@@ -7,8 +7,8 @@ import { fileURLToPath } from 'node:url';
 import type { CanvasDocument } from '@playground/shared';
 import type {
   DocSummary, MemberRole, Persistence, ShareRole, StoredAsset, StoredConnection, StoredMembership,
-  StoredInvite, StoredProject, StoredSession, StoredShare, StoredSnapshot, StoredThumbnail,
-  StoredUser,
+  StoredInvite, StoredProject, StoredPublication, StoredSession, StoredShare, StoredSnapshot,
+  StoredThumbnail, StoredUser,
 } from './persistence.ts';
 
 // Anchored to the package, not the working directory: resolving against cwd
@@ -124,6 +124,13 @@ export class SqlitePersistence implements Persistence {
         revoked INTEGER NOT NULL DEFAULT 0
       );
       CREATE INDEX IF NOT EXISTS invites_doc ON invites(doc_id);
+
+      CREATE TABLE IF NOT EXISTS publications (
+        slug TEXT PRIMARY KEY,
+        doc_id TEXT NOT NULL UNIQUE REFERENCES documents(id) ON DELETE CASCADE,
+        artboard_id TEXT, title TEXT NOT NULL, description TEXT,
+        published_by TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+      );
 
       CREATE TABLE IF NOT EXISTS thumbnails (
         doc_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
@@ -344,6 +351,27 @@ export class SqlitePersistence implements Persistence {
     this.db.prepare('DELETE FROM memberships WHERE doc_id = ? AND user_id = ?').run(docId, userId);
   }
 
+  async savePublication(p: StoredPublication): Promise<void> {
+    this.db.prepare(`
+      INSERT INTO publications (slug, doc_id, artboard_id, title, description, published_by, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(slug) DO UPDATE SET artboard_id = excluded.artboard_id, title = excluded.title,
+        description = excluded.description, updated_at = excluded.updated_at
+    `).run(p.slug, p.docId, p.artboardId, p.title, p.description, p.publishedBy, p.createdAt, p.updatedAt);
+  }
+
+  async loadPublication(slug: string): Promise<StoredPublication | null> {
+    return publicationRow(this.db.prepare('SELECT * FROM publications WHERE slug = ?').get(slug));
+  }
+
+  async loadPublicationFor(docId: string): Promise<StoredPublication | null> {
+    return publicationRow(this.db.prepare('SELECT * FROM publications WHERE doc_id = ?').get(docId));
+  }
+
+  async deletePublication(slug: string): Promise<void> {
+    this.db.prepare('DELETE FROM publications WHERE slug = ?').run(slug);
+  }
+
   async saveThumbnail(t: StoredThumbnail): Promise<void> {
     this.db.prepare(`
       INSERT INTO thumbnails (doc_id, key, stamp, mime, bytes, created_at) VALUES (?, ?, ?, ?, ?, ?)
@@ -415,6 +443,19 @@ function userRow(r: unknown): StoredUser | null {
   return {
     id: row.id, email: row.email, name: row.name, passwordHash: row.password_hash,
     createdAt: row.created_at, emailVerifiedAt: row.email_verified_at, color: row.color,
+  };
+}
+
+function publicationRow(r: unknown): StoredPublication | null {
+  if (!r) return null;
+  const row = r as {
+    slug: string; doc_id: string; artboard_id: string | null; title: string;
+    description: string | null; published_by: string; created_at: number; updated_at: number;
+  };
+  return {
+    slug: row.slug, docId: row.doc_id, artboardId: row.artboard_id, title: row.title,
+    description: row.description, publishedBy: row.published_by,
+    createdAt: row.created_at, updatedAt: row.updated_at,
   };
 }
 

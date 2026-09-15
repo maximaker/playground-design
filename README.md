@@ -171,6 +171,7 @@ need a real layout engine reach into a connected tab, and they say so plainly wh
 | `write_html` | The main creation tool. HTML in, editable layers out |
 | `create_artboard` | New screen, placed clear of existing work, on the current page |
 | `create_page` / `set_current_page` / `rename_page` / `delete_page` | Pages. Each connection has its own current page |
+| `publish_page` / `unpublish_page` / `get_publication` | Put an artboard on the public web, or take it down |
 | `componentise` | Registers a shape and swaps every identical copy for an instance, text and links carried as overrides. Refuses if any artboard would render differently |
 | `update_styles` | Batch CSS, with `:hover` / `@media` variants via `selector` |
 | `set_text_content` | Batch text |
@@ -353,6 +354,13 @@ hole in the grid. Search, sort (last edited, name, size) and a grid-or-list view
 person. Each document carries a tint derived from its id — the same colour every time, so a document
 becomes findable by shape before you have read a title, and never the only signal since the name is
 beside it. A role badge appears only when a document is not yours outright.
+
+**Publishing.** Any artboard can go on the public web at `/p/<slug>`: no editor, no account, no share
+token. Because the documents here are already HTML and CSS, this is not an export — the page is
+rendered from the document on every request, so a link keeps up with the work and there is nothing to
+re-publish after an edit. The artboard's fixed frame is released to fill the viewport, at which point
+the media queries written against it resolve against the window instead, and a 1440px landing page
+becomes a responsive site. Agents can do it too: `publish_page`, `unpublish_page`, `get_publication`.
 
 **Inviting people.** A document's Share panel has two halves: the people who have access, with their
 roles, and the links anyone can hold. There is no mail service, so an invitation is a *link* the
@@ -599,6 +607,10 @@ that export emits the import rather than the markup.
 - `scripts/dashboard-check.mjs` — thumbnails (really an image, cached, 304 on revalidate) and the
   column grid: it computes where the twelve lines are and asserts every band starts on one, at three
   widths
+- `scripts/publish-check.mjs` — what a stranger gets: the page without an account, no editor chrome,
+  the document's own media queries stacking it at 420px, and a real 404 once the link is withdrawn
+- `scripts/agent-pack-check.mjs` — pages over MCP, including the bug where every page-shaped tool
+  read `pages[0]`, and componentising with its render-for-render gate
 - `scripts/members-check.mjs` — the whole invitation path: an owner inviting, a stranger following the
   link, signing up from it, and landing in the document, plus the refusals (wrong account, withdrawn,
   an editor trying to invite)

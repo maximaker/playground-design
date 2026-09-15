@@ -24,6 +24,8 @@ import {
   type Comment, commentsOf, newId as newIdOf,
 } from '@playground/shared';
 import { applyOps, getDocument, StoreError, createSnapshot } from './store.ts';
+import { persistence } from './persistence.ts';
+import { pageArtboard, slugify } from './publish.ts';
 import { callTab, notifyTabs, selectionOf, hasLiveTab, NoTabError } from './realtime.ts';
 import { renderNode } from './render.ts';
 import { storeAsset } from './assets.ts';
@@ -1795,6 +1797,85 @@ function registerComponentTools(server: McpServer, ctx: McpContext): void {
       definitionRoot: root.id,
       instanceId: instance.id,
       next: 'Insert more with insert_instance. Mark a layer in the definition with data-slot to let instances supply their own content.',
+    });
+  }));
+
+  // --- Publishing -------------------------------------------------------------
+
+  server.registerTool('publish_page', {
+    title: 'Publish an artboard as a web page',
+    description:
+      'Puts one artboard on the public web at /p/<slug> — no editor, no account, no share token. ' +
+      'The page re-renders from the document, so edits appear without republishing. Call it again ' +
+      'to change which artboard or what address.',
+    inputSchema: {
+      artboardId: z.string().optional().describe('Defaults to the first artboard on the first page.'),
+      slug: z.string().max(60).optional().describe('The address. Defaults to the document name.'),
+      description: z.string().max(280).optional().describe('For link previews and search results.'),
+    },
+    annotations: { destructiveHint: false },
+  }, async ({ artboardId, slug, description }) => guard(async () => {
+    const doc = requireDoc(ctx);
+    if (artboardId) {
+      const n = node(doc, artboardId);
+      if (n.type !== 'artboard') return fail(`${artboardId} is a ${n.type}; publish an artboard.`);
+    }
+    const chosen = pageArtboard(doc, artboardId ?? null);
+    if (!chosen) return fail('This document has no artboards yet.');
+
+    const store = await persistence();
+    const existing = await store.loadPublicationFor(doc.id);
+    const wanted = slugify(slug || existing?.slug || doc.name);
+    const clash = await store.loadPublication(wanted);
+    if (clash && clash.docId !== doc.id) {
+      return fail(`The address /p/${wanted} is taken. Pass a different slug.`);
+    }
+    if (existing && existing.slug !== wanted) await store.deletePublication(existing.slug);
+
+    const publication = {
+      slug: wanted,
+      docId: doc.id,
+      artboardId: artboardId ?? existing?.artboardId ?? null,
+      title: doc.name,
+      description: description ?? existing?.description ?? null,
+      publishedBy: `agent:${ctx.connection.code}`,
+      createdAt: existing?.createdAt ?? Date.now(),
+      updatedAt: Date.now(),
+    };
+    await store.savePublication(publication);
+    return json({
+      url: `${ctx.baseUrl}/p/${publication.slug}`,
+      artboard: doc.nodes[chosen]?.name,
+      live: true,
+      next: 'The page follows the document. unpublish_page takes it down.',
+    });
+  }));
+
+  server.registerTool('unpublish_page', {
+    title: 'Take a published page down',
+    description: 'Removes the public page. The address stops working immediately, for everyone.',
+  }, async () => guard(async () => {
+    const doc = requireDoc(ctx);
+    const store = await persistence();
+    const existing = await store.loadPublicationFor(doc.id);
+    if (!existing) return json({ published: false, note: 'This document was not published.' });
+    await store.deletePublication(existing.slug);
+    return json({ published: false, wasAt: `${ctx.baseUrl}/p/${existing.slug}` });
+  }));
+
+  server.registerTool('get_publication', {
+    title: 'Is this document published?',
+    description: 'The public address of this document, if it has one, and which artboard it shows.',
+    annotations: { readOnlyHint: true },
+  }, async () => guard(async () => {
+    const doc = requireDoc(ctx);
+    const pub = await (await persistence()).loadPublicationFor(doc.id);
+    if (!pub) return json({ published: false });
+    return json({
+      published: true,
+      url: `${ctx.baseUrl}/p/${pub.slug}`,
+      artboard: doc.nodes[pageArtboard(doc, pub.artboardId) ?? '']?.name,
+      description: pub.description,
     });
   }));
 

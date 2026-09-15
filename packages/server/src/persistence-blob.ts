@@ -24,7 +24,8 @@ import { createHash } from 'node:crypto';
 import type { CanvasDocument } from '@playground/shared';
 import type {
   DocSummary, Persistence, StoredAsset, StoredConnection, StoredMembership, StoredProject,
-  StoredInvite, StoredSession, StoredShare, StoredSnapshot, StoredThumbnail, StoredUser,
+  StoredInvite, StoredPublication, StoredSession, StoredShare, StoredSnapshot, StoredThumbnail,
+  StoredUser,
 } from './persistence.ts';
 
 type BlobModule = typeof import('@vercel/blob');
@@ -243,6 +244,31 @@ export class BlobPersistence implements Persistence {
     for (const { path, session } of loaded) {
       if (session?.userId !== userId) continue;
       try { await del(path, { token: this.token }); } catch { /* already gone */ }
+    }
+  }
+
+  async savePublication(p: StoredPublication): Promise<void> {
+    this.invalidate('publications');
+    await this.putJson(`publications/${p.slug}.json`, p);
+    // Indexed by document as well: a document knows its own link without a scan.
+    await this.putJson(`publications-by-doc/${p.docId}.json`, { slug: p.slug });
+  }
+
+  async loadPublication(slug: string) { return this.getJson<StoredPublication>(`publications/${slug}.json`); }
+
+  async loadPublicationFor(docId: string): Promise<StoredPublication | null> {
+    const ref = await this.getJson<{ slug: string }>(`publications-by-doc/${docId}.json`);
+    return ref ? this.loadPublication(ref.slug) : null;
+  }
+
+  async deletePublication(slug: string): Promise<void> {
+    const { del } = await this.blob();
+    const existing = await this.loadPublication(slug);
+    this.invalidate('publications');
+    try { await del(`publications/${slug}.json`, { token: this.token }); } catch { /* already gone */ }
+    if (existing) {
+      try { await del(`publications-by-doc/${existing.docId}.json`, { token: this.token }); }
+      catch { /* already gone */ }
     }
   }
 

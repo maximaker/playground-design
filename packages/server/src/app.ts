@@ -36,6 +36,7 @@ import {
   BUNDLE_FORMAT, newId, referencedAssets, remapAssets, stripLocalState, validateBundle,
 } from '@playground/shared';
 import { importUrl, ImportError } from './import.ts';
+import { freeSlug, pageArtboard, publishedHtml, slugify } from './publish.ts';
 import { getTemplate, templateSummaries, type Template } from './templates.ts';
 import { RENDERER_VERSION, renderNode, renderThumbnail } from './render.ts';
 import { persistence, type MemberRole } from './persistence.ts';
@@ -133,6 +134,8 @@ const OWNER_ONLY: { method: string; pattern: RegExp }[] = [
   { method: 'DELETE', pattern: /^\/documents\/[^/]+\/invites\/[^/]+$/ },
   { method: 'DELETE', pattern: /^\/documents\/[^/]+\/members\/[^/]+$/ },
   { method: 'POST', pattern: /^\/documents\/[^/]+\/shares$/ },
+  { method: 'POST', pattern: /^\/documents\/[^/]+\/publish$/ },
+  { method: 'DELETE', pattern: /^\/documents\/[^/]+\/publish$/ },
   { method: 'DELETE', pattern: /^\/shares\/[^/]+$/ },
 ];
 
@@ -767,6 +770,57 @@ api.get('/documents/:id/components/:componentId/preview', async (c) => {
   return pictureResponse(c, rendered.data, rendered.mime, stamp);
 });
 
+// --- Publishing ---------------------------------------------------------------
+
+api.get('/documents/:id/publish', async (c) => {
+  const pub = await (await persistence()).loadPublicationFor(c.req.param('id'));
+  return c.json({ publication: pub ? { ...pub, url: `${PUBLIC_URL}/p/${pub.slug}` } : null });
+});
+
+api.post('/documents/:id/publish', async (c) => {
+  const doc = await requireDocument(c.req.param('id'));
+  const body = await c.req.json<{ slug?: string; artboardId?: string; description?: string }>()
+    .catch(() => ({} as { slug?: string; artboardId?: string; description?: string }));
+
+  if (body.artboardId && !doc.nodes[body.artboardId]) {
+    return c.json({ error: `No artboard ${body.artboardId} in this document.` }, 400);
+  }
+  if (!pageArtboard(doc, body.artboardId ?? null)) {
+    return c.json({ error: 'This document has no artboards to publish yet.' }, 400);
+  }
+
+  const store = await persistence();
+  const existing = await store.loadPublicationFor(doc.id);
+  // Keep the slug when republishing unless a new one was asked for: the link is
+  // the thing people already have.
+  const slug = body.slug || existing?.slug || await freeSlug(slugify(doc.name), doc.id);
+  if (body.slug && body.slug !== existing?.slug) {
+    const clash = await store.loadPublication(slugify(body.slug));
+    if (clash && clash.docId !== doc.id) return c.json({ error: 'That address is taken.' }, 409);
+  }
+  if (existing && existing.slug !== slugify(slug)) await store.deletePublication(existing.slug);
+
+  const publication = {
+    slug: slugify(slug),
+    docId: doc.id,
+    artboardId: body.artboardId ?? existing?.artboardId ?? null,
+    title: doc.name,
+    description: body.description ?? existing?.description ?? null,
+    publishedBy: c.get('user')!.id,
+    createdAt: existing?.createdAt ?? Date.now(),
+    updatedAt: Date.now(),
+  };
+  await store.savePublication(publication);
+  return c.json({ publication: { ...publication, url: `${PUBLIC_URL}/p/${publication.slug}` } }, 201);
+});
+
+api.delete('/documents/:id/publish', async (c) => {
+  const store = await persistence();
+  const existing = await store.loadPublicationFor(c.req.param('id'));
+  if (existing) await store.deletePublication(existing.slug);
+  return c.json({ ok: true });
+});
+
 api.get('/documents/:id/bundle', async (c) => {
   const doc = await requireDocument(c.req.param('id'));
   const includeAssets = c.req.query('assets') !== 'false';
@@ -981,6 +1035,36 @@ api.post('/documents/:id/assets', async (c) => {
 
 app.route('/api', api);
 
+/**
+ * A published page.
+ *
+ * No account, no editor, no share token: a plain web page at a plain URL,
+ * rendered from the document as it is right now.
+ */
+app.get('/p/:slug', async (c) => {
+  // A real 404, not `c.notFound()`: this route sits in front of the SPA
+  // fallback, so handing the request on served the editor shell with a 200 —
+  // and an unpublished link looked like a working page that had lost its
+  // content.
+  const gone = () => c.html(NOT_PUBLISHED, 404);
+
+  const store = await persistence();
+  const pub = await store.loadPublication(c.req.param('slug'));
+  if (!pub) return gone();
+
+  await ensureLoaded(pub.docId);
+  const doc = getDocument(pub.docId);
+  if (!doc) return gone();
+  const artboard = pageArtboard(doc, pub.artboardId);
+  if (!artboard) return gone();
+
+  return c.html(publishedHtml(doc, artboard, pub, `${PUBLIC_URL}/p/${pub.slug}`), 200, {
+    // Short, not zero: a published link can be shared widely, and the point of
+    // publishing from a design tool is that edits show up.
+    'cache-control': 'public, max-age=30, stale-while-revalidate=300',
+  });
+});
+
 app.get('/assets/:id', async (c) => {
   const asset = await getAsset(c.req.param('id'));
   if (!asset) return c.json({ error: 'not found' }, 404);
@@ -1103,6 +1187,21 @@ function pictureResponse(c: Context<{ Variables: Vars }>, bytes: Buffer, mime: s
     etag,
   });
 }
+
+/** What an unpublished or withdrawn link shows. Deliberately plain. */
+const NOT_PUBLISHED = `<!doctype html>
+<html lang="en"><head><meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="robots" content="noindex" />
+<title>Not published</title>
+<style>
+  body { margin: 0; min-height: 100vh; display: grid; place-items: center;
+         font: 16px/1.6 system-ui, sans-serif; color: #444; background: #fafafa; }
+  div { max-width: 26rem; padding: 2rem; text-align: center; }
+  h1 { font-size: 1.2rem; margin: 0 0 .5rem; color: #111; }
+</style></head>
+<body><div><h1>This page is not published</h1>
+<p>The link may have been withdrawn, or it may never have existed.</p></div></body></html>`;
 
 async function requireDocument(id: string): Promise<CanvasDocument> {
   await ensureLoaded(id);

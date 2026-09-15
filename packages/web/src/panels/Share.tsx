@@ -15,6 +15,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useCanvas } from '../state/store.ts';
 import { Icon } from '../ui/Icon.tsx';
 import { People } from './People.tsx';
+import { Publish } from './Publish.tsx';
 
 interface ShareRow {
   token: string;
@@ -102,6 +103,9 @@ export function Share({ onClose }: { onClose: () => void }) {
               <People docId={docId} myRole={myRole} />
             </>
           )}
+
+          <h3 className="share-heading">Publish to the web</h3>
+          <Publish canPublish={myRole === 'owner'} />
 
           <h3 className="share-heading">Anyone with a link</h3>
           <p className="modal-lede">

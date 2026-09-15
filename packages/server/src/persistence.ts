@@ -146,6 +146,26 @@ export interface StoredThumbnail {
   createdAt: number;
 }
 
+/**
+ * A document published as a plain web page.
+ *
+ * The page is rendered from the document on every request rather than frozen at
+ * publish time: this is a design tool, and the whole point of publishing from
+ * it is that the link keeps up with the work. Unpublishing is a delete, so a
+ * link that is gone is gone.
+ */
+export interface StoredPublication {
+  slug: string;
+  docId: string;
+  /** Which artboard is the page. Null means "pick the busiest one each time". */
+  artboardId: string | null;
+  title: string;
+  description: string | null;
+  publishedBy: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface StoredSnapshot {
   id: string;
   docId: string;
@@ -199,6 +219,11 @@ export interface Persistence {
   loadMembership(docId: string, userId: string): Promise<StoredMembership | null>;
   loadMemberships(opts: { docId?: string; userId?: string }): Promise<StoredMembership[]>;
   deleteMembership(docId: string, userId: string): Promise<void>;
+
+  savePublication(p: StoredPublication): Promise<void>;
+  loadPublication(slug: string): Promise<StoredPublication | null>;
+  loadPublicationFor(docId: string): Promise<StoredPublication | null>;
+  deletePublication(slug: string): Promise<void>;
 
   saveThumbnail(thumb: StoredThumbnail): Promise<void>;
   loadThumbnail(docId: string, key: string): Promise<StoredThumbnail | null>;
