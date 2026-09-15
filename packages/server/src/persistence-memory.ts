@@ -3,7 +3,7 @@
 import type { CanvasDocument } from '@playground/shared';
 import type {
   DocSummary, Persistence, StoredAsset, StoredConnection, StoredMembership, StoredProject,
-  StoredSession, StoredShare, StoredSnapshot, StoredThumbnail, StoredUser,
+  StoredInvite, StoredSession, StoredShare, StoredSnapshot, StoredThumbnail, StoredUser,
 } from './persistence.ts';
 
 export class MemoryPersistence implements Persistence {
@@ -18,6 +18,7 @@ export class MemoryPersistence implements Persistence {
   private snapshots = new Map<string, StoredSnapshot>();
   private users = new Map<string, StoredUser>();
   private thumbnails = new Map<string, StoredThumbnail>();
+  private invites = new Map<string, StoredInvite>();
   private sessions = new Map<string, StoredSession>();
   private memberships = new Map<string, StoredMembership>();
 
@@ -62,6 +63,13 @@ export class MemoryPersistence implements Persistence {
   async deleteSession(token: string) { this.sessions.delete(token); }
   async deleteSessionsForUser(userId: string) {
     for (const [token, s] of this.sessions) if (s.userId === userId) this.sessions.delete(token);
+  }
+
+  async saveInvite(i: StoredInvite) { this.invites.set(i.token, i); }
+  async loadInvite(token: string) { return this.invites.get(token) ?? null; }
+  async loadInvites(docId: string) {
+    return [...this.invites.values()].filter((i) => i.docId === docId)
+      .sort((a, b) => b.createdAt - a.createdAt);
   }
 
   async saveMembership(m: StoredMembership) { this.memberships.set(`${m.docId}:${m.userId}`, m); }

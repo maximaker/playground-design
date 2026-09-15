@@ -25,6 +25,7 @@ import { Icon, type IconName } from './ui/Icon.tsx';
 import { Logo } from './ui/Logo.tsx';
 import { Settings } from './ui/Settings.tsx';
 import { Landing } from './Landing.tsx';
+import { Join } from './Join.tsx';
 import { AccountMenu } from './ui/AccountMenu.tsx';
 import { useSession } from './state/session.ts';
 import { OverflowMenu } from './ui/OverflowMenu.tsx';
@@ -50,6 +51,7 @@ const LEFT_TABS: { id: LeftTab; icon: IconName; label: string; hint: string }[] 
 
 export function App() {
   const [source, setSource] = useState<Source | null>(() => sourceFromLocation());
+  const [joining, setJoining] = useState<string | null>(() => joinFromLocation());
   const session = useSession();
   const [appearance, setAppearance] = useState<Appearance>(loadAppearance);
 
@@ -65,7 +67,7 @@ export function App() {
   }, [appearance]);
 
   useEffect(() => {
-    const onPop = () => setSource(sourceFromLocation());
+    const onPop = () => { setSource(sourceFromLocation()); setJoining(joinFromLocation()); };
     window.addEventListener('popstate', onPop);
     return () => window.removeEventListener('popstate', onPop);
   }, []);
@@ -74,6 +76,25 @@ export function App() {
   // credential, and sending a reviewer to a sign-in form would defeat the link.
   if (session.loading && source?.kind !== 'share') {
     return <div className="boot" aria-busy>Loading…</div>;
+  }
+
+  // An invitation needs an account, but it explains itself first — and carries
+  // the person back to the invitation once they have signed in.
+  if (joining) {
+    return (
+      <Join
+        token={joining}
+        user={session.user}
+        hasAccounts={session.hasAccounts}
+        signupCodeRequired={session.signupCodeRequired}
+        onSignedIn={() => { void session.refresh(); }}
+        onOpen={(id) => {
+          history.pushState({}, '', `/d/${id}`);
+          setJoining(null);
+          setSource({ kind: 'doc', id });
+        }}
+      />
+    );
   }
 
   if (!session.user && source?.kind !== 'share') {
@@ -126,6 +147,17 @@ function sourceFromLocation(): Source | null {
   const share = /^\/s\/([\w-]+)/.exec(location.pathname);
   if (share) return { kind: 'share', token: share[1]! };
   return null;
+}
+
+/**
+ * The invitation being followed, if any.
+ *
+ * Kept apart from `Source` because an invitation is not a document the editor
+ * can open — it is a thing you accept, which then produces one. Tokens are
+ * base64url, so they carry `-` and `_` as well as word characters.
+ */
+function joinFromLocation(): string | null {
+  return /^\/join\/([\w-]+)/.exec(location.pathname)?.[1] ?? null;
 }
 
 function Editor({ source, onHome, appearance, onAppearance, session }: {

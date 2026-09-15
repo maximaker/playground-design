@@ -1,17 +1,20 @@
 /**
- * Share links.
+ * Who can see this document: the people, and the links.
  *
  * The document URL is an edit credential — anyone holding it can change the
  * file — so showing work to someone has been all-or-nothing. A share link is a
  * separate, revocable token that only opens a read-only view.
  *
  * The panel is blunt about the difference, because getting it wrong is the kind
- * of mistake you find out about afterwards.
+ * of mistake you find out about afterwards. Named people sit above the links,
+ * because that is the answer to "who can see this" most of the time and a link
+ * is the exception.
  */
 
 import { useCallback, useEffect, useState } from 'react';
 import { useCanvas } from '../state/store.ts';
 import { Icon } from '../ui/Icon.tsx';
+import { People } from './People.tsx';
 
 interface ShareRow {
   token: string;
@@ -30,6 +33,7 @@ export function Share({ onClose }: { onClose: () => void }) {
   const [label, setLabel] = useState('');
   const [busy, setBusy] = useState(false);
   const [justMade, setJustMade] = useState<string | null>(null);
+  const [myRole, setMyRole] = useState<'owner' | 'editor' | 'viewer' | null>(null);
 
   const refresh = useCallback(async () => {
     if (!docId) return;
@@ -40,6 +44,14 @@ export function Share({ onClose }: { onClose: () => void }) {
   }, [docId]);
 
   useEffect(() => { void refresh(); }, [refresh]);
+
+  useEffect(() => {
+    if (!docId) return;
+    void fetch(`/api/documents/${docId}/members`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((body: { role?: 'owner' | 'editor' | 'viewer' } | null) => setMyRole(body?.role ?? null))
+      .catch(() => setMyRole(null));
+  }, [docId]);
 
   const create = async () => {
     if (!docId) return;
@@ -79,11 +91,19 @@ export function Share({ onClose }: { onClose: () => void }) {
     <div className="modal-backdrop" onPointerDown={onClose}>
       <div className="modal" onPointerDown={(e) => e.stopPropagation()}>
         <header className="modal-header">
-          <h2>Share a link</h2>
+          <h2>Share</h2>
           <button className="icon-button" onClick={onClose} aria-label="Close"><Icon name="close" size={15} /></button>
         </header>
 
         <div className="modal-body">
+          {docId && (
+            <>
+              <h3 className="share-heading">People</h3>
+              <People docId={docId} myRole={myRole} />
+            </>
+          )}
+
+          <h3 className="share-heading">Anyone with a link</h3>
           <p className="modal-lede">
             A share link opens this document <strong>read-only</strong>, live — whoever holds it sees
             changes as they happen but cannot make any. It does not reveal the document’s own URL,
@@ -138,8 +158,9 @@ export function Share({ onClose }: { onClose: () => void }) {
           )}
 
           <p className="panel-hint">
-            Anyone with a link can view. There are no accounts yet, so revoking is the only way to
-            take access back — and it takes effect immediately, for everyone holding that link.
+            A link needs no account, so revoking is the only way to take it back — and it takes
+            effect immediately, for everyone holding that link. To give someone editing rights,
+            invite them by name above instead.
           </p>
         </div>
       </div>

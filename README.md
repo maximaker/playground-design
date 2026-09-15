@@ -350,6 +350,13 @@ person. Each document carries a tint derived from its id — the same colour eve
 becomes findable by shape before you have read a title, and never the only signal since the name is
 beside it. A role badge appears only when a document is not yours outright.
 
+**Inviting people.** A document's Share panel has two halves: the people who have access, with their
+roles, and the links anyone can hold. There is no mail service, so an invitation is a *link* the
+inviter sends themselves — and an address that already has an account skips the link and is added on
+the spot, with the panel saying which of the two happened. Invitations expire in two weeks, are single
+use, and when they name an address they work for that account and nobody else. Following one signed
+out shows what you were invited to above the sign-in form, then carries you back to it.
+
 **Accounts.** Email and password, hashed with scrypt, session cookies, all inside the instance — a
 self-hosted server with no mail service must still be able to sign its owner in. One consequence is
 stated rather than hidden: addresses are recorded but **not verified**, and there is no reset-by-email,
@@ -583,6 +590,9 @@ that export emits the import rather than the markup.
 - `scripts/dashboard-check.mjs` — thumbnails (really an image, cached, 304 on revalidate) and the
   column grid: it computes where the twelve lines are and asserts every band starts on one, at three
   widths
+- `scripts/members-check.mjs` — the whole invitation path: an owner inviting, a stranger following the
+  link, signing up from it, and landing in the document, plus the refusals (wrong account, withdrawn,
+  an editor trying to invite)
 - `scripts/accounts-check.mjs` — the gate, end to end: signed-out requests, a second account that
   cannot reach the first's work, viewer versus editor versus owner, the socket refusing an
   unauthenticated join, and the landing page's sign-in and sign-out in a real browser

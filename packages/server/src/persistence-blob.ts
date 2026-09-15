@@ -24,7 +24,7 @@ import { createHash } from 'node:crypto';
 import type { CanvasDocument } from '@playground/shared';
 import type {
   DocSummary, Persistence, StoredAsset, StoredConnection, StoredMembership, StoredProject,
-  StoredSession, StoredShare, StoredSnapshot, StoredThumbnail, StoredUser,
+  StoredInvite, StoredSession, StoredShare, StoredSnapshot, StoredThumbnail, StoredUser,
 } from './persistence.ts';
 
 type BlobModule = typeof import('@vercel/blob');
@@ -244,6 +244,23 @@ export class BlobPersistence implements Persistence {
       if (session?.userId !== userId) continue;
       try { await del(path, { token: this.token }); } catch { /* already gone */ }
     }
+  }
+
+  async saveInvite(i: StoredInvite): Promise<void> {
+    this.invalidate('invites');
+    await this.putJson(`invites/${i.token}.json`, i);
+  }
+
+  async loadInvite(token: string) { return this.getJson<StoredInvite>(`invites/${token}.json`); }
+
+  async loadInvites(docId: string): Promise<StoredInvite[]> {
+    const all = await this.cachedList('invites', async () => {
+      const { list } = await this.blob();
+      const { blobs } = await list({ prefix: 'invites/', token: this.token, limit: 500 });
+      const loaded = await Promise.all(blobs.map((b) => this.getJson<StoredInvite>(b.pathname)));
+      return loaded.filter((i): i is StoredInvite => !!i);
+    });
+    return all.filter((i) => i.docId === docId).sort((a, b) => b.createdAt - a.createdAt);
   }
 
   async saveMembership(m: StoredMembership): Promise<void> {

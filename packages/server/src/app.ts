@@ -41,8 +41,8 @@ import { RENDERER_VERSION, renderNode, renderThumbnail } from './render.ts';
 import { persistence, type MemberRole } from './persistence.ts';
 import {
   AuthError, SESSION_COOKIE, atLeast, authenticate, createAccount, documentsFor, endSession, grant,
-  hasAccounts, membersOf, publicUser, revokeMembership, roleFor, sessionUser, signupCodeRequired,
-  startSession,
+  acceptInvite, createInvite, hasAccounts, invitesFor, membersOf, publicUser, readInvite,
+  revokeInvite, revokeMembership, roleFor, sessionUser, signupCodeRequired, startSession,
 } from './accounts.ts';
 import { DB_PATH } from './persistence-sqlite.ts';
 import { isOnMountedVolume } from './volume.ts';
@@ -119,12 +119,18 @@ const api = new Hono<{ Variables: Vars }>();
  * `/shares/*` is not an exception to access control — a share token *is* the
  * credential, and the share layer already refuses edits from a view-only one.
  */
-const PUBLIC_PATHS = [/^\/health$/, /^\/auth(\/|$)/, /^\/shares(\/|$)/];
+const PUBLIC_PATHS = [
+  /^\/health$/, /^\/auth(\/|$)/, /^\/shares(\/|$)/,
+  // An invitee is not a member yet; the invite token is what they have.
+  /^\/invites(\/|$)/,
+];
 
 /** Paths where being an editor is not enough. */
 const OWNER_ONLY: { method: string; pattern: RegExp }[] = [
   { method: 'DELETE', pattern: /^\/documents\/[^/]+$/ },
   { method: 'POST', pattern: /^\/documents\/[^/]+\/members$/ },
+  { method: 'POST', pattern: /^\/documents\/[^/]+\/invites$/ },
+  { method: 'DELETE', pattern: /^\/documents\/[^/]+\/invites\/[^/]+$/ },
   { method: 'DELETE', pattern: /^\/documents\/[^/]+\/members\/[^/]+$/ },
   { method: 'POST', pattern: /^\/documents\/[^/]+\/shares$/ },
   { method: 'DELETE', pattern: /^\/shares\/[^/]+$/ },
@@ -260,6 +266,74 @@ api.get('/documents/:id/members', async (c) => c.json({
   members: await membersOf(c.req.param('id')),
   role: c.get('role'),
 }));
+
+/**
+ * Invitations to a document.
+ *
+ * A link, not an email: this instance has no mail service, so the owner is the
+ * one who sends it. Naming an address is optional and only narrows who the link
+ * works for.
+ */
+api.get('/documents/:id/invites', async (c) => c.json({
+  invites: (await invitesFor(c.req.param('id')))
+    .filter((i) => !i.revoked && !i.accepted)
+    .map((i) => ({ ...i, url: `${PUBLIC_URL}/join/${i.token}` })),
+}));
+
+api.post('/documents/:id/invites', async (c) => {
+  type InviteBody = { email?: string; role?: MemberRole };
+  const { email, role } = await c.req.json<InviteBody>().catch((): InviteBody => ({}));
+  const wanted: MemberRole = role === 'owner' || role === 'viewer' ? role : 'editor';
+  const store = await persistence();
+
+  // Someone who already has an account does not need a link: add them, and say
+  // which of the two happened rather than pretending both are "invited".
+  if (email) {
+    const existing = await store.loadUserByEmail(email.trim().toLowerCase());
+    if (existing) {
+      await grant(c.req.param('id'), existing.id, wanted);
+      return c.json({ added: publicUser(existing), members: await membersOf(c.req.param('id')) }, 201);
+    }
+  }
+
+  const invite = await createInvite(c.req.param('id'), c.get('user')!.id, wanted, email);
+  return c.json({ invite: { ...invite, url: `${PUBLIC_URL}/join/${invite.token}` } }, 201);
+});
+
+api.delete('/documents/:id/invites/:token', async (c) => {
+  await revokeInvite(c.req.param('token'));
+  return c.json({ ok: true });
+});
+
+/**
+ * Reading and accepting an invitation.
+ *
+ * Not under `/documents/:id`, because the person following the link is not a
+ * member yet — the gate would turn them away before they could accept.
+ */
+api.get('/invites/:token', async (c) => {
+  const invite = await readInvite(c.req.param('token'));
+  if (!invite) return c.json({ error: 'That invitation has been withdrawn or never existed.' }, 404);
+  await ensureLoaded(invite.docId);
+  const doc = getDocument(invite.docId);
+  const inviter = await (await persistence()).loadUser(invite.invitedBy);
+  return c.json({
+    document: { id: invite.docId, name: doc?.name ?? 'a document' },
+    role: invite.role,
+    email: invite.email,
+    invitedBy: inviter ? { name: inviter.name, email: inviter.email } : null,
+    expired: invite.expiresAt < Date.now(),
+    // Whether the caller can accept right now, or has to sign in first.
+    signedIn: !!c.get('user'),
+  });
+});
+
+api.post('/invites/:token/accept', async (c) => {
+  const user = c.get('user');
+  if (!user) return c.json({ error: 'Sign in to accept this invitation.', needsAuth: true }, 401);
+  const invite = await acceptInvite(c.req.param('token'), user);
+  return c.json({ docId: invite.docId, role: invite.role, url: `${PUBLIC_URL}/d/${invite.docId}` });
+});
 
 api.post('/documents/:id/members', async (c) => {
   const { email, role } = await c.req.json<{ email?: string; role?: MemberRole }>();

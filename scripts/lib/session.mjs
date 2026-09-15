@@ -29,6 +29,9 @@ const pending = new Map();
 
 const realFetch = globalThis.fetch.bind(globalThis);
 
+/** The unpatched fetch, for checks that must genuinely be anonymous. */
+export const rawFetch = realFetch;
+
 async function login(origin) {
   if (cookies.has(origin)) return cookies.get(origin);
   if (pending.has(origin)) return pending.get(origin);
@@ -60,13 +63,22 @@ globalThis.fetch = async function signedInFetch(input, init = {}) {
   let origin;
   try { origin = new URL(url).origin; } catch { return realFetch(input, init); }
 
+  // A caller that set its own cookie is acting as somebody in particular —
+  // several checks hold two or three accounts at once — so this must not
+  // overwrite it. Doing exactly that made every request in members-check come
+  // from the checks account no matter whose object made it.
+  const headers = init.headers ?? {};
+  const callerCookie = Object.keys(headers).some((k) => k.toLowerCase() === 'cookie'
+    && String(headers[k] ?? '').length > 0);
   const withCookie = (cookie) => ({
     ...init,
-    headers: { ...(init.headers ?? {}), ...(cookie ? { cookie } : {}) },
+    headers: callerCookie ? headers : { ...headers, ...(cookie ? { cookie } : {}) },
   });
 
   const first = await realFetch(input, withCookie(cookies.get(origin)));
-  if (first.status !== 401) return first;
+  // A caller acting as its own account owns its 401s; signing in as the checks
+  // account and retrying would answer a question nobody asked.
+  if (first.status !== 401 || callerCookie) return first;
 
   // 401 once is the signal to log in; 401 twice is a real failure and is
   // returned as-is rather than retried in a loop.
@@ -84,6 +96,9 @@ export async function sessionCookie(origin) {
 // `chromium` is a module singleton, so wrapping its methods here reaches every
 // script that imports it.
 
+/** Per-browser handle on the unwrapped newContext, for deliberately signed-out pages. */
+const plainContexts = new WeakMap();
+
 try {
   const { chromium } = await import('playwright');
   const launch = chromium.launch.bind(chromium);
@@ -92,6 +107,7 @@ try {
     const newPage = browser.newPage.bind(browser);
     browser.newPage = async (...pageArgs) => wrapPage(await newPage(...pageArgs));
     const newContext = browser.newContext.bind(browser);
+    plainContexts.set(browser, newContext);
     browser.newContext = async (...ctxArgs) => {
       const context = await newContext(...ctxArgs);
       const ctxPage = context.newPage.bind(context);
@@ -104,15 +120,39 @@ try {
   // No Playwright in this script's dependency graph; the fetch half still works.
 }
 
+/**
+ * A page that is *not* signed in.
+ *
+ * Every other page gets a session so that thirty scripts written before
+ * accounts keep working. A check about what a signed-out visitor sees needs the
+ * opposite, and has no other way to ask for it.
+ */
+export async function signedOutPage(browser, opts) {
+  const plainContext = plainContexts.get(browser);
+  if (!plainContext) throw new Error('signedOutPage needs a browser from the patched chromium.launch');
+  // Through the *context*, not `browser.newPage`: Playwright's newPage calls
+  // `this.newContext()` internally, which is the patched one, so even the
+  // original newPage came back with a session attached.
+  const context = await plainContext(opts);
+  return context.newPage();
+}
+
 function wrapPage(page) {
   const goto = page.goto.bind(page);
   page.goto = async (url, ...rest) => {
     try {
       const origin = new URL(url).origin;
       if (url.startsWith('http')) {
-        const cookie = await sessionCookie(origin);
-        const [name, value] = cookie.split('=');
-        await page.context().addCookies([{ name, value, url: origin }]);
+        // A context the caller has already signed in — a check driving the
+        // browser as one of its own accounts — is left alone. Overwriting it
+        // made the browser act as the checks account no matter who the script
+        // had logged in as, and the document simply refused to open.
+        const existing = await page.context().cookies(origin);
+        if (!existing.some((c) => c.name === 'playground_session')) {
+          const cookie = await sessionCookie(origin);
+          const [name, value] = cookie.split('=');
+          await page.context().addCookies([{ name, value, url: origin }]);
+        }
       }
     } catch {
       // A file:// URL, or an instance that needs no account. Navigate anyway.

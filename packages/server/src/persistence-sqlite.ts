@@ -7,7 +7,8 @@ import { fileURLToPath } from 'node:url';
 import type { CanvasDocument } from '@playground/shared';
 import type {
   DocSummary, MemberRole, Persistence, ShareRole, StoredAsset, StoredConnection, StoredMembership,
-  StoredProject, StoredSession, StoredShare, StoredSnapshot, StoredThumbnail, StoredUser,
+  StoredInvite, StoredProject, StoredSession, StoredShare, StoredSnapshot, StoredThumbnail,
+  StoredUser,
 } from './persistence.ts';
 
 // Anchored to the package, not the working directory: resolving against cwd
@@ -110,6 +111,19 @@ export class SqlitePersistence implements Persistence {
         PRIMARY KEY (doc_id, user_id)
       );
       CREATE INDEX IF NOT EXISTS memberships_user ON memberships(user_id);
+
+      CREATE TABLE IF NOT EXISTS invites (
+        token TEXT PRIMARY KEY,
+        doc_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+        role TEXT NOT NULL,
+        email TEXT,
+        invited_by TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        expires_at INTEGER NOT NULL,
+        accepted_by TEXT, accepted_at INTEGER,
+        revoked INTEGER NOT NULL DEFAULT 0
+      );
+      CREATE INDEX IF NOT EXISTS invites_doc ON invites(doc_id);
 
       CREATE TABLE IF NOT EXISTS thumbnails (
         doc_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
@@ -283,6 +297,27 @@ export class SqlitePersistence implements Persistence {
     this.db.prepare('DELETE FROM sessions WHERE user_id = ?').run(userId);
   }
 
+  async saveInvite(i: StoredInvite): Promise<void> {
+    this.db.prepare(`
+      INSERT INTO invites (token, doc_id, role, email, invited_by, created_at, expires_at,
+                           accepted_by, accepted_at, revoked)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(token) DO UPDATE SET role = excluded.role, accepted_by = excluded.accepted_by,
+        accepted_at = excluded.accepted_at, revoked = excluded.revoked
+    `).run(i.token, i.docId, i.role, i.email, i.invitedBy, i.createdAt, i.expiresAt,
+      i.acceptedBy, i.acceptedAt, i.revoked ? 1 : 0);
+  }
+
+  async loadInvite(token: string): Promise<StoredInvite | null> {
+    return inviteRow(this.db.prepare('SELECT * FROM invites WHERE token = ?').get(token));
+  }
+
+  async loadInvites(docId: string): Promise<StoredInvite[]> {
+    const rows = this.db.prepare(
+      'SELECT * FROM invites WHERE doc_id = ? ORDER BY created_at DESC').all(docId);
+    return (rows as unknown[]).map((r) => inviteRow(r)!).filter(Boolean);
+  }
+
   async saveMembership(m: StoredMembership): Promise<void> {
     this.db.prepare(`
       INSERT INTO memberships (doc_id, user_id, role, created_at) VALUES (?, ?, ?, ?)
@@ -380,6 +415,20 @@ function userRow(r: unknown): StoredUser | null {
   return {
     id: row.id, email: row.email, name: row.name, passwordHash: row.password_hash,
     createdAt: row.created_at, emailVerifiedAt: row.email_verified_at, color: row.color,
+  };
+}
+
+function inviteRow(r: unknown): StoredInvite | null {
+  if (!r) return null;
+  const row = r as {
+    token: string; doc_id: string; role: MemberRole; email: string | null; invited_by: string;
+    created_at: number; expires_at: number; accepted_by: string | null; accepted_at: number | null;
+    revoked: number;
+  };
+  return {
+    token: row.token, docId: row.doc_id, role: row.role, email: row.email,
+    invitedBy: row.invited_by, createdAt: row.created_at, expiresAt: row.expires_at,
+    acceptedBy: row.accepted_by, acceptedAt: row.accepted_at, revoked: !!row.revoked,
   };
 }
 

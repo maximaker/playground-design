@@ -2227,3 +2227,46 @@ code { font-family: var(--mono); font-size: 0.92em; }
   .library-tools { width: 100%; }
   .library-search { flex: 1 1 auto; min-width: 0; }
 }
+
+/* --- People and invitations --------------------------------------------------- */
+.people { display: flex; flex-direction: column; gap: var(--s4); }
+.people-invite { display: flex; align-items: flex-end; gap: var(--s3); flex-wrap: wrap; }
+.people-invite .field.is-wide { flex: 1 1 16rem; }
+.people-invite .button { min-height: 2.3rem; }
+
+.people-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.people-list li {
+  display: flex; align-items: center; gap: var(--s3);
+  padding: var(--s3) 0; border-top: 1px solid var(--border);
+}
+.people-who { display: flex; flex-direction: column; min-width: 0; flex: 1 1 auto; }
+.people-who strong { font-size: 0.92rem; }
+.people-who .dim { font-size: 0.8rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.people-role { width: auto; min-width: 7rem; }
+/* A pending invitation is deliberately quieter than a person who is actually in. */
+.people-list li.is-pending .people-who strong { font-weight: 500; color: var(--fg-muted); }
+.avatar-chip.is-pending {
+  background: var(--bg-input); color: var(--fg-muted); border: 1px dashed var(--border-strong);
+  width: 26px; height: 26px; text-shadow: none;
+}
+
+/* --- Joining ------------------------------------------------------------------- */
+.join { min-height: 100vh; display: grid; place-items: center; background: var(--bg-sunken); padding: var(--s5); }
+.join-card {
+  display: flex; flex-direction: column; gap: var(--s4); align-items: flex-start;
+  max-width: 30rem; padding: 2.4rem; border-radius: var(--radius-lg);
+  background: var(--bg-raised); border: 1px solid var(--border); color: var(--fg-muted);
+}
+.join-card h1 { margin: 0; font-size: 1.5rem; letter-spacing: -0.02em; color: var(--fg); }
+.join-lede { margin: 0; line-height: 1.6; }
+.join-actions { display: flex; gap: var(--s3); flex-wrap: wrap; }
+.join-note { margin: 0; font-size: 0.82rem; }
+/* The invitation stays on screen above the sign-in form, so it is obvious what
+   signing in is for. */
+.join-wrap { display: flex; flex-direction: column; min-height: 100vh; background: var(--bg-sunken); }
+.join-banner {
+  display: flex; align-items: center; gap: var(--s3); margin: 0;
+  padding: var(--s4) var(--s6); background: var(--bg-raised);
+  border-bottom: 1px solid var(--border); color: var(--fg-muted); font-size: 0.92rem;
+}
+.join-banner strong { color: var(--fg); }

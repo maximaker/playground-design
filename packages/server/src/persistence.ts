@@ -91,6 +91,29 @@ export interface StoredSession {
 
 export type MemberRole = 'owner' | 'editor' | 'viewer';
 
+/**
+ * An invitation to a document, as a link.
+ *
+ * There is no mail service, so an invite cannot be *sent* — it is created and
+ * the person who made it passes the link on however they like. The address is
+ * optional and, when present, only a restriction: the link then works for that
+ * account and nobody else, which is the difference between inviting a colleague
+ * and leaving a key under the mat.
+ */
+export interface StoredInvite {
+  token: string;
+  docId: string;
+  role: MemberRole;
+  /** Lower-cased, or null for a link anyone signed in may accept. */
+  email: string | null;
+  invitedBy: string;
+  createdAt: number;
+  expiresAt: number;
+  acceptedBy: string | null;
+  acceptedAt: number | null;
+  revoked: boolean;
+}
+
 export interface StoredMembership {
   docId: string;
   userId: string;
@@ -167,6 +190,10 @@ export interface Persistence {
   loadSession(token: string): Promise<StoredSession | null>;
   deleteSession(token: string): Promise<void>;
   deleteSessionsForUser(userId: string): Promise<void>;
+
+  saveInvite(invite: StoredInvite): Promise<void>;
+  loadInvite(token: string): Promise<StoredInvite | null>;
+  loadInvites(docId: string): Promise<StoredInvite[]>;
 
   saveMembership(m: StoredMembership): Promise<void>;
   loadMembership(docId: string, userId: string): Promise<StoredMembership | null>;

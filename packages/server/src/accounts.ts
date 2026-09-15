@@ -22,7 +22,7 @@
 
 import { randomBytes, randomUUID, scrypt, timingSafeEqual } from 'node:crypto';
 import { promisify } from 'node:util';
-import type { MemberRole, StoredMembership, StoredUser } from './persistence.ts';
+import type { MemberRole, StoredInvite, StoredMembership, StoredUser } from './persistence.ts';
 import { persistence } from './persistence.ts';
 import { listDocuments } from './store.ts';
 
@@ -296,6 +296,92 @@ export async function claimUnownedDocuments(userId: string): Promise<number> {
     claimed++;
   }
   return claimed;
+}
+
+// ---------------------------------------------------------------------------
+// Invitations
+// ---------------------------------------------------------------------------
+
+const INVITE_TTL_MS = 14 * 24 * 60 * 60 * 1000;
+
+export interface InviteView {
+  token: string;
+  role: MemberRole;
+  email: string | null;
+  createdAt: number;
+  expiresAt: number;
+  accepted: boolean;
+  revoked: boolean;
+}
+
+export async function createInvite(
+  docId: string, invitedBy: string, role: MemberRole, email?: string | null,
+): Promise<StoredInvite> {
+  const invite: StoredInvite = {
+    token: randomBytes(18).toString('base64url'),
+    docId,
+    role,
+    email: email?.trim().toLowerCase() || null,
+    invitedBy,
+    createdAt: Date.now(),
+    // Invitations that live forever are credentials nobody remembers issuing.
+    expiresAt: Date.now() + INVITE_TTL_MS,
+    acceptedBy: null,
+    acceptedAt: null,
+    revoked: false,
+  };
+  await (await persistence()).saveInvite(invite);
+  return invite;
+}
+
+export async function invitesFor(docId: string): Promise<InviteView[]> {
+  const invites = await (await persistence()).loadInvites(docId);
+  return invites.map((i) => ({
+    token: i.token, role: i.role, email: i.email, createdAt: i.createdAt, expiresAt: i.expiresAt,
+    accepted: !!i.acceptedBy, revoked: i.revoked,
+  }));
+}
+
+export async function revokeInvite(token: string): Promise<void> {
+  const store = await persistence();
+  const invite = await store.loadInvite(token);
+  if (!invite) return;
+  await store.saveInvite({ ...invite, revoked: true });
+}
+
+/** Reads an invitation without using it, for the "you have been invited" screen. */
+export async function readInvite(token: string): Promise<StoredInvite | null> {
+  const invite = await (await persistence()).loadInvite(token);
+  if (!invite || invite.revoked) return null;
+  return invite;
+}
+
+/**
+ * Uses an invitation.
+ *
+ * Single use, and bound to the address when one was given: an invite passed on
+ * to someone else should stop at the person it names. Accepting twice is not an
+ * error — someone following their own link again should land in the document,
+ * not on a failure.
+ */
+export async function acceptInvite(token: string, user: StoredUser): Promise<StoredInvite> {
+  const store = await persistence();
+  const invite = await store.loadInvite(token);
+  if (!invite || invite.revoked) throw new AuthError('That invitation has been withdrawn.', 404);
+  if (invite.expiresAt < Date.now()) throw new AuthError('That invitation has expired.', 410);
+  if (invite.email && invite.email !== user.email.toLowerCase()) {
+    throw new AuthError(`That invitation is for ${invite.email}.`, 403);
+  }
+  if (invite.acceptedBy && invite.acceptedBy !== user.id) {
+    throw new AuthError('That invitation has already been used.', 409);
+  }
+
+  // Never demote: someone who is already an owner and follows a viewer link
+  // stays an owner.
+  const current = await roleFor(invite.docId, user.id);
+  if (!atLeast(current, invite.role)) await grant(invite.docId, user.id, invite.role);
+  await store.saveInvite({ ...invite, acceptedBy: user.id, acceptedAt: Date.now() });
+  return invite;
 }
 
 /** Whether this instance has any accounts yet — the signal to offer sign-up. */
