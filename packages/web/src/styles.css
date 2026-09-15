@@ -1084,6 +1084,18 @@ code { font-family: var(--mono); font-size: 0.92em; }
   /* The toolbar floats over the canvas, so it has to sit under an open drawer
      rather than on top of it. */
   .toolbar { z-index: 20; }
+
+  /*
+   * Buttons lose their labels here rather than only at `narrow`. The header
+   * carries the logotype, search, undo and redo, two drawer toggles, the
+   * document name, Import, Export, Share and Connect agent — with labels that
+   * runs past the right edge around 820px and pushes the logotype off. Every
+   * one of them keeps its tooltip and aria-label, so nothing becomes
+   * unreachable, only narrower.
+   */
+  .topbar .button-label { display: none; }
+  .topbar .button { padding: 0.4rem var(--s3); }
+  .topbar { gap: 0.2rem; }
 }
 
 @media (max-width: 700px) {
