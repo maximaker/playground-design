@@ -171,6 +171,44 @@ const zoomAfter = await view.evaluate(() => window.__playground.store.getState()
 check('⇧1 zooms to fit, as it does in Figma', Math.abs(zoomAfter - 0.2) > 0.01,
   `${zoomBefore} → ${zoomAfter}`);
 
+// Two questions, two axes. The picker used to be one wrapping row of chips
+// where "Base" belonged to both and neither row said what it was.
+await view.evaluate((id) => window.__playground.store.getState().select([id]), kids[0].id);
+await view.waitForTimeout(500);
+const axes = await view.$$eval('.variant-axis', (els) => els.map((e) => ({
+  label: e.querySelector('.variant-axis-label')?.textContent,
+  active: e.querySelector('.segmented button.is-active')?.textContent,
+  options: e.querySelectorAll('.segmented button').length,
+})));
+check('the variant picker is split into a state axis and a width axis',
+  axes.length === 2 && axes[0].label === 'State' && axes[1].label === 'Width',
+  JSON.stringify(axes));
+check('and each axis always shows a definite answer',
+  axes.every((a) => !!a.active), JSON.stringify(axes.map((a) => a.active)));
+
+await view.locator('.variant-axis .segmented button', { hasText: ':hover' }).first().click();
+await view.waitForTimeout(400);
+const afterState = await view.$$eval('.variant-axis', (els) =>
+  els.map((e) => e.querySelector('.segmented button.is-active')?.textContent));
+check('choosing a state leaves the width axis on All — one selector, honestly shown',
+  afterState[0] === ':hover' && afterState[1] === 'All', JSON.stringify(afterState));
+
+const bpButton = view.locator('.variant-axis').nth(1).locator('.segmented button').nth(1);
+if (await bpButton.count()) {
+  await bpButton.click();
+  await view.waitForTimeout(400);
+  const afterWidth = await view.$$eval('.variant-axis', (els) =>
+    els.map((e) => e.querySelector('.segmented button.is-active')?.textContent));
+  check('and choosing a width returns the state axis to Base',
+    afterWidth[0] === 'Base' && afterWidth[1] !== 'All', JSON.stringify(afterWidth));
+}
+check('the note reads as one sentence, not as a flex row',
+  (await view.evaluate(() => {
+    const el = document.querySelector('.variant-note');
+    return el ? getComputedStyle(el).display : null;
+  })) === 'block');
+await view.evaluate(() => window.__playground.store.getState().setActiveVariant(null));
+
 // Icon-only controls say what they are, in the interface's own voice rather
 // than the browser's.
 const toolbarTips = await view.$$eval('.toolbar button', (els) => ({

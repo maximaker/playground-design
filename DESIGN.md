@@ -193,6 +193,12 @@ levitates on hover reads as a card). Press flattens to `--shadow-sm` and
 translates 0.5px down. `.primary` is solid `--fg` with `--bg` text — the black
 pill from the campaign sample — not the accent, which is reserved for state.
 
+**Two-axis picker.** Where two independent questions share one control —
+which state, which width — each gets its own labelled row of segmented options
+rather than one wrapping list. Each row always shows a definite answer, so the
+pair reads as a sentence. If the model cannot store a combination, picking in
+one row visibly returns the other to its base rather than pretending.
+
 **Segmented control.** An inset track (`--bg-sunken`, radius `--radius-pill`,
 2px padding); the selected item is a `--bg-panel` pill with `--shadow-pill`.
 Used for the code tabs, the view switcher, and the 1D/7D/1M-style ranges.

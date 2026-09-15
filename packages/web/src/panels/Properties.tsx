@@ -33,6 +33,9 @@ export function Properties() {
   );
   void structureVersion;
   const activeVariant = useCanvas((s) => s.activeVariant);
+  // The one selector, read as the two axes the picker shows.
+  const widthVariant = activeVariant?.startsWith('@') ? activeVariant : null;
+  const stateVariant = activeVariant && !widthVariant ? activeVariant : null;
   const setActiveVariant = useCanvas((s) => s.setActiveVariant);
   const dispatch = useCanvas((s) => s.dispatch);
   const doc = getDoc();
@@ -184,55 +187,96 @@ export function Properties() {
 
       {instanceNode && instanceDef && <InstanceProps instanceId={resolved[0]!.targetId} def={instanceDef} node={instanceNode} />}
 
-      <div className="variant-bar" title="Which state or breakpoint you are editing">
-        <button className={!activeVariant ? 'is-active' : ''} onClick={() => setActiveVariant(null)}>Base</button>
-        {[':hover', ':focus', ':active'].map((v) => (
-          <button
-            key={v}
-            className={activeVariant === v ? 'is-active' : ''}
-            data-has={knownVariants.includes(v) ? 'yes' : 'no'}
-            onClick={() => setActiveVariant(activeVariant === v ? null : v)}
-          >{v}</button>
-        ))}
-        {/* The document's breakpoints, not ad-hoc numbers: an override authored
-            here uses the same width the rest of the design responds at. */}
-        {breakpoints.map((bp) => {
-          const selector = breakpointSelector(bp);
-          const has = knownVariants.includes(selector);
-          return (
+      {/*
+        * Two axes, not one list.
+        *
+        * A state and a width are different questions — "what does it look like
+        * under the cursor" and "what does it look like on a phone" — and they
+        * were a single wrapping row of chips where Base belonged to both and
+        * neither row said what it was. Separated, each axis always shows a
+        * definite answer, so the pair reads as a sentence: hover, at all
+        * widths.
+        *
+        * They stay exclusive because the document is: a variant carries one
+        * selector, so there is no such thing here as hover-on-tablet. Picking
+        * in one axis returns the other to its base, and showing that happen is
+        * more honest than two controls implying a combination that cannot be
+        * stored.
+        */}
+      <div className="variant-picker">
+        <div className="variant-axis">
+          <span className="variant-axis-label">State</span>
+          <div className="segmented is-auto">
             <button
-              key={bp.id}
-              className={activeVariant === selector ? 'is-active' : ''}
-              data-has={has ? 'yes' : 'no'}
-              title={`${bp.name} — ${bp.maxWidth}px and below${has ? ' (has overrides)' : ''}`}
-              onClick={() => setActiveVariant(activeVariant === selector ? null : selector)}
-            >{bp.name}</button>
-          );
-        })}
+              className={!stateVariant ? 'is-active' : ''}
+              title="No state — the resting styles"
+              onClick={() => setActiveVariant(widthVariant ?? null)}
+            >Base</button>
+            {[':hover', ':focus', ':active'].map((v) => (
+              <button
+                key={v}
+                className={activeVariant === v ? 'is-active' : ''}
+                data-has={knownVariants.includes(v) ? 'yes' : 'no'}
+                onClick={() => setActiveVariant(activeVariant === v ? null : v)}
+              >{v}</button>
+            ))}
+          </div>
+        </div>
 
-        {/* Any breakpoint width that is not in the document's list. */}
-        {knownVariants
-          .filter((v) => v.startsWith('@') && !breakpoints.some((bp) => breakpointSelector(bp) === v))
-          .map((v) => (
+        <div className="variant-axis">
+          <span className="variant-axis-label">Width</span>
+          <div className="segmented is-auto">
             <button
-              key={v}
-              className={activeVariant === v ? 'is-active' : ''}
-              data-has="yes"
-              title={`${v} — not one of this document's breakpoints`}
-              onClick={() => setActiveVariant(activeVariant === v ? null : v)}
-            >{maxWidthOf(v) ? `${maxWidthOf(v)}px` : v.replace('@media', '').trim()}</button>
-          ))}
+              className={!widthVariant ? 'is-active' : ''}
+              title="Every width"
+              onClick={() => setActiveVariant(stateVariant ?? null)}
+            >All</button>
+            {/* The document's breakpoints, not ad-hoc numbers: an override
+                authored here uses the same width the rest of the design
+                responds at. */}
+            {breakpoints.map((bp) => {
+              const selector = breakpointSelector(bp);
+              const has = knownVariants.includes(selector);
+              return (
+                <button
+                  key={bp.id}
+                  className={activeVariant === selector ? 'is-active' : ''}
+                  data-has={has ? 'yes' : 'no'}
+                  title={`${bp.name} — ${bp.maxWidth}px and below${has ? ' (has overrides)' : ''}`}
+                  onClick={() => setActiveVariant(activeVariant === selector ? null : selector)}
+                >{bp.name}</button>
+              );
+            })}
+
+            {/* Any breakpoint width that is not in the document's list. */}
+            {knownVariants
+              .filter((v) => v.startsWith('@') && !breakpoints.some((bp) => breakpointSelector(bp) === v))
+              .map((v) => (
+                <button
+                  key={v}
+                  className={activeVariant === v ? 'is-active' : ''}
+                  data-has="yes"
+                  title={`${v} — not one of this document's breakpoints`}
+                  onClick={() => setActiveVariant(activeVariant === v ? null : v)}
+                >{maxWidthOf(v) ? `${maxWidthOf(v)}px` : v.replace('@media', '').trim()}</button>
+              ))}
+          </div>
+        </div>
       </div>
 
       {activeVariant && (
         <p className="variant-note">
-          {activeVariant.startsWith('@') ? (
+          {widthVariant ? (
             <>
-              Editing <strong>{labelForSelector(activeVariant, breakpoints)}</strong>. Only properties
-              you change here are overridden — set the artboard to this width to see it.
+              Editing <strong>{labelForSelector(widthVariant, breakpoints)}</strong>{', in no particular '
+              + 'state. Only properties you change here are overridden — set the artboard to this '
+              + 'width to see it.'}
             </>
           ) : (
-            <>Editing <code>{activeVariant}</code>. Only properties you change here are overridden.</>
+            <>
+              Editing <code>{activeVariant}</code>{', at every width. Only properties you change '
+              + 'here are overridden.'}
+            </>
           )}
         </p>
       )}

@@ -612,35 +612,43 @@ code { font-family: var(--mono); font-size: 0.92em; }
 .prop-title { font-weight: 600; display: flex; flex-direction: column; gap: 0.1rem; }
 .prop-type { font-weight: 400; font-size: 0.78rem; color: var(--fg-muted); }
 
-/* Which state or width you are editing: a one-of-these picker, so it wears the
-   segmented control's shape rather than a fifth kind of chip. */
-.variant-bar {
-  display: flex; flex-wrap: wrap; gap: 0.15rem;
-  margin: var(--s3) var(--s4); padding: 0.14rem;
-  background: var(--bg-sunken); border: 1px solid var(--border);
-  border-radius: var(--radius-pill);
+/*
+ * Which state and which width you are editing: two labelled axes rather than
+ * one wrapping row of chips. Each is the segmented control, so the panel has
+ * one shape for "pick one of these" and the label says which question it is
+ * answering.
+ */
+.variant-picker {
+  display: flex; flex-direction: column; gap: var(--s2);
+  margin: var(--s3) var(--s4);
 }
-.variant-bar button {
-  background: none; border: 1px solid transparent; color: var(--fg-muted);
-  border-radius: var(--radius-pill); padding: 0.2rem 0.55rem; font-size: 0.78rem;
-  display: inline-flex; align-items: center;
-  transition: background var(--transition), color var(--transition), box-shadow var(--transition);
+.variant-axis { display: flex; align-items: center; gap: var(--s3); }
+.variant-axis-label {
+  flex: 0 0 2.6rem;
+  font-size: 0.68rem; font-weight: 600; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--fg-faint);
 }
-/* A dot, not a colour: the chips that already carry overrides are worth
+/* Options sized to their labels: ":hover" and "Base" are not the same width,
+   and stretching them to match wastes the rail on empty pill. */
+.segmented.is-auto { flex: 1 1 auto; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+.segmented.is-auto::-webkit-scrollbar { display: none; }
+.segmented.is-auto button { flex: 0 1 auto; }
+/* A dot, not a colour: the options that already carry overrides are worth
    marking, and the marking must not compete with which one is selected. */
-.variant-bar button[data-has='yes'] { color: var(--fg); font-weight: 500; }
-.variant-bar button[data-has='yes']::after {
+.segmented button[data-has='yes'] { color: var(--fg); }
+.segmented button[data-has='yes']::after {
   content: ''; width: 4px; height: 4px; border-radius: 50%;
-  background: var(--accent); margin-left: 0.35em;
+  background: var(--accent); margin-left: 0.35em; flex: none;
 }
-.variant-bar button.is-active {
-  background: var(--bg-panel); color: var(--fg); box-shadow: var(--shadow-pill);
-}
+
+/* Block, not flex: it is a sentence. As a flex row each phrase became its own
+   item and the line broke wherever the JSX happened to. */
 .variant-note {
-  margin: 0; padding: var(--s3) var(--s4); font-size: 0.8rem; color: var(--fg-muted);
-  background: var(--accent-soft); display: flex; gap: var(--s3);
-  align-items: baseline; justify-content: space-between; line-height: 1.5;
+  margin: 0 var(--s4) var(--s3); padding: var(--s3); font-size: 0.8rem;
+  color: var(--fg-muted); line-height: 1.5;
+  background: var(--accent-soft); border-radius: var(--radius-sm);
 }
+.variant-note strong, .variant-note code { color: var(--fg); }
 
 .prop-section { border-bottom: 1px solid var(--border); }
 .prop-section header { display: flex; align-items: center; justify-content: space-between; }
@@ -692,7 +700,8 @@ code { font-family: var(--mono); font-size: 0.92em; }
 }
 .segmented button {
   flex: 1; background: none; border: 0; padding: 0.24rem 0.5rem; color: var(--fg-muted);
-  font-size: 0.8rem; display: grid; place-items: center; min-height: 1.6rem;
+  font-size: 0.8rem; min-height: 1.6rem;
+  display: inline-flex; align-items: center; justify-content: center;
   border-radius: var(--radius-pill); white-space: nowrap;
   transition: background var(--transition), color var(--transition), box-shadow var(--transition);
 }
