@@ -63,6 +63,31 @@ app.use('/assets/*', async (c, next) => {
 
 app.use('*', cors({ origin: (o) => o ?? '*', credentials: true }));
 
+/**
+ * Turns an unhandled failure into something the caller can act on.
+ *
+ * Storage is the one that matters. When the Blob store is unavailable — a
+ * suspended store, an expired token, a billing state gone inactive — every
+ * write throws from deep inside persistence, and the bare 500 that produced
+ * said nothing at all. An agent or a browser hitting that deserves to be told
+ * which of "the server is broken" and "the storage behind it is switched off"
+ * it is looking at, because only one of them is worth retrying.
+ */
+app.onError((err, c) => {
+  const message = err instanceof Error ? err.message : String(err);
+  const storage = /blob|suspended|store|token|quota|billing/i.test(message);
+  if (storage) {
+    console.error('[playground] storage failure:', message);
+    return c.json({
+      error: 'The storage behind this deployment is unavailable, so nothing can be saved right now.',
+      detail: message,
+      hint: 'Reads from the cache may still work. Check the Blob store\'s status and billing state.',
+    }, 503);
+  }
+  console.error('[playground] unhandled:', err);
+  return c.json({ error: message }, 500);
+});
+
 // ---------------------------------------------------------------------------
 // Documents
 // ---------------------------------------------------------------------------

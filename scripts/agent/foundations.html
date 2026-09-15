@@ -1,0 +1,193 @@
+<style>
+  .sheet { font-family: var(--font-sans); color: var(--color-fg); display: flex;
+           flex-direction: column; gap: 64px; padding: 80px 72px; background: var(--color-bg); }
+  .rule { height: 1px; background: var(--color-border-strong); }
+  .section { display: flex; flex-direction: column; gap: 24px; }
+  /* 12px, not 11: no grey that still reads as "faint" clears 4.5:1 at 11px. */
+  .eyebrow { font-family: var(--font-mono); font-size: 12px; letter-spacing: 0.12em;
+             text-transform: uppercase; color: var(--color-fg-muted); }
+  .mono { font-family: var(--font-mono); font-size: 12px; color: var(--color-fg-muted); }
+  .note { font-size: 12px; color: var(--color-fg-muted); }
+
+  .swatch-grid { display: flex; flex-direction: row; flex-wrap: wrap; gap: 16px; }
+  .swatch { display: flex; flex-direction: row; align-items: center; gap: 12px; width: 268px;
+            padding: 12px; background: var(--color-surface); border: 1px solid var(--color-border);
+            border-radius: var(--radius-md); }
+  .chip { width: 40px; height: 40px; border-radius: var(--radius-sm);
+          border: 1px solid var(--color-border-strong); }
+  .swatch-meta { display: flex; flex-direction: column; gap: 2px; }
+  .swatch-name { font-size: 13px; font-weight: 600; }
+
+  .card { background: var(--color-surface); border: 1px solid var(--color-border);
+          border-radius: var(--radius-lg); padding: 32px; box-shadow: var(--shadow-card); }
+  .type-row { display: flex; flex-direction: row; align-items: baseline; gap: 24px; }
+  .type-label { width: 150px; flex: 0 0 auto; font-family: var(--font-mono); font-size: 12px;
+                color: var(--color-fg-muted); }
+
+  .spec { display: flex; flex-direction: column; gap: 12px; align-items: flex-start; }
+  /* Filled rather than transparent: a shadow specimen with no fill shows only
+     its shadow, and the shape it is meant to demonstrate disappears. */
+  .box { width: 108px; height: 76px; background: var(--color-surface-sunken);
+         border: 1px solid var(--color-border-strong); }
+  .box-shadow { border-color: transparent; border-radius: var(--radius-md); }
+
+  .tag { display: inline-flex; flex-direction: row; align-items: center; width: fit-content;
+         padding: 4px 12px; border-radius: var(--radius-pill); background: var(--color-surface-sunken);
+         border: 1px solid var(--color-border); color: var(--color-fg-muted); font-size: 12px; line-height: 1.2; }
+  .tag-good { background: var(--color-success-bg); border-color: transparent; color: var(--color-success); }
+
+  .btn { display: inline-flex; flex-direction: row; align-items: center; justify-content: center;
+         gap: 8px; padding: 12px 24px; border-radius: var(--radius-pill); font-size: 14px;
+         font-weight: 500; line-height: 1.2; border: 1px solid transparent; width: fit-content; }
+  .btn-solid { background: var(--color-surface-ink); color: var(--color-on-ink); }
+  .btn-ghost { background: var(--color-surface); color: var(--color-fg); border-color: var(--color-border-strong); }
+  .btn-ink { background: var(--color-surface-ink-2); color: var(--color-on-ink); border-color: var(--color-border-ink); }
+  .led { width: 8px; height: 8px; border-radius: 999px; background: var(--color-success); }
+
+  .seg { display: flex; flex-direction: row; align-items: center; gap: 4px; padding: 4px;
+         width: fit-content; background: var(--color-surface-sunken);
+         border: 1px solid var(--color-border); border-radius: var(--radius-pill); }
+  .seg-item { display: flex; flex-direction: row; align-items: center; gap: 8px; padding: 8px 16px;
+              border-radius: var(--radius-pill); font-size: 13px; color: var(--color-fg-muted); white-space: nowrap; }
+  .seg-on { background: var(--color-surface); color: var(--color-fg); box-shadow: var(--shadow-chip); }
+  .dot { width: 6px; height: 6px; border-radius: 999px; background: var(--color-attention); }
+
+  .panel-card { display: flex; flex-direction: column; gap: 16px; flex: 1 1 300px; min-width: 0;
+                padding: 24px; background: var(--color-surface);
+                border: 1px solid var(--color-border); border-radius: var(--radius-lg); }
+  .row { display: flex; flex-direction: row; flex-wrap: wrap; gap: 12px; align-items: center; }
+  .pair { display: flex; flex-direction: row; gap: 16px; }
+  .pair-card { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column;
+               justify-content: space-between; gap: 32px; padding: 32px; border-radius: var(--radius-lg); }
+  .stack { display: flex; flex-direction: column; gap: 12px; }
+  .card-title { margin: 0; font-size: 19px; line-height: 1.35; letter-spacing: -0.01em; font-weight: 600; }
+  .card-body { margin: 0; font-size: 14px; line-height: 1.65; color: var(--color-fg-muted); }
+  .on-ink { color: var(--color-on-ink); }
+  .on-ink-muted { color: var(--color-on-ink-muted); }
+</style>
+
+<div class="sheet">
+
+  <div style="display:flex;flex-direction:row;align-items:flex-end;justify-content:space-between;gap:32px">
+    <div style="display:flex;flex-direction:column;gap:12px;max-width:720px">
+      <span class="eyebrow">Design system v1.0</span>
+      <h1 style="margin:0;font-size:40px;line-height:1.15;letter-spacing:-0.02em;font-weight:600">
+        <span style="color:var(--color-fg-faint)">A quiet system that</span> gets loud on purpose
+      </h1>
+      <p style="margin:0;font-size:15px;line-height:1.65;color:var(--color-fg-muted);max-width:620px">
+        Near-neutral surfaces, hairline borders, and one near-black panel reserved for the thing that
+        matters most on a screen. Two accent hues only: green means verified, amber means live.
+      </p>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:6px;text-align:right">
+      <span class="mono">Northsignal</span>
+      <span class="note">AI web consulting</span>
+    </div>
+  </div>
+
+  <div class="rule"></div>
+
+  <div class="section">
+    <span class="eyebrow">01 — Colour</span>
+    <div class="swatch-grid">
+      <div class="swatch"><div class="chip" style="background:var(--color-bg)"></div><div class="swatch-meta"><span class="swatch-name">bg</span><span class="mono">#EBEBEB</span><span class="note">The page itself</span></div></div>
+      <div class="swatch"><div class="chip" style="background:var(--color-surface)"></div><div class="swatch-meta"><span class="swatch-name">surface</span><span class="mono">#FFFFFF</span><span class="note">Panels and cards</span></div></div>
+      <div class="swatch"><div class="chip" style="background:var(--color-surface-sunken)"></div><div class="swatch-meta"><span class="swatch-name">surface-sunken</span><span class="mono">#F7F7F7</span><span class="note">Inset tracks, tags</span></div></div>
+      <div class="swatch"><div class="chip" style="background:var(--color-surface-ink)"></div><div class="swatch-meta"><span class="swatch-name">surface-ink</span><span class="mono">#1C1C1C</span><span class="note">Emphasis — use once</span></div></div>
+      <div class="swatch"><div class="chip" style="background:var(--color-surface-ink-2)"></div><div class="swatch-meta"><span class="swatch-name">surface-ink-2</span><span class="mono">#2B2B2B</span><span class="note">Raised, on ink</span></div></div>
+      <div class="swatch"><div class="chip" style="background:var(--color-border)"></div><div class="swatch-meta"><span class="swatch-name">border</span><span class="mono">#ECECEC</span><span class="note">Hairline, default</span></div></div>
+      <div class="swatch"><div class="chip" style="background:var(--color-border-strong)"></div><div class="swatch-meta"><span class="swatch-name">border-strong</span><span class="mono">#DCDCDC</span><span class="note">Dividers</span></div></div>
+      <div class="swatch"><div class="chip" style="background:var(--color-fg)"></div><div class="swatch-meta"><span class="swatch-name">fg</span><span class="mono">#171717</span><span class="note">Body and headings</span></div></div>
+      <div class="swatch"><div class="chip" style="background:var(--color-fg-muted)"></div><div class="swatch-meta"><span class="swatch-name">fg-muted</span><span class="mono">#666666</span><span class="note">Supporting copy</span></div></div>
+      <div class="swatch"><div class="chip" style="background:var(--color-fg-faint)"></div><div class="swatch-meta"><span class="swatch-name">fg-faint</span><span class="mono">#858585</span><span class="note">The quiet half of a headline</span></div></div>
+      <div class="swatch"><div class="chip" style="background:var(--color-success)"></div><div class="swatch-meta"><span class="swatch-name">success</span><span class="mono">#3D7A38</span><span class="note">Verified, shipped</span></div></div>
+      <div class="swatch"><div class="chip" style="background:var(--color-attention)"></div><div class="swatch-meta"><span class="swatch-name">attention</span><span class="mono">#E09B33</span><span class="note">Live, in progress</span></div></div>
+    </div>
+  </div>
+
+  <div class="rule"></div>
+
+  <div class="section">
+    <span class="eyebrow">02 — Type</span>
+    <div class="card" style="display:flex;flex-direction:column;gap:28px">
+      <div class="type-row"><span class="type-label">display / 64 / 600</span><span style="font-size:64px;line-height:1.05;letter-spacing:-0.03em;font-weight:600">Ships to production</span></div>
+      <div class="type-row"><span class="type-label">h2 / 34 / 600</span><span style="font-size:34px;line-height:1.2;letter-spacing:-0.02em;font-weight:600">Section heading</span></div>
+      <div class="type-row"><span class="type-label">h3 / 19 / 600</span><span style="font-size:19px;line-height:1.35;letter-spacing:-0.01em;font-weight:600">Card title, two lines at most</span></div>
+      <div class="type-row"><span class="type-label">body / 15 / 1.65</span><span style="font-size:15px;line-height:1.65;color:var(--color-fg-muted);max-width:520px">Supporting copy sits at fifteen pixels with generous leading. Measure is capped near sixty characters so a paragraph never runs the width of a card.</span></div>
+      <div class="type-row"><span class="type-label">small / 13</span><span style="font-size:13px;line-height:1.6;color:var(--color-fg-muted)">Captions, tags and footnotes</span></div>
+      <div class="type-row"><span class="type-label">mono / 12 / .12em</span><span class="eyebrow">Eyebrows and counters</span></div>
+    </div>
+  </div>
+
+  <div class="rule"></div>
+
+  <div class="section">
+    <span class="eyebrow">03 — Shape and depth</span>
+    <div class="card" style="display:flex;flex-direction:row;flex-wrap:wrap;gap:32px">
+      <div class="spec"><div class="box" style="border-radius:var(--radius-sm)"></div><span class="mono">radius.sm · 10</span></div>
+      <div class="spec"><div class="box" style="border-radius:var(--radius-md)"></div><span class="mono">radius.md · 16</span></div>
+      <div class="spec"><div class="box" style="border-radius:var(--radius-lg)"></div><span class="mono">radius.lg · 24</span></div>
+      <div class="spec"><div class="box" style="border-radius:var(--radius-xl)"></div><span class="mono">radius.xl · 32</span></div>
+      <div class="spec"><div class="box" style="border-radius:var(--radius-pill);width:140px"></div><span class="mono">radius.pill</span></div>
+      <div class="spec"><div class="box box-shadow" style="box-shadow:var(--shadow-chip)"></div><span class="mono">shadow.chip</span></div>
+      <div class="spec"><div class="box box-shadow" style="box-shadow:var(--shadow-panel)"></div><span class="mono">shadow.panel</span></div>
+    </div>
+  </div>
+
+  <div class="rule"></div>
+
+  <div class="section">
+    <span class="eyebrow">04 — Components</span>
+
+    <div style="display:flex;flex-direction:row;flex-wrap:wrap;gap:16px">
+      <div class="panel-card">
+        <span class="mono">Tags</span>
+        <div class="row" style="gap:8px">
+          <span class="tag">retrieval</span><span class="tag tag-good">shipped</span>
+          <span class="tag">evals</span><span class="tag">6 weeks</span>
+        </div>
+      </div>
+      <div class="panel-card">
+        <span class="mono">Buttons</span>
+        <div class="row"><span class="btn btn-solid">Book a review</span><span class="btn btn-ghost">See the work →</span></div>
+      </div>
+      <div class="panel-card">
+        <span class="mono">Segmented control</span>
+        <div class="seg">
+          <span class="seg-item seg-on"><span class="dot"></span>Audit</span>
+          <span class="seg-item">Build</span>
+          <span class="seg-item">Operate</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="pair">
+      <div class="pair-card" style="background:var(--color-surface);border:1px solid var(--color-border)">
+        <div class="stack">
+          <h3 class="card-title">Light card — the state of things</h3>
+          <p class="card-body">Carries the problem, the evidence and the tags. Hairline border, no shadow: it is the calm half of the pair.</p>
+          <div class="row" style="gap:8px"><span class="tag">RAG</span><span class="tag tag-good">audited</span><span class="tag">latency</span></div>
+        </div>
+        <div style="display:flex;flex-direction:row;align-items:center;justify-content:space-between;gap:16px">
+          <span style="font-size:13px;color:var(--color-fg-muted)"><span style="color:var(--color-fg)">(27)</span> findings</span>
+          <span style="font-size:13px;color:var(--color-fg);text-decoration:underline">Read more</span>
+        </div>
+      </div>
+
+      <div class="pair-card" style="background:var(--color-surface-ink)">
+        <div class="stack">
+          <h3 class="card-title on-ink">Ink card — what we do about it</h3>
+          <p class="card-body on-ink-muted">The emphatic half. One per screen, at most. It takes the resolution, the commitment, the price.</p>
+        </div>
+        <div class="stack" style="gap:16px">
+          <span style="font-size:13px;color:var(--color-on-ink-muted)">Fixed scope, six weeks</span>
+          <div class="row">
+            <span class="btn btn-ink"><span class="led"></span>In production</span>
+            <span class="btn btn-ghost">Start an audit →</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
