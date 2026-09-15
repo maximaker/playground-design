@@ -205,16 +205,18 @@ code { font-family: var(--mono); font-size: 0.92em; }
 }
 .logo:hover { background: var(--bg-hover); }
 
-.logotype { display: inline-flex; align-items: center; gap: 0.45em; }
+.logotype { display: inline-flex; align-items: center; gap: 0.62em; }
 .logotype-word {
   font-family: var(--font-display);
   font-weight: 600;
-  letter-spacing: 0.055em;
+  /* Caps need far more tracking than lowercase: set solid they read as a
+     single block, and the last letter needs the space back at the end or the
+     word looks like it is leaning right. */
+  text-transform: uppercase;
+  letter-spacing: 0.185em;
+  padding-right: 0.185em;
   line-height: 1;
-  background: linear-gradient(100deg, var(--logo-from), var(--logo-to));
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
+  color: var(--fg);
   white-space: nowrap;
 }
 
@@ -967,53 +969,145 @@ code { font-family: var(--mono); font-size: 0.92em; }
 .boot-inner { text-align: center; color: var(--fg-muted); display: flex; flex-direction: column; gap: var(--s4); align-items: center; }
 .boot-error { color: var(--danger); margin: 0; }
 
-.home { max-width: 76rem; margin: 0 auto; padding: var(--s6) var(--s5) var(--s6); }
-.home header { margin-bottom: var(--s6); position: relative; }
-.home-actions { display: flex; align-items: center; gap: var(--s3); position: relative; }
-.home .settings-popover { top: 2.6rem; right: auto; left: 0; }
-.home h1 { margin: 0 0 var(--s3); font-size: 1rem; }
-.home header p { color: var(--fg-muted); margin: 0 0 var(--s4); font-size: 1rem; max-width: 46rem; line-height: 1.6; }
+.home { max-width: 82rem; margin: 0 auto; padding: 2.4rem var(--s5) 3rem; }
+
+/* The header is one row: who this is on the left, what you can do on the right.
+   Stacked, it pushed the library below the fold on a laptop. */
+.home-head {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: var(--s5); margin-bottom: 2.4rem; position: relative;
+}
+.home-identity { display: flex; flex-direction: column; gap: var(--s3); min-width: 0; }
+.home h1 { margin: 0; font-size: 1rem; }
+.home-identity p {
+  color: var(--fg-muted); margin: 0; font-size: 0.92rem; max-width: 42rem; line-height: 1.55;
+}
+.home-actions { display: flex; align-items: center; gap: var(--s3); position: relative; flex: 0 0 auto; }
+.home .settings-popover { top: 2.6rem; right: 0; left: auto; }
 .home-error { color: var(--danger); }
 
-.starters { margin: var(--s6) 0; }
-.starters h2 { margin: 0 0 var(--s1); font-size: 1.05rem; }
-.starters > p { margin: 0 0 var(--s4); font-size: 0.9rem; max-width: 52rem; line-height: 1.6; }
-
-.starter-grid, .home-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr)); gap: var(--s4); }
-.starter {
-  display: flex; flex-direction: column; gap: var(--s2); align-items: flex-start; text-align: left;
-  padding: var(--s4); border-radius: var(--radius); background: var(--bg-raised);
-  border: 1px solid var(--border); color: var(--fg);
-  transition: border-color var(--transition), transform var(--transition);
+/* --- Starter kits ----------------------------------------------------------
+ *
+ * Demoted. They matter on the first day and never again, so they are a strip
+ * above the library rather than four large cards competing with the documents.
+ */
+.starters {
+  margin: 0 0 2.4rem; padding-bottom: 2.4rem; border-bottom: 1px solid var(--border);
 }
-.starter:hover:not(:disabled) { border-color: var(--border-strong); transform: translateY(-1px); }
+.starters-head { display: flex; align-items: baseline; gap: var(--s5); margin-bottom: var(--s4); flex-wrap: wrap; }
+.starters h2 { margin: 0; font-size: 0.95rem; }
+.starters-head p { margin: 0; font-size: 0.85rem; max-width: 46rem; line-height: 1.55; }
+.starter-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr)); gap: var(--s3); }
+.starter {
+  display: flex; align-items: center; gap: var(--s3); text-align: left;
+  padding: var(--s3); border-radius: var(--radius);
+  background: var(--bg-raised); border: 1px solid var(--border); color: var(--fg);
+  cursor: pointer; min-width: 0;
+}
+.starter:hover:not(:disabled) { border-color: var(--border-strong); background: var(--bg-hover); }
 .starter:disabled { opacity: .5; }
-.starter span.dim { font-size: 0.82rem; line-height: 1.5; }
-.starter-swatches { display: block; width: 100%; height: 2.2rem; border-radius: var(--radius-sm); margin-bottom: var(--s1); }
-
+.starter-text { display: flex; flex-direction: column; gap: 0.1rem; min-width: 0; }
+.starter-text strong { font-size: 0.88rem; }
+/* One line, clipped: the full sentence is in the button's title. */
+.starter-text .dim {
+  font-size: 0.78rem; line-height: 1.4;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.starter-swatches {
+  display: block; flex: 0 0 auto; width: 2.4rem; height: 2.4rem;
+  border-radius: var(--radius-sm); border: 1px solid var(--border);
+}
 .starter-clean .starter-swatches { background: linear-gradient(90deg,#4f46e5 0 30%,#0f172a 30% 55%,#64748b 55% 75%,#e2e8f0 75% 100%); }
 .starter-editorial .starter-swatches { background: linear-gradient(90deg,#9a3412 0 30%,#1c1917 30% 55%,#78716c 55% 75%,#faf8f5 75% 100%); }
 .starter-brutal .starter-swatches { background: linear-gradient(90deg,#dc2626 0 30%,#000 30% 55%,#3f3f46 55% 75%,#fefce8 75% 100%); }
 .starter-soft .starter-swatches { background: linear-gradient(90deg,#9333ea 0 30%,#3b0764 30% 55%,#7e5a95 55% 75%,#fdf4ff 75% 100%); }
 
-.home-section-title { margin: var(--s6) 0 var(--s4); font-size: 1.05rem; }
+/* --- Documents -------------------------------------------------------------- */
+.home-section-title { margin: 0; font-size: 1.05rem; }
+.home-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr)); gap: var(--s4); }
+.home-list { display: flex; flex-direction: column; gap: 1px; }
+
 .home-card {
-  background: var(--bg-raised); border: 1px solid var(--border); border-radius: var(--radius);
-  padding: var(--s4); cursor: pointer; position: relative;
-  transition: border-color var(--transition), transform var(--transition);
+  position: relative; display: flex; align-items: center; gap: var(--s4);
+  padding: var(--s4); border-radius: var(--radius);
+  background: var(--bg-raised); border: 1px solid var(--border);
+  cursor: pointer; text-align: left; min-width: 0;
 }
-.home-card:hover { border-color: var(--border-strong); transform: translateY(-1px); }
-.home-card h3 { margin: 0 0 var(--s2); font-size: 0.95rem; }
-.home-card p { margin: 0 0 0.1rem; font-size: 0.82rem; }
-.home-card-actions { display: flex; align-items: center; gap: var(--s2); margin-top: var(--s3); opacity: 0; }
-/*
- * Revealed on hover, but also whenever focus is inside — otherwise the move and
- * delete buttons are unreachable by keyboard, which is the version of "tidy"
- * that locks people out.
- */
+.home-card:hover { border-color: var(--border-strong); background: var(--bg-hover); }
+.home-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.home-card[draggable="true"] { cursor: grab; }
+
+/* The tinted slab: identity at a glance, and the thing that stopped these cards
+   from being three lines of grey text in a box of white space. */
+.home-card-face {
+  flex: 0 0 auto; display: grid; place-items: center;
+  width: 2.6rem; height: 2.6rem; border-radius: var(--radius-sm);
+  font-weight: 600; font-size: 1.05rem;
+  /* --tint is a hue, set per document in the markup. */
+  background: color-mix(in srgb, hsl(var(--tint, 240) 65% 50%) 13%, var(--bg-raised));
+  color: hsl(var(--tint, 240) 42% 38%);
+  border: 1px solid color-mix(in srgb, hsl(var(--tint, 240) 60% 45%) 22%, transparent);
+}
+[data-theme='dark'] .home-card-face {
+  background: color-mix(in srgb, hsl(var(--tint, 240) 60% 55%) 16%, var(--bg-raised));
+  color: hsl(var(--tint, 240) 62% 76%);
+}
+.home-card-body { display: flex; flex-direction: column; gap: 0.15rem; min-width: 0; flex: 1 1 auto; }
+.home-card h3 {
+  margin: 0; font-size: 0.95rem; font-weight: 600;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.home-card p {
+  margin: 0; font-size: 0.82rem;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.home-card-sep { margin: 0 0.35em; opacity: 0.55; }
+
+.role-badge {
+  flex: 0 0 auto; align-self: flex-start;
+  font-size: 0.7rem; letter-spacing: 0.06em; text-transform: uppercase;
+  padding: 0.15rem 0.4rem; border-radius: var(--radius-sm);
+  background: var(--bg-input); border: 1px solid var(--border); color: var(--fg-muted);
+}
+
+/* Reserved so the row does not reflow when the actions fade in on hover. */
+.home-card-actions {
+  display: flex; align-items: center; gap: var(--s2); flex: 0 0 auto;
+  opacity: 0; transition: opacity 90ms ease;
+}
+/* Held at the size of the buttons it will contain, so nothing reflows when
+   they fade in — but not a line taller. */
+.home-card-actions .button { font-size: 0.78rem; padding: 0.2rem var(--s2); min-height: 1.6rem; }
 .home-card:hover .home-card-actions,
 .home-card:focus-within .home-card-actions { opacity: 1; }
-.home-card[draggable="true"] { cursor: grab; }
+@media (pointer: coarse) {
+  /* No hover on a touch screen, so the actions are simply always there — and
+     they have to be big enough to hit. */
+  .home-card-actions { opacity: 1; }
+  .home-card-actions .button { min-height: 40px; padding: 0 var(--s3); }
+  .home-grid .home-card { padding-bottom: 3.4rem; }
+}
+
+/* In the grid the actions float over the card's bottom corner instead of
+   reserving a row: an empty strip under every title is what made the old cards
+   look like placeholders waiting for a thumbnail. */
+.home-grid .home-card { flex-direction: column; align-items: stretch; gap: var(--s3); }
+.home-grid .home-card-actions {
+  position: absolute; right: var(--s3); bottom: var(--s3);
+  padding: 0.15rem; border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--bg-raised) 88%, transparent);
+  backdrop-filter: blur(4px);
+}
+.home-grid .home-card-face { width: 100%; height: 3.6rem; font-size: 1.25rem; }
+.home-grid .role-badge { position: absolute; top: var(--s4); right: var(--s4); background: var(--bg-raised); }
+
+.home-list .home-card {
+  border-radius: 0; border-left-color: transparent; border-right-color: transparent;
+  border-bottom: none; padding: var(--s3) var(--s4);
+}
+.home-list .home-card:first-child { border-radius: var(--radius) var(--radius) 0 0; }
+.home-list .home-card:last-child { border-radius: 0 0 var(--radius) var(--radius); border-bottom: 1px solid var(--border); }
+.home-list .home-card-face { width: 2rem; height: 2rem; font-size: 0.85rem; }
 
 /* --- Settings popover ---------------------------------------------------- */
 
@@ -1967,3 +2061,44 @@ code { font-family: var(--mono); font-size: 0.92em; }
   padding: var(--s3); border-radius: var(--radius-sm); cursor: pointer; text-align: left;
 }
 .account-item:hover { background: var(--bg-hover); }
+
+/* --- Library toolbar --------------------------------------------------------- */
+.library-docs-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: var(--s4); flex-wrap: wrap; margin-bottom: var(--s4);
+}
+.library-title { display: flex; align-items: baseline; gap: var(--s3); min-width: 0; }
+.library-tools { display: flex; align-items: center; gap: var(--s3); }
+.library-search {
+  display: inline-flex; align-items: center; gap: var(--s2);
+  padding: 0 var(--s3); height: 2.1rem; min-width: 12rem;
+  background: var(--bg-input); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); color: var(--fg-muted);
+}
+.library-search:focus-within { border-color: var(--accent); color: var(--fg); }
+.library-search input {
+  background: none; border: 0; color: var(--fg); font: inherit; font-size: 0.88rem;
+  width: 100%; min-width: 0; padding: 0;
+}
+.library-search input:focus { outline: none; }
+/* Safari draws its own clear button on a search field, doubled up with ours. */
+.library-search input::-webkit-search-decoration,
+.library-search input::-webkit-search-cancel-button { appearance: none; }
+.library-sort select {
+  font: inherit; font-size: 0.88rem; color: var(--fg);
+  background: var(--bg-input); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); height: 2.1rem; padding: 0 var(--s2);
+}
+.library-view button { min-height: 1.9rem; padding: 0 var(--s3); }
+
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+
+@media (max-width: 760px) {
+  .home-head { flex-direction: column; }
+  .library-docs-head { align-items: flex-start; }
+  .library-tools { width: 100%; }
+  .library-search { flex: 1 1 auto; min-width: 0; }
+}

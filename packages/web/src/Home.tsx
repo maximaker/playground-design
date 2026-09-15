@@ -20,8 +20,20 @@ import type { useSession } from './state/session.ts';
 import { AccountMenu } from './ui/AccountMenu.tsx';
 
 interface DocSummary {
-  id: string; name: string; rev: number; updatedAt: number; nodeCount: number; projectId?: string;
+  id: string; name: string; rev: number; updatedAt: number; nodeCount: number;
+  projectId?: string;
+  /** The caller's own role, so a document shared with you says so. */
+  role?: 'owner' | 'editor' | 'viewer';
 }
+
+type Sort = 'recent' | 'name' | 'size';
+type View = 'grid' | 'list';
+
+const SORTS: { id: Sort; label: string }[] = [
+  { id: 'recent', label: 'Last edited' },
+  { id: 'name', label: 'Name' },
+  { id: 'size', label: 'Size' },
+];
 interface Project { id: string; name: string; createdAt: number; documentCount: number }
 interface TemplateSummary { id: string; name: string; description: string; tokenCount: number }
 
@@ -46,6 +58,15 @@ export function Home({ onOpen, appearance, onAppearance, session }: {
   const [dragOver, setDragOver] = useState<Filter | undefined>(undefined);
   const [menuFor, setMenuFor] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
+  const [query, setQuery] = useState('');
+  const [sort, setSort] = useState<Sort>('recent');
+  // Remembered per person: whichever way you read a library, you read it that
+  // way every day. Not worth a round trip to the server.
+  const [view, setView] = useState<View>(() =>
+    (localStorage.getItem('playground.library.view') as View) ?? 'grid');
+  useEffect(() => {
+    try { localStorage.setItem('playground.library.view', view); } catch { /* not critical */ }
+  }, [view]);
 
   const refresh = useCallback(async () => {
     try {
@@ -92,10 +113,17 @@ export function Home({ onOpen, appearance, onAppearance, session }: {
   }, []);
 
   const shown = useMemo(() => {
-    if (filter === null) return docs;
-    if (filter === 'unfiled') return docs.filter((d) => !d.projectId);
-    return docs.filter((d) => d.projectId === filter);
-  }, [docs, filter]);
+    const inScope = filter === null ? docs
+      : filter === 'unfiled' ? docs.filter((d) => !d.projectId)
+        : docs.filter((d) => d.projectId === filter);
+    const needle = query.trim().toLowerCase();
+    const matched = needle ? inScope.filter((d) => d.name.toLowerCase().includes(needle)) : inScope;
+    const ordered = [...matched];
+    if (sort === 'name') ordered.sort((a, b) => a.name.localeCompare(b.name));
+    else if (sort === 'size') ordered.sort((a, b) => b.nodeCount - a.nodeCount);
+    else ordered.sort((a, b) => b.updatedAt - a.updatedAt);
+    return ordered;
+  }, [docs, filter, query, sort]);
 
   const unfiled = docs.filter((d) => !d.projectId).length;
 
@@ -223,9 +251,11 @@ export function Home({ onOpen, appearance, onAppearance, session }: {
 
   return (
     <div className="home">
-      <header>
-        <h1><Logo size={38} /></h1>
-        <p>A design tool whose documents are real HTML and CSS — and that agents can edit with you.</p>
+      <header className="home-head">
+        <div className="home-identity">
+          <h1><Logo size={30} /></h1>
+          <p>Documents that are real HTML and CSS — and that agents can edit with you.</p>
+        </div>
         <div className="home-actions">
           <button className="button primary" onClick={() => void create()} disabled={creating}>
             <Icon name="plus" size={14} /> Blank document
@@ -269,17 +299,27 @@ export function Home({ onOpen, appearance, onAppearance, session }: {
 
       {templates.length > 0 && (
         <section className="starters">
-          <h2>Start from a design system</h2>
-          <p className="dim">
-            Each kit sets up tokens and a foundations sheet, so you — and any agent you connect —
-            have real variables to reference instead of inventing hex codes.
-          </p>
-          <div className="starter-grid">
+          <div className="starters-head">
+            <h2>Start from a design system</h2>
+            <p className="dim">
+              Each kit sets up tokens and a foundations sheet, so you — and any agent you
+              connect — have real variables to reference instead of inventing hex codes.
+            </p>
+          </div>
+          <div className="starter-row">
             {templates.map((t) => (
-              <button key={t.id} className={`starter starter-${t.id}`} onClick={() => void create(t.id)} disabled={creating}>
+              <button
+                key={t.id}
+                className={`starter starter-${t.id}`}
+                onClick={() => void create(t.id)}
+                disabled={creating}
+                title={t.description}
+              >
                 <span className="starter-swatches" aria-hidden />
-                <strong>{t.name}</strong>
-                <span className="dim">{t.description}</span>
+                <span className="starter-text">
+                  <strong>{t.name}</strong>
+                  <span className="dim">{t.description}</span>
+                </span>
               </button>
             ))}
           </div>
@@ -347,8 +387,46 @@ export function Home({ onOpen, appearance, onAppearance, session }: {
 
           <section className="library-docs">
             <div className="library-docs-head">
-              <h2 className="home-section-title">{title}</h2>
-              <span className="dim">{shown.length} document{shown.length === 1 ? '' : 's'}</span>
+              <div className="library-title">
+                <h2 className="home-section-title">{title}</h2>
+                <span className="dim">
+                  {shown.length} document{shown.length === 1 ? '' : 's'}
+                  {query && docs.length !== shown.length ? ` of ${docs.length}` : ''}
+                </span>
+              </div>
+
+              <div className="library-tools">
+                <label className="library-search">
+                  <Icon name="search" size={13} />
+                  <input
+                    type="search"
+                    value={query}
+                    placeholder="Search documents"
+                    aria-label="Search documents"
+                    onChange={(e) => setQuery(e.target.value)}
+                  />
+                </label>
+
+                <label className="library-sort">
+                  <span className="sr-only">Sort by</span>
+                  <select value={sort} onChange={(e) => setSort(e.target.value as Sort)}>
+                    {SORTS.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
+                  </select>
+                </label>
+
+                <div className="segmented library-view">
+                  <button
+                    className={view === 'grid' ? 'is-active' : ''}
+                    onClick={() => setView('grid')}
+                    title="Grid" aria-label="Grid view" aria-pressed={view === 'grid'}
+                  ><Icon name="grid" size={13} /></button>
+                  <button
+                    className={view === 'list' ? 'is-active' : ''}
+                    onClick={() => setView('list')}
+                    title="List" aria-label="List view" aria-pressed={view === 'list'}
+                  ><Icon name="list" size={13} /></button>
+                </div>
+              </div>
             </div>
 
             {note && (
@@ -358,7 +436,7 @@ export function Home({ onOpen, appearance, onAppearance, session }: {
               </p>
             )}
 
-            <div className="home-grid">
+            <div className={view === 'grid' ? 'home-grid' : 'home-list'}>
               {shown.map((d) => (
                 <div
                   key={d.id}
@@ -372,9 +450,35 @@ export function Home({ onOpen, appearance, onAppearance, session }: {
                   }}
                   onClick={() => onOpen(d.id)}
                 >
-                  <h3>{d.name}</h3>
-                  <p className="dim">{d.nodeCount} layers · rev {d.rev}</p>
-                  <p className="dim">{relativeTime(d.updatedAt)}</p>
+                  {/*
+                    * A tinted slab keyed to the document's own id. Not
+                    * decoration: it is the same colour every time, so a
+                    * document becomes findable by shape in a grid of twenty
+                    * before you have read a single title.
+                    */}
+                  <span className="home-card-face" style={faceStyle(d.id)} aria-hidden>
+                    <span className="home-card-initial">{(d.name.trim()[0] ?? '?').toUpperCase()}</span>
+                  </span>
+
+                  <div className="home-card-body">
+                    <h3>{d.name}</h3>
+                    <p className="dim" title={`Revision ${d.rev}`}>
+                      {d.nodeCount.toLocaleString()} layer{d.nodeCount === 1 ? '' : 's'}
+                      <span className="home-card-sep">·</span>
+                      {relativeTime(d.updatedAt)}
+                      {d.projectId && projects.find((p) => p.id === d.projectId) && (
+                        <>
+                          <span className="home-card-sep">·</span>
+                          {projects.find((p) => p.id === d.projectId)!.name}
+                        </>
+                      )}
+                    </p>
+                  </div>
+
+                  {/* Only worth saying when it is not the ordinary case. */}
+                  {d.role && d.role !== 'owner' && (
+                    <span className={`role-badge role-${d.role}`}>{d.role}</span>
+                  )}
 
                   <div className="home-card-actions" onClick={(e) => e.stopPropagation()}>
                     <span className="home-card-menu-anchor">
@@ -422,6 +526,25 @@ export function Home({ onOpen, appearance, onAppearance, session }: {
 }
 
 /** Short relative time — an absolute timestamp is noise on a document list. */
+/**
+ * A stable tint for a document, derived from its id.
+ *
+ * Only the hue varies, and only as a custom property — the CSS mixes it into
+ * the surface colour so the tint is a wash rather than a block of paint. Eight
+ * saturated slabs in a grid look like a toy; the same eight at 12% look like a
+ * filing system.
+ *
+ * The hue is a hash rather than a random pick, so a document is the same colour
+ * tomorrow and becomes findable by shape before you have read a title. Colour is
+ * never the only signal — the name is right there — so nothing is lost if two
+ * hues look alike to you.
+ */
+function faceStyle(id: string): React.CSSProperties {
+  let hash = 0;
+  for (const ch of id) hash = (hash * 31 + ch.charCodeAt(0)) % 360;
+  return { '--tint': String(hash) } as React.CSSProperties;
+}
+
 function relativeTime(ts: number): string {
   if (!Number.isFinite(ts)) return 'just now';
   const diff = Date.now() - ts;

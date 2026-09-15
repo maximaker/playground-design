@@ -330,6 +330,11 @@ content. Detach bakes everything in and drops the link.
 control from browser zoom, because browser zoom scales the canvas too — and the canvas has to stay at
 its true size while you design.
 
+**The library.** Search, sort (last edited, name, size) and a grid-or-list view that is remembered per
+person. Each document carries a tint derived from its id — the same colour every time, so a document
+becomes findable by shape before you have read a title, and never the only signal since the name is
+beside it. A role badge appears only when a document is not yours outright.
+
 **Accounts.** Email and password, hashed with scrypt, session cookies, all inside the instance — a
 self-hosted server with no mail service must still be able to sign its owner in. One consequence is
 stated rather than hidden: addresses are recorded but **not verified**, and there is no reset-by-email,
