@@ -7,6 +7,7 @@
  */
 
 import { sanitizeMarkup } from './sanitize.ts';
+import { fontFamiliesIn, googleFontsHref } from './fonts.ts';
 import { parse as parseHtmlDom, type HTMLElement as ParsedElement } from 'node-html-parser';
 import {
   type CanvasDocument, type CanvasNode, type NodeId, type NodeType, type StyleMap,
@@ -190,6 +191,15 @@ export function tokenCss(doc: CanvasDocument, theme = 'default'): string {
 /** A full standalone HTML document for an artboard — used by export and preview. */
 export function emitStandalone(doc: CanvasDocument, rootId: NodeId, opts: EmitOptions = {}): string {
   const { html, css } = emitHtml(doc, rootId, { ...opts, mode: opts.mode ?? 'stylesheet' });
+  /*
+   * The web fonts the design uses.
+   *
+   * Without this an exported page silently lost its typefaces and reflowed into
+   * whatever the system stack is — the export looked like the design in every
+   * way except the one a designer would check first.
+   */
+  const href = googleFontsHref(fontFamiliesIn(doc, rootId));
+  const fontsLink = href ? `<link rel="stylesheet" href="${escapeAttr(href)}" />\n` : '';
   const themeCss = doc.themes
     .filter((t) => t !== 'default')
     .map((t) => tokenCss(doc, t))
@@ -201,7 +211,7 @@ export function emitStandalone(doc: CanvasDocument, rootId: NodeId, opts: EmitOp
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>${escapeText(doc.nodes[rootId]?.name ?? doc.name)}</title>
-<style>
+${fontsLink}<style>
 *, *::before, *::after { box-sizing: border-box; }
 body { margin: 0; }
 ${css}

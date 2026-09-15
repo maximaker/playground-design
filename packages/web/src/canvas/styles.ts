@@ -1,7 +1,7 @@
 /** Conversions between the document's CSS-shaped styles and React style objects. */
 
 import type { CanvasDocument, CanvasNode, NodeId, StyleMap } from '@playground/shared';
-import { contestedProperties, descendants } from '@playground/shared';
+import { contestedProperties, descendants, fontFamiliesIn } from '@playground/shared';
 import type { CSSProperties } from 'react';
 
 export function toReactStyle(styles: StyleMap): CSSProperties {
@@ -67,34 +67,15 @@ export function artboardStylesheet(doc: CanvasDocument, artboardId: NodeId, them
   return blocks.join('\n\n');
 }
 
-/** Font families referenced anywhere in an artboard, for Google Fonts loading. */
+/**
+ * Font loading lives in shared now: the canvas and the standalone export have
+ * to agree about which families a design needs, and they did not — the export
+ * asked for none at all.
+ */
+export { fontFamiliesIn, googleFontsHref } from '@playground/shared';
+
 export function fontFamilies(doc: CanvasDocument, artboardId: NodeId): string[] {
-  const families = new Set<string>();
-  for (const id of [artboardId, ...descendants(doc, artboardId)]) {
-    const node = doc.nodes[id];
-    if (!node) continue;
-    for (const source of [node.styles, ...node.variants.map((v) => v.styles)]) {
-      const family = source['font-family'];
-      if (!family) continue;
-      const first = family.split(',')[0]!.trim().replace(/^['"]|['"]$/g, '');
-      if (first && !GENERIC.has(first.toLowerCase())) families.add(first);
-    }
-  }
-  return [...families];
-}
-
-const GENERIC = new Set([
-  'inherit', 'initial', 'unset', 'serif', 'sans-serif', 'monospace', 'cursive', 'fantasy',
-  'system-ui', 'ui-sans-serif', 'ui-serif', 'ui-monospace', '-apple-system',
-  'arial', 'helvetica', 'georgia', 'times new roman', 'courier new', 'verdana',
-]);
-
-export function googleFontsHref(families: string[]): string | null {
-  if (!families.length) return null;
-  const params = families
-    .map((f) => `family=${encodeURIComponent(f).replace(/%20/g, '+')}:ital,wght@0,100..900;1,100..900`)
-    .join('&');
-  return `https://fonts.googleapis.com/css2?${params}&display=swap`;
+  return fontFamiliesIn(doc, artboardId);
 }
 
 /** Whether a node participates in its parent's flex flow. */
