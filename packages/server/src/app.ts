@@ -32,6 +32,8 @@ import {
 import { importUrl, ImportError } from './import.ts';
 import { getTemplate, templateSummaries, type Template } from './templates.ts';
 import { renderNode } from './render.ts';
+import { persistence } from './persistence.ts';
+import { DB_PATH } from './persistence-sqlite.ts';
 
 const PORT = Number(process.env.PORT ?? 4000);
 const PUBLIC_URL =
@@ -94,7 +96,25 @@ app.onError((err, c) => {
 
 const api = new Hono();
 
-api.get('/health', (c) => c.json({ ok: true, version: '0.1.0' }));
+/**
+ * Health, plus the two settings that are wrong most often on a fresh deploy.
+ *
+ * Both are things a caller can already observe — the public URL is in every
+ * link the server hands out, and the storage kind is obvious from behaviour —
+ * so reporting them leaks nothing and saves digging through container logs to
+ * find out whether an environment variable actually arrived.
+ */
+api.get('/health', async (c) => {
+  const store = await persistence();
+  return c.json({
+    ok: true,
+    version: '0.1.0',
+    publicUrl: PUBLIC_URL,
+    publicUrlConfigured: !!process.env.PLAYGROUND_PUBLIC_URL,
+    storage: store.kind,
+    ...(store.kind === 'sqlite' ? { database: DB_PATH } : {}),
+  });
+});
 
 api.get('/documents', async (c) => c.json({ documents: await listDocuments() }));
 
