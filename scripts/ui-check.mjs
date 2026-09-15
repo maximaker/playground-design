@@ -352,6 +352,21 @@ check('⇧0 returns to 100%',
 // A width typed into a field must still be a width, not a zoom.
 await view.evaluate(() => window.__playground.store.getState().select([]));
 
+// Scrollbars are furniture, and there are none — but everything still scrolls.
+const bars = await view.evaluate(() => {
+  const out = [];
+  for (const el of document.querySelectorAll('*')) {
+    const st = getComputedStyle(el);
+    if (!/auto|scroll/.test(st.overflowY + st.overflowX)) continue;
+    const width = el.offsetWidth - el.clientWidth;
+    const height = el.offsetHeight - el.clientHeight;
+    const border = parseFloat(st.borderLeftWidth) + parseFloat(st.borderRightWidth);
+    if (width - border > 1 || height > 1) out.push(el.className || el.tagName);
+  }
+  return out;
+});
+check('no scrollable area draws a scrollbar', bars.length === 0, bars.slice(0, 3).join(' | '));
+
 // --- The other two surfaces ------------------------------------------------------
 
 await view.goto(`${BASE}/`, { waitUntil: 'networkidle' });

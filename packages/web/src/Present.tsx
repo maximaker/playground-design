@@ -41,6 +41,12 @@ export function Present() {
   const doc = getDoc();
 
   const [scaling, setScaling] = useState<Scaling>('fit');
+  /*
+   * A zoom the person set themselves, which overrides the scaling mode until
+   * they pick one again. Presenting is not only showing: it is also "hold on,
+   * let me get closer to that", and a mode with three fixed sizes cannot do it.
+   */
+  const [custom, setCustom] = useState<number | null>(null);
   const [showComments, setShowComments] = useState(false);
   const [chrome, setChrome] = useState(true);
   // Measured from the stage, not the window: the stage has padding, and a
@@ -48,6 +54,9 @@ export function Present() {
   const stageRef = useRef<HTMLDivElement | null>(null);
   const [size, setSize] = useState({ width: window.innerWidth, height: window.innerHeight });
   const hideTimer = useRef<number>(0);
+  // Read by the wheel handler, which is installed once and must not close over
+  // a stale fit — the window can be resized under it.
+  const fittedRef = useRef(1);
 
   const page = doc?.pages.find((p) => p.id === present?.pageId) ?? doc?.pages[0];
   const frames = useMemo(
@@ -59,7 +68,11 @@ export function Present() {
 
   const go = useCallback((next: number) => {
     if (!present) return;
-    setPresent({ ...present, index: Math.max(0, Math.min(frames.length - 1, next)) });
+    const index = Math.max(0, Math.min(frames.length - 1, next));
+    if (index === present.index) return;
+    // A zoom belongs to the frame you were looking at, not to the deck.
+    setCustom(null);
+    setPresent({ ...present, index });
   }, [present, frames.length, setPresent]);
 
   // The bar gets out of the way of the thing it is describing, and comes back
@@ -91,42 +104,112 @@ export function Present() {
     };
   }, [present, wake]);
 
+  const onKey = useCallback((e: KeyboardEvent) => {
+    const target = e.target as HTMLElement | null;
+    const typing = target?.tagName === 'TEXTAREA' || target?.tagName === 'INPUT';
+    if (typing && e.key !== 'Escape') return;
+    const keys = ['ArrowRight', 'ArrowLeft', 'ArrowDown', 'ArrowUp', ' ', 'Home', 'End',
+      'Escape', 'PageDown', 'PageUp', 'f', 'c'];
+    if (!keys.includes(e.key) || e.metaKey || e.ctrlKey) return;
+    e.preventDefault();
+    e.stopPropagation();
+    wake();
+    if (e.key === 'Escape') {
+      if (useCanvas.getState().draftComment) return useCanvas.getState().setDraftComment(null);
+      return exit(setPresent);
+    }
+    if (e.key === 'ArrowRight' || e.key === 'ArrowDown' || e.key === ' ' || e.key === 'PageDown') go(index + 1);
+    else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp' || e.key === 'PageUp') go(index - 1);
+    else if (e.key === 'Home') go(0);
+    else if (e.key === 'End') go(frames.length - 1);
+    else if (e.key === 'f') void toggleFullscreen();
+    else if (e.key === 'c') setShowComments((v) => !v);
+  }, [index, frames.length, go, setPresent, wake]);
+
   useEffect(() => {
     if (!present) return;
-    const onKey = (e: KeyboardEvent) => {
-      const typing = (e.target as HTMLElement | null)?.tagName === 'TEXTAREA'
-        || (e.target as HTMLElement | null)?.tagName === 'INPUT';
-      if (typing && e.key !== 'Escape') return;
-      const keys = ['ArrowRight', 'ArrowLeft', 'ArrowDown', 'ArrowUp', ' ', 'Home', 'End',
-        'Escape', 'PageDown', 'PageUp', 'f', 'c'];
-      if (!keys.includes(e.key)) return;
-      e.preventDefault();
-      e.stopPropagation();
-      wake();
-      if (e.key === 'Escape') {
-        if (useCanvas.getState().draftComment) return useCanvas.getState().setDraftComment(null);
-        return exit(setPresent);
-      }
-      if (e.key === 'ArrowRight' || e.key === 'ArrowDown' || e.key === ' ' || e.key === 'PageDown') go(index + 1);
-      else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp' || e.key === 'PageUp') go(index - 1);
-      else if (e.key === 'Home') go(0);
-      else if (e.key === 'End') go(frames.length - 1);
-      else if (e.key === 'f') void toggleFullscreen();
-      else if (e.key === 'c') setShowComments((v) => !v);
-    };
     // Capture, because the editor's own shortcuts are still listening: `f`
     // would otherwise pick up the frame tool behind the presentation.
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
-  }, [present, index, frames.length, go, setPresent, wake]);
+  }, [present, onKey]);
+
+  /*
+   * And the same handler inside the frame.
+   *
+   * An artboard is a real iframe, and clicking one moves focus into its
+   * document — after which its key events belong to that window and never
+   * reach this one. It showed up as the arrows going dead at Actual size,
+   * where you click to scroll around before trying to move on.
+   */
+  useEffect(() => {
+    if (!present) return;
+    let frameDoc: Document | null = null;
+    const attach = () => {
+      const next = document.querySelector<HTMLIFrameElement>('.present-frame iframe')?.contentDocument ?? null;
+      if (next === frameDoc) return;
+      frameDoc?.removeEventListener('keydown', onKey, true);
+      frameDoc = next;
+      frameDoc?.addEventListener('keydown', onKey, true);
+    };
+    attach();
+    // The frame is replaced on every move through the deck, so this keeps up
+    // with it rather than assuming the one that was there when it started.
+    const timer = window.setInterval(attach, 400);
+    return () => {
+      window.clearInterval(timer);
+      frameDoc?.removeEventListener('keydown', onKey, true);
+    };
+  }, [present, onKey]);
+
+  /*
+   * Zoom on ⌘/Ctrl-wheel, which is also what a trackpad pinch sends.
+   *
+   * A native listener because React registers wheel as passive, where
+   * preventDefault does nothing but warn — and without it the browser zooms
+   * the whole window, which is the thing this tool has to stop doing.
+   *
+   * The point under the cursor is held by measuring where it lands after the
+   * new scale and scrolling back by the difference. Computing it in advance
+   * means predicting what the centring margins will do, which is a second
+   * layout algorithm to keep in step with the first.
+   */
+  useEffect(() => {
+    const stage = stageRef.current;
+    if (!stage || !present) return;
+    const onWheel = (e: WheelEvent) => {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      e.preventDefault();
+      const frame = stage.querySelector<HTMLElement>('.present-frame');
+      if (!frame) return;
+      const rect = frame.getBoundingClientRect();
+      const at = { x: (e.clientX - rect.left), y: (e.clientY - rect.top) };
+      setCustom((previous) => {
+        const from = previous ?? fittedRef.current;
+        const next = Math.min(4, Math.max(0.05, from * (1 - e.deltaY / 400)));
+        const k = next / from;
+        requestAnimationFrame(() => {
+          const after = frame.getBoundingClientRect();
+          stage.scrollLeft += (after.left + at.x * k) - e.clientX;
+          stage.scrollTop += (after.top + at.y * k) - e.clientY;
+        });
+        return next;
+      });
+      wake();
+    };
+    stage.addEventListener('wheel', onWheel, { passive: false });
+    return () => stage.removeEventListener('wheel', onWheel);
+  }, [present, wake]);
 
   if (!present || !doc || !page || !current) return null;
 
   const node = doc.nodes[current];
   const { width, height } = node ? getArtboardSize(node) : { width: 0, height: 0 };
-  const scale = scaling === 'actual' ? 1
+  const fitted = scaling === 'actual' ? 1
     : scaling === 'fill' ? size.width / Math.max(1, width)
       : Math.min(size.width / Math.max(1, width), size.height / Math.max(1, height));
+  const scale = custom ?? fitted;
+  fittedRef.current = fitted;
 
   return createPortal(
     <div
@@ -196,10 +279,18 @@ export function Present() {
               key={s.value}
               className={scaling === s.value ? 'is-active' : ''}
               title={s.hint}
-              onClick={() => setScaling(s.value)}
+              onClick={() => { setScaling(s.value); setCustom(null); }}
             >{s.label}</button>
           ))}
         </div>
+
+        {custom !== null && (
+          <button
+            className="present-zoom tabular"
+            onClick={() => setCustom(null)}
+            title="Back to the scaling mode"
+          >{Math.round(scale * 100)}%</button>
+        )}
 
         <button
           className={`icon-button${showComments ? ' is-active' : ''}`}
@@ -282,7 +373,19 @@ function PresentFrame({ id, width, height, scale, scaling, comments }: {
           // Presented frames are for looking at: nothing here edits the
           // document, so the frame does not need to reach back out of itself.
           sandbox="allow-same-origin allow-scripts"
-          style={{ width, height, border: 0, display: 'block', background: '#fff' }}
+          /*
+           * Transparent to the pointer.
+           *
+           * An iframe swallows every event that happens over it — clicks never
+           * reach the presentation, ⌘-wheel never reaches the zoom, and a click
+           * moves focus into that document, after which the arrow keys belong
+           * to it. Since a presented frame is for looking at, the cheapest
+           * correct answer is for it not to take the pointer at all.
+           */
+          style={{
+            width, height, border: 0, display: 'block', background: '#fff',
+            pointerEvents: 'none',
+          }}
         />
         {body && createPortal(<NodeView id={id} isRoot />, body)}
       </div>

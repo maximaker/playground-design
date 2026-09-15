@@ -140,6 +140,57 @@ check('fill width uses the whole window', Math.abs(filled - 1280) < 4, `${filled
 await view.locator('.present-scaling button', { hasText: 'Fit' }).first().click();
 await view.waitForTimeout(600);
 
+// --- Scrolling and zooming ---------------------------------------------------------
+
+await view.locator('.present-scaling button', { hasText: 'Actual size' }).click();
+await view.waitForTimeout(700);
+const actual = await view.evaluate(() => {
+  const stage = document.querySelector('.present-stage');
+  const frame = document.querySelector('.present-frame iframe');
+  return {
+    scrollable: stage.scrollHeight > stage.clientHeight || stage.scrollWidth > stage.clientWidth,
+    onScreen: Math.round(frame.getBoundingClientRect().width),
+    // A scrollbar would take width from the content box; none of ours do.
+    bar: stage.offsetWidth - stage.clientWidth,
+  };
+});
+check('at actual size the frame is 1:1 and the stage scrolls',
+  actual.onScreen === 1440 && actual.scrollable, JSON.stringify(actual));
+check('and no scrollbar is drawn for it', actual.bar === 0, `${actual.bar}px of furniture`);
+
+// The bug that came out of this: clicking a frame moves focus into its iframe
+// document, and from then on the arrows belonged to that window.
+await view.mouse.move(640, 400);
+await view.evaluate(() => {
+  document.querySelector('.present-frame iframe').contentDocument.body.focus();
+});
+await view.keyboard.press('ArrowRight');
+await view.waitForTimeout(700);
+check('the arrows still work after the frame has taken focus',
+  (await counter()).trim() === '3 / 3', await counter());
+await view.keyboard.press('ArrowLeft');
+await view.waitForTimeout(600);
+
+// ⌘-wheel zooms the presentation rather than the window.
+await view.mouse.move(640, 400);
+await view.keyboard.down('Meta');
+await view.mouse.wheel(0, -240);
+await view.keyboard.up('Meta');
+await view.waitForTimeout(600);
+const zoomed = await view.evaluate(() => {
+  const el = document.querySelector('.present-zoom');
+  const frame = document.querySelector('.present-frame iframe');
+  return { readout: el?.textContent, width: Math.round(frame.getBoundingClientRect().width) };
+});
+check('⌘-wheel zooms the frame and says by how much',
+  !!zoomed.readout && zoomed.width > 1440, JSON.stringify(zoomed));
+await view.locator('.present-zoom').click();
+await view.waitForTimeout(500);
+check('and the readout puts it back', (await view.locator('.present-zoom').count()) === 0);
+
+await view.locator('.present-scaling button', { hasText: 'Fit' }).first().click();
+await view.waitForTimeout(600);
+
 // --- The bar gets out of the way ---------------------------------------------------
 
 await view.mouse.move(640, 410);
