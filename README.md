@@ -522,6 +522,8 @@ that export emits the import rather than the markup.
   surface the way an agent does, including the error paths
 - `packages/server/src/fidelity.test.ts` — the export-fidelity gate: render an artboard, export it,
   re-import the export into a fresh document, render that, and pixel-diff the two
+- `scripts/artboard-remount-check.mjs` — an artboard that scrolls out of view and comes back must
+  render again, not come back blank
 - `scripts/agent/deck.mjs` + `deck.html` — the Northsignal capabilities deck, ten 1920×1080 slides on
   their own page of the document, built from the landing page's tokens;
   `scripts/agent/deck-check.mjs` renders each slide standalone and fails on one that does not fit

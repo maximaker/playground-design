@@ -76,9 +76,15 @@ export const Artboard = memo(function Artboard({ id, live }: Props) {
   );
 
   // Set up the iframe document once it exists, then portal the node tree in.
+  //
+  // `live` is a dependency because an artboard that scrolls out of view unmounts
+  // its iframe and mounts a brand new one when it comes back. Keyed to `id`
+  // alone, this effect did not re-run for that second frame: the portal kept
+  // writing into the body of the document that had just been thrown away, and
+  // the artboard stayed blank for the rest of the session.
   useEffect(() => {
     const frame = frameRef.current;
-    if (!frame) { setBody(null); return; }
+    if (!live || !frame) { setBody(null); return; }
     registerFrame(id, frame);
 
     const init = () => {
@@ -105,7 +111,7 @@ export const Artboard = memo(function Artboard({ id, live }: Props) {
       frame.removeEventListener('load', init);
       registerFrame(id, null);
     };
-  }, [id]);
+  }, [id, live]);
 
   // Variants and fonts go in the iframe head, outside the React tree.
   useEffect(() => {
