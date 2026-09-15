@@ -2,7 +2,7 @@
 
 import type { CanvasDocument } from '@playground/shared';
 import type {
-  DocSummary, Persistence, StoredAsset, StoredConnection, StoredShare, StoredSnapshot,
+  DocSummary, Persistence, StoredAsset, StoredConnection, StoredProject, StoredShare, StoredSnapshot,
 } from './persistence.ts';
 
 export class MemoryPersistence implements Persistence {
@@ -12,6 +12,7 @@ export class MemoryPersistence implements Persistence {
   private docs = new Map<string, { doc: CanvasDocument; updatedAt: number }>();
   private connections = new Map<string, StoredConnection>();
   private shares = new Map<string, StoredShare>();
+  private projects = new Map<string, StoredProject>();
   private assets = new Map<string, StoredAsset>();
   private snapshots = new Map<string, StoredSnapshot>();
 
@@ -25,6 +26,7 @@ export class MemoryPersistence implements Persistence {
       .map(({ doc, updatedAt }) => ({
         id: doc.id, name: doc.name, rev: doc.rev, updatedAt,
         nodeCount: Object.keys(doc.nodes).length,
+        projectId: doc.projectId,
       }))
       .sort((a, b) => b.updatedAt - a.updatedAt);
   }
@@ -34,6 +36,12 @@ export class MemoryPersistence implements Persistence {
     return [...this.connections.values()].filter((c) => !docId || c.docId === docId);
   }
   async loadConnection(code: string) { return this.connections.get(code) ?? null; }
+
+  async saveProject(project: StoredProject) { this.projects.set(project.id, project); }
+  async loadProjects() {
+    return [...this.projects.values()].sort((a, b) => a.name.localeCompare(b.name));
+  }
+  async deleteProject(id: string) { return this.projects.delete(id); }
 
   async saveShare(share: StoredShare) { this.shares.set(share.token, share); }
   async loadShares(docId: string) {

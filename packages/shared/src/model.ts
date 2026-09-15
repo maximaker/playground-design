@@ -343,6 +343,14 @@ export interface CanvasDocument {
   codeComponents?: Record<string, CodeComponent>;
   /** Comment threads, across all pages. */
   comments?: Comment[];
+  /**
+   * The project this document is filed under, or undefined for unfiled.
+   *
+   * Library metadata, not design content: it is set through the REST API rather
+   * than through an op, so moving a document between projects is not something
+   * the canvas can undo or that gets replayed to everyone editing it.
+   */
+  projectId?: string;
   /** Named widths this design is authored against. */
   breakpoints?: Breakpoint[];
   /** Monotonic, bumped on every applied op. Used for reconnect/catch-up. */

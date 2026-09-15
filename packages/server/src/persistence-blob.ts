@@ -14,7 +14,7 @@
 
 import type { CanvasDocument } from '@playground/shared';
 import type {
-  DocSummary, Persistence, StoredAsset, StoredConnection, StoredShare, StoredSnapshot,
+  DocSummary, Persistence, StoredAsset, StoredConnection, StoredProject, StoredShare, StoredSnapshot,
 } from './persistence.ts';
 
 type BlobModule = typeof import('@vercel/blob');
@@ -65,6 +65,7 @@ export class BlobPersistence implements Persistence {
     await this.putJson(`index/${doc.id}.json`, {
       id: doc.id, name: doc.name, rev: doc.rev, updatedAt: Date.now(),
       nodeCount: Object.keys(doc.nodes).length,
+      projectId: doc.projectId,
     } satisfies DocSummary);
   }
 
@@ -91,6 +92,22 @@ export class BlobPersistence implements Persistence {
     const { blobs } = await list({ prefix: 'connections/', token: this.token, limit: 500 });
     const all = await Promise.all(blobs.map((b) => this.getJson<StoredConnection>(b.pathname)));
     return all.filter((c): c is StoredConnection => !!c && (!docId || c.docId === docId));
+  }
+
+  async saveProject(p: StoredProject) { await this.putJson(`projects/${p.id}.json`, p); }
+
+  async loadProjects(): Promise<StoredProject[]> {
+    const { list } = await this.blob();
+    const { blobs } = await list({ prefix: 'projects/', token: this.token, limit: 200 });
+    const all = await Promise.all(blobs.map((b) => this.getJson<StoredProject>(b.pathname)));
+    return all.filter((p): p is StoredProject => !!p).sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  async deleteProject(id: string): Promise<boolean> {
+    const { del } = await this.blob();
+    if (!(await this.getJson<StoredProject>(`projects/${id}.json`))) return false;
+    await del(`projects/${id}.json`, { token: this.token });
+    return true;
   }
 
   async saveShare(s: StoredShare) { await this.putJson(`shares/${s.token}.json`, s); }

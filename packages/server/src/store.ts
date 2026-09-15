@@ -110,6 +110,17 @@ async function markDirty(id: string): Promise<void> {
   scheduleFlush();
 }
 
+/**
+ * Persists a change made directly to a cached document, outside the op log.
+ *
+ * Only for library metadata — filing a document under a project, say. Anything
+ * that changes the design must go through `applyOps`, or it will not reach the
+ * people looking at it and cannot be undone.
+ */
+export async function touchDocument(id: string): Promise<void> {
+  await markDirty(id);
+}
+
 // ---------------------------------------------------------------------------
 // Documents
 // ---------------------------------------------------------------------------
@@ -130,7 +141,13 @@ export async function listDocuments(): Promise<DocSummary[]> {
   return stored.map((s) => {
     const live = cache.get(s.id);
     return live
-      ? { ...s, name: live.name, rev: live.rev, nodeCount: Object.keys(live.nodes).length }
+      ? {
+          ...s, name: live.name, rev: live.rev,
+          nodeCount: Object.keys(live.nodes).length,
+          // Filing is written to the cached document and flushed later, so the
+          // stored index lags behind it until then.
+          projectId: live.projectId,
+        }
       : s;
   });
 }

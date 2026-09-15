@@ -425,6 +425,7 @@ node scripts/comment-check.mjs        # the whole loop, person → agent → res
 node scripts/cursor-check.mjs         # two tabs at different zooms
 node scripts/drop-check.mjs           # a real DataTransfer, both placements
 node scripts/agent-review-check.mjs   # a real MCP session, outlined and reverted
+node scripts/project-check.mjs        # filing, counts, and that deleting keeps documents
 ```
 
 Two of them are honest about the deployment rather than failing on it: presence rides the WebSocket,
@@ -443,6 +444,31 @@ that export emits the import rather than the markup.
   surface the way an agent does, including the error paths
 - `packages/server/src/fidelity.test.ts` — the export-fidelity gate: render an artboard, export it,
   re-import the export into a fresh document, render that, and pixel-diff the two
+
+## Projects
+
+A flat list stops being a library somewhere around thirty files, and this is a tool designed to make
+files quickly — an agent can create one in a single call. Projects are the smallest thing that fixes
+that: a name, and a membership field on each document. The library puts them down one side, with
+**All documents** and **Unfiled** above them.
+
+Documents move by dragging a card onto a project, and by a menu on the card as well: dragging is the
+faster gesture and the one people reach for, but it is invisible until you try it and impossible with
+a keyboard. A document created while a project is open is filed into it.
+
+Two deliberate restraints. Membership is library metadata, not design content — it is set through the
+REST API rather than an op, so filing a document is not something the canvas can undo, does not enter
+version history, and is not replayed to everyone editing it. And **deleting a project never deletes
+documents**: they come back as unfiled, and the confirmation says so before you agree to it.
+
+| | |
+|---|---|
+| `GET /api/projects` | With a document count each |
+| `POST /api/projects` | `{ name }` |
+| `PATCH /api/projects/:id` | Rename |
+| `DELETE /api/projects/:id` | Returns how many documents it unfiled |
+| `PUT /api/documents/:id/project` | `{ projectId }`, or `null` to unfile |
+| `POST /api/documents` | Accepts `projectId`, so create-and-file is one call |
 
 ## Sharing
 

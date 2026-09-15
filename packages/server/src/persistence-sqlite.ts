@@ -6,7 +6,8 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { CanvasDocument } from '@playground/shared';
 import type {
-  DocSummary, Persistence, ShareRole, StoredAsset, StoredConnection, StoredShare, StoredSnapshot,
+  DocSummary, Persistence, ShareRole, StoredAsset, StoredConnection, StoredProject, StoredShare,
+  StoredSnapshot,
 } from './persistence.ts';
 
 // Anchored to the package, not the working directory: resolving against cwd
@@ -44,6 +45,10 @@ export class SqlitePersistence implements Persistence {
         revoked INTEGER NOT NULL DEFAULT 0
       );
       CREATE INDEX IF NOT EXISTS connections_doc ON connections(doc_id);
+
+      CREATE TABLE IF NOT EXISTS projects (
+        id TEXT PRIMARY KEY, name TEXT NOT NULL, created_at INTEGER NOT NULL
+      );
 
       CREATE TABLE IF NOT EXISTS shares (
         token TEXT PRIMARY KEY,
@@ -92,10 +97,14 @@ export class SqlitePersistence implements Persistence {
     const rows = this.db.prepare(
       'SELECT id, name, rev, updated_at, data FROM documents ORDER BY updated_at DESC',
     ).all() as { id: string; name: string; rev: number; updated_at: number; data: string }[];
-    return rows.map((r) => ({
-      id: r.id, name: r.name, rev: r.rev, updatedAt: r.updated_at,
-      nodeCount: Object.keys((JSON.parse(r.data) as CanvasDocument).nodes).length,
-    }));
+    return rows.map((r) => {
+      const doc = JSON.parse(r.data) as CanvasDocument;
+      return {
+        id: r.id, name: r.name, rev: r.rev, updatedAt: r.updated_at,
+        nodeCount: Object.keys(doc.nodes).length,
+        projectId: doc.projectId,
+      };
+    });
   }
 
   async saveConnection(c: StoredConnection): Promise<void> {
@@ -117,6 +126,24 @@ export class SqlitePersistence implements Persistence {
   async loadConnection(code: string): Promise<StoredConnection | null> {
     const row = this.db.prepare('SELECT * FROM connections WHERE code = ?').get(code) as Record<string, unknown> | undefined;
     return row ? toConnection(row) : null;
+  }
+
+  async saveProject(p: StoredProject): Promise<void> {
+    this.db.prepare('INSERT OR REPLACE INTO projects (id, name, created_at) VALUES (?, ?, ?)')
+      .run(p.id, p.name, p.createdAt);
+  }
+
+  async loadProjects(): Promise<StoredProject[]> {
+    const rows = this.db.prepare('SELECT * FROM projects ORDER BY name COLLATE NOCASE').all();
+    return (rows as Record<string, unknown>[]).map((r) => ({
+      id: String(r.id), name: String(r.name), createdAt: Number(r.created_at),
+    }));
+  }
+
+  async deleteProject(id: string): Promise<boolean> {
+    const before = this.db.prepare('SELECT COUNT(*) n FROM projects WHERE id = ?').get(id) as { n: number };
+    this.db.prepare('DELETE FROM projects WHERE id = ?').run(id);
+    return before.n > 0;
   }
 
   async saveShare(s: StoredShare): Promise<void> {

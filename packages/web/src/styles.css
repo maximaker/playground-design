@@ -967,7 +967,7 @@ code { font-family: var(--mono); font-size: 0.92em; }
 .boot-inner { text-align: center; color: var(--fg-muted); display: flex; flex-direction: column; gap: var(--s4); align-items: center; }
 .boot-error { color: var(--danger); margin: 0; }
 
-.home { max-width: 62rem; margin: 0 auto; padding: var(--s6) var(--s5) var(--s6); }
+.home { max-width: 76rem; margin: 0 auto; padding: var(--s6) var(--s5) var(--s6); }
 .home header { margin-bottom: var(--s6); position: relative; }
 .home-actions { display: flex; align-items: center; gap: var(--s3); position: relative; }
 .home .settings-popover { top: 2.6rem; right: auto; left: 0; }
@@ -1005,8 +1005,15 @@ code { font-family: var(--mono); font-size: 0.92em; }
 .home-card:hover { border-color: var(--border-strong); transform: translateY(-1px); }
 .home-card h3 { margin: 0 0 var(--s2); font-size: 0.95rem; }
 .home-card p { margin: 0 0 0.1rem; font-size: 0.82rem; }
-.home-card .button { margin-top: var(--s3); opacity: 0; }
-.home-card:hover .button { opacity: 1; }
+.home-card-actions { display: flex; align-items: center; gap: var(--s2); margin-top: var(--s3); opacity: 0; }
+/*
+ * Revealed on hover, but also whenever focus is inside — otherwise the move and
+ * delete buttons are unreachable by keyboard, which is the version of "tidy"
+ * that locks people out.
+ */
+.home-card:hover .home-card-actions,
+.home-card:focus-within .home-card-actions { opacity: 1; }
+.home-card[draggable="true"] { cursor: grab; }
 
 /* --- Settings popover ---------------------------------------------------- */
 
@@ -1694,3 +1701,80 @@ code { font-family: var(--mono); font-size: 0.92em; }
 
 .agent-change-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .agent-change-step { display: flex; align-items: center; gap: var(--s1); flex: 0 0 auto; }
+
+/* Library: projects beside documents -------------------------------------- */
+
+.library { display: grid; grid-template-columns: 14rem minmax(0, 1fr); gap: var(--s5); align-items: start; }
+
+.library-nav { display: flex; flex-direction: column; gap: 1px; position: sticky; top: var(--s4); }
+
+.library-row {
+  display: flex; align-items: center; gap: var(--s3);
+  width: 100%; padding: var(--s2) var(--s3);
+  background: transparent; border: 1px solid transparent; border-radius: var(--radius-sm);
+  color: var(--fg-muted); font-size: 0.85rem; text-align: left; cursor: pointer;
+}
+.library-row > span:nth-child(2) { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.library-row:hover { background: var(--bg-hover); color: var(--fg); }
+.library-row.is-active { background: var(--bg-active); color: var(--fg); }
+
+/* Unmistakable while dragging: a faint hover state is not a drop target. */
+.library-row.is-drop-target {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--fg);
+}
+
+.library-row.is-project { padding: 0; gap: 0; }
+.library-row.is-project .library-row-main {
+  display: flex; align-items: center; gap: var(--s3);
+  flex: 1 1 auto; min-width: 0;
+  padding: var(--s2) var(--s3);
+  background: none; border: 0; color: inherit; font: inherit; text-align: left; cursor: pointer;
+}
+.library-row.is-project .library-row-main span:nth-child(2) {
+  flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.library-row.is-project .icon-button { opacity: 0; }
+.library-row.is-project:hover .icon-button,
+.library-row.is-project:focus-within .icon-button { opacity: 1; }
+
+.library-heading {
+  display: flex; align-items: center; justify-content: space-between;
+  margin: var(--s4) 0 var(--s1); padding: 0 var(--s3);
+  font-size: 0.7rem; font-weight: 600; letter-spacing: .07em; text-transform: uppercase;
+  color: var(--fg-faint);
+}
+
+.library-empty { padding: 0 var(--s3); font-size: 0.78rem; line-height: 1.5; }
+
+.library-docs-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--s3); }
+.library-docs .home-section-title { margin-top: 0; }
+
+.library-note {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--s3);
+  padding: var(--s2) var(--s3); margin: 0 0 var(--s3);
+  background: var(--bg-input); border: 1px solid var(--border); border-radius: var(--radius-sm);
+  font-size: 0.82rem;
+}
+
+.home-card-menu-anchor { position: relative; }
+.home-card-menu {
+  position: absolute; left: 0; top: calc(100% + 0.25rem); z-index: 40;
+  min-width: 11rem; display: flex; flex-direction: column;
+  padding: var(--s1); background: var(--bg-raised);
+  border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.3);
+}
+.home-card-menu button {
+  padding: var(--s2) var(--s3); background: none; border: 0; border-radius: var(--radius-sm);
+  color: var(--fg); font: inherit; font-size: 0.82rem; text-align: left; cursor: pointer;
+}
+.home-card-menu button:hover:not(:disabled) { background: var(--bg-hover); }
+.home-card-menu button:disabled { color: var(--fg-faint); cursor: default; }
+.home-card-menu .dim { padding: var(--s2) var(--s3); font-size: 0.8rem; }
+
+@media (max-width: 52rem) {
+  .library { grid-template-columns: minmax(0, 1fr); }
+  .library-nav { position: static; }
+}

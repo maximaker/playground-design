@@ -26,6 +26,9 @@ import { getAsset, storeAsset, AssetError, MAX_ASSET_BYTES } from './assets.ts';
 import {
   type Share, createShare, listShares, redactForViewer, resolveShare, revokeShare, viewerMayApply,
 } from './shares.ts';
+import {
+  ProjectError, createProject, deleteProject, fileDocument, listProjects, renameProject,
+} from './projects.ts';
 import { importUrl, ImportError } from './import.ts';
 import { getTemplate, templateSummaries, type Template } from './templates.ts';
 import { renderNode } from './render.ts';
@@ -73,9 +76,8 @@ api.get('/documents', async (c) => c.json({ documents: await listDocuments() }))
 api.get('/templates', (c) => c.json({ templates: templateSummaries() }));
 
 api.post('/documents', async (c) => {
-  const body = await c.req
-    .json<{ name?: string; html?: string; template?: string }>()
-    .catch(() => ({} as { name?: string; html?: string; template?: string }));
+  type NewDoc = { name?: string; html?: string; template?: string; projectId?: string };
+  const body = await c.req.json<NewDoc>().catch(() => ({} as NewDoc));
 
   const template = body.template ? getTemplate(body.template) : undefined;
   if (body.template && !template) {
@@ -83,6 +85,13 @@ api.post('/documents', async (c) => {
   }
 
   const doc = await createDocument(body.name?.trim() || template?.name || 'Untitled');
+
+  // Filed at creation, so "new document in this project" is one call rather
+  // than a create followed by a move that can half-fail.
+  if (body.projectId) {
+    try { await fileDocument(doc.id, body.projectId); }
+    catch (err) { return c.json({ error: err instanceof ProjectError ? err.message : String(err) }, 400); }
+  }
   // A brand new document has only the seeded defaults, and the kit is the whole
   // point of choosing it — so it replaces them outright rather than losing every
   // colour to a name collision.
@@ -334,6 +343,48 @@ api.post('/documents/:id/connections', async (c) => {
 
 api.delete('/connections/:code', async (c) =>
   (await revokeConnection(c.req.param('code'))) ? c.json({ ok: true }) : c.json({ error: 'not found' }, 404));
+
+// ---------------------------------------------------------------------------
+// Projects
+// ---------------------------------------------------------------------------
+
+api.get('/projects', async (c) => c.json({ projects: await listProjects() }));
+
+api.post('/projects', async (c) => {
+  const body = await c.req.json<{ name?: string }>().catch(() => ({} as { name?: string }));
+  try {
+    return c.json({ project: await createProject(body.name ?? '') }, 201);
+  } catch (err) {
+    return c.json({ error: err instanceof ProjectError ? err.message : String(err) }, 400);
+  }
+});
+
+api.patch('/projects/:id', async (c) => {
+  const body = await c.req.json<{ name?: string }>().catch(() => ({} as { name?: string }));
+  try {
+    const project = await renameProject(c.req.param('id'), body.name ?? '');
+    return project ? c.json({ project }) : c.json({ error: 'not found' }, 404);
+  } catch (err) {
+    return c.json({ error: err instanceof ProjectError ? err.message : String(err) }, 400);
+  }
+});
+
+api.delete('/projects/:id', async (c) => {
+  const { deleted, unfiled } = await deleteProject(c.req.param('id'));
+  // Documents are never deleted with their project; the count is reported so
+  // the UI can say where they went rather than leaving people to wonder.
+  return deleted ? c.json({ ok: true, unfiled }) : c.json({ error: 'not found' }, 404);
+});
+
+api.put('/documents/:id/project', async (c) => {
+  const body = await c.req.json<{ projectId?: string | null }>().catch(() => ({ projectId: null }));
+  try {
+    await fileDocument(c.req.param('id'), body.projectId ?? null);
+    return c.json({ ok: true, projectId: body.projectId ?? null });
+  } catch (err) {
+    return c.json({ error: err instanceof ProjectError ? err.message : String(err) }, 404);
+  }
+});
 
 // ---------------------------------------------------------------------------
 // Share links

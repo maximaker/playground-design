@@ -16,6 +16,13 @@ export interface DocSummary {
   rev: number;
   updatedAt: number;
   nodeCount: number;
+  projectId?: string;
+}
+
+export interface StoredProject {
+  id: string;
+  name: string;
+  createdAt: number;
 }
 
 export interface StoredConnection {
@@ -71,6 +78,10 @@ export interface Persistence {
   saveConnection(conn: StoredConnection): Promise<void>;
   loadConnections(docId?: string): Promise<StoredConnection[]>;
   loadConnection(code: string): Promise<StoredConnection | null>;
+
+  saveProject(project: StoredProject): Promise<void>;
+  loadProjects(): Promise<StoredProject[]>;
+  deleteProject(id: string): Promise<boolean>;
 
   saveShare(share: StoredShare): Promise<void>;
   loadShares(docId: string): Promise<StoredShare[]>;
