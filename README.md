@@ -359,18 +359,19 @@ person. Each document carries a tint derived from its id — the same colour eve
 becomes findable by shape before you have read a title, and never the only signal since the name is
 beside it. A role badge appears only when a document is not yours outright.
 
-**Two rails, split by scope.** The left one is about the document — pages, layers, components and
-tokens above a divider, then the lists of what is happening to it: comments, review, history. The
-right one is about the selection: *Design* to change it, *Spec* to hand it over. The spec used to sit
-on the left, which meant reading a layer's measurements in one rail while its properties sat in the
-other. Someone on a view-only link opens on Spec, because they cannot use the controls and reading the
-design is most of why a link was sent to them.
+**Two rails and a strip.** The left rail is the document's structure: pages, layers, components,
+tokens. The right rail is how you are looking at it: *Design*, *Spec*, *Comments*, *Review* — same tab
+style as the left, because one application should have one kind of tab. History is a strip along the
+bottom of the canvas, since it is a record of what has been done rather than part of what the document
+is: one line saying what just changed, opening upward for versions and comparisons. Undo and redo live
+in the toolbar with the tools, which is where the work is; the topbar corner was the furthest point on
+screen from it.
 
-**The lists are lenses.** While Review is open the canvas outlines what it found; while Comments is
-open it outlines the layers people wrote about; while a version comparison is open it outlines what
-moved. Dashed and tinted, never solid, so a lens never reads as a selection — a selection is a thing
-you are about to change. "Two to fix" that points at nothing is a list you have to click through one
-row at a time.
+**The right-hand panels are lenses.** Opening one changes the canvas. Comments shows its pins whatever
+the saved preference says; Review outlines every contrast and tap-target problem it found; a version
+comparison outlines what moved. Dashed and tinted, never solid, so a lens never reads as a selection —
+a selection is a thing you are about to change. "Two to fix" that points at nothing is a list you
+click through one row at a time.
 
 **Handover, without redlines.** Every design tool grows a redlining mode: arrows and labels someone
 types over a picture, saying what the padding is. That exists because in those tools the design *is* a

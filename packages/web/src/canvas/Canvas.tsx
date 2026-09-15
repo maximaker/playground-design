@@ -74,6 +74,9 @@ export function Canvas({ onContextMenu }: CanvasProps) {
   // offset gets counted twice.
   const [origin, setOrigin] = useState({ x: 0, y: 0 });
   const prefs = useCanvas((s) => s.canvasPrefs);
+  // The Comments panel shows the pins while it is open, whatever the preference
+  // says: a lens you have to switch on separately is not a lens.
+  const commentLens = useCanvas((s) => s.commentLens);
   /**
    * The pointer in canvas space, for the ruler's position marker. Held here
    * rather than read from the peer-cursor state because that one is rounded and
@@ -938,7 +941,7 @@ export function Canvas({ onContextMenu }: CanvasProps) {
         className="comment-layer"
         style={{ transform: `translate(${viewport.x - origin.x}px, ${viewport.y - origin.y}px)` }}
       >
-        {prefs.comments && doc
+        {(prefs.comments || commentLens) && doc
           && commentsOf(doc, page.id).map((c) => <CommentPin key={c.id} comment={c} />)}
         <CommentComposer />
       </div>

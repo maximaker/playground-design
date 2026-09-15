@@ -21,6 +21,10 @@ export function Toolbar({ compact }: { compact?: boolean }) {
   const setTool = useCanvas((s) => s.setTool);
   const zoom = useCanvas((s) => s.viewport.zoom);
   const setViewport = useCanvas((s) => s.setViewport);
+  const undo = useCanvas((s) => s.undo);
+  const redo = useCanvas((s) => s.redo);
+  const canUndo = useCanvas((s) => s.undoStack.length > 0);
+  const canRedo = useCanvas((s) => s.redoStack.length > 0);
 
   // On a phone, eight 40px tap targets plus a zoom control do not fit the
   // width. The tools keep their size — shrinking them below a fingertip would
@@ -32,6 +36,30 @@ export function Toolbar({ compact }: { compact?: boolean }) {
           produce a refusal, so they are not offered. */}
       {/* A viewer can move around, look, and comment — commenting is the whole
           reason a review link exists. The rest would only ever be refused. */}
+      {/*
+        * Undo and redo live with the tools rather than up in the topbar corner.
+        * They belong to the canvas: they undo what the canvas just did, the eye
+        * is already here while working, and the corner they were in is the
+        * furthest point on the screen from where the work happens.
+        */}
+      {!readOnly && !compact && (
+        <>
+          <button
+            title="Undo (⌘Z)"
+            aria-label="Undo"
+            disabled={!canUndo}
+            onClick={() => undo()}
+          ><Icon name="undo" size={16} /></button>
+          <button
+            title="Redo (⌘⇧Z)"
+            aria-label="Redo"
+            disabled={!canRedo}
+            onClick={() => redo()}
+          ><Icon name="redo" size={16} /></button>
+          <span className="toolbar-divider" />
+        </>
+      )}
+
       {TOOLS.filter((t) => !readOnly || ['move', 'hand', 'comment'].includes(t.tool)).map((t) => (
         <button
           key={t.tool}

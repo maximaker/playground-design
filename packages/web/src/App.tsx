@@ -14,7 +14,7 @@ import { Components } from './panels/Components.tsx';
 import { Review } from './panels/Review.tsx';
 import { Spec } from './panels/Spec.tsx';
 import { Comments } from './panels/Comments.tsx';
-import { History } from './panels/History.tsx';
+import { HistoryBar } from './ui/HistoryBar.tsx';
 import { ConnectAgent } from './panels/ConnectAgent.tsx';
 import { Share } from './panels/Share.tsx';
 import { Export } from './panels/Export.tsx';
@@ -38,24 +38,24 @@ import {
 } from './state/appearance.ts';
 import { Home } from './Home.tsx';
 
-type LeftTab = 'layers' | 'pages' | 'components' | 'tokens' | 'comments' | 'review' | 'history';
+type LeftTab = 'layers' | 'pages' | 'components' | 'tokens';
 
 /**
- * The right rail describes the selection; the left rail describes the document.
+ * The left rail is the document's structure. The right rail is how you are
+ * looking at it: the design of the selection, its spec, the conversation about
+ * it, the problems in it.
  *
- * Which is why the spec moved: it is the same object as the properties panel
- * seen from the other side — one to change the layer, one to hand it over —
- * and reading a layer's spec on the left while its properties sat on the right
- * meant looking in two places at one thing.
+ * The lenses moved here because that is what they are — ways of looking, not
+ * parts of the file. Opening one is meant to change the canvas: Comments shows
+ * its pins, Review outlines what it found.
  */
-type RightTab = 'properties' | 'spec';
+type RightTab = 'properties' | 'spec' | 'comments' | 'review';
 
-/** How many of the left tabs are about structure; the rest are about activity. */
-const STRUCTURE_TABS = 4;
-
-const RIGHT_TABS: { id: RightTab; label: string; hint: string }[] = [
-  { id: 'properties', label: 'Design', hint: 'Edit the selected layer' },
-  { id: 'spec', label: 'Spec', hint: 'Measured size, tokens, notes and code to paste' },
+const RIGHT_TABS: { id: RightTab; icon: IconName; label: string; hint: string }[] = [
+  { id: 'properties', icon: 'settings', label: 'Design', hint: 'Edit the selected layer' },
+  { id: 'spec', icon: 'ruler', label: 'Spec', hint: 'Measured size, tokens, notes and code to paste' },
+  { id: 'comments', icon: 'comment', label: 'Comments', hint: 'The conversation about this design — shows the pins while open' },
+  { id: 'review', icon: 'check', label: 'Review', hint: 'Contrast, tap targets, tokens and layout — outlines what it finds' },
 ];
 
 const LEFT_TABS: { id: LeftTab; icon: IconName; label: string; hint: string }[] = [
@@ -63,9 +63,6 @@ const LEFT_TABS: { id: LeftTab; icon: IconName; label: string; hint: string }[] 
   { id: 'pages', icon: 'page', label: 'Pages', hint: 'Pages in this document' },
   { id: 'components', icon: 'component', label: 'Components', hint: 'Reusable components and their variants' },
   { id: 'tokens', icon: 'palette', label: 'Tokens', hint: 'Design tokens and themes' },
-  { id: 'comments', icon: 'comment', label: 'Comments', hint: 'Feedback on this design — agents can read and answer it' },
-  { id: 'review', icon: 'check', label: 'Review', hint: 'Contrast, tap targets, token consistency and layout shape' },
-  { id: 'history', icon: 'history', label: 'History', hint: 'Changes and saved versions' },
 ];
 
 export function App() {
@@ -281,32 +278,12 @@ function Editor({ source, onHome, appearance, onAppearance, session }: {
         ><Icon name="search" size={15} /></button>
 
         {/*
-          * Undo and redo were keyboard-only. They are the two actions people
-          * reach for most when they are unsure of a tool, which is exactly when
-          * they are least likely to know the shortcut. Hidden for a viewer:
-          * their only writable action is a comment, and undoing one would send
-          * a removal the server refuses.
+          * Undo and redo are in the toolbar with the tools now — they act on the
+          * canvas, and this corner is the furthest point on screen from where
+          * the work happens. On a phone the toolbar drops them for width and the
+          * overflow menu carries them, which is where they were before; putting
+          * them back in the topbar there overflowed it.
           */}
-        {/* Only narrow drops them, where they move into the overflow menu;
-            compact still has the width. */}
-        {!readOnly && mode !== 'narrow' && (
-          <span className="topbar-group">
-            <button
-              className="icon-button"
-              title={canUndo ? `Undo (${modKey}Z)` : 'Nothing to undo'}
-              aria-label="Undo"
-              disabled={!canUndo}
-              onClick={() => useCanvas.getState().undo()}
-            ><Icon name="undo" size={15} /></button>
-            <button
-              className="icon-button"
-              title={canRedo ? `Redo (${modKey}⇧Z)` : 'Nothing to redo'}
-              aria-label="Redo"
-              disabled={!canRedo}
-              onClick={() => useCanvas.getState().redo()}
-            ><Icon name="redo" size={15} /></button>
-          </span>
-        )}
 
         {overlay && (
           <button
@@ -455,24 +432,17 @@ function Editor({ source, onHome, appearance, onAppearance, session }: {
 
         <aside className={`rail rail-left${leftOpen ? ' is-open' : ''}`} {...hiddenWhenClosed(leftOpen)}>
           <nav className="rail-tabs" aria-label="Panels">
-            {LEFT_TABS.map((t, i) => (
-              <Fragment key={t.id}>
-                {/*
-                  * Structure above, activity below. Eight identical icons in a
-                  * strip is a list nobody reads; the break says the panels below
-                  * are about what is happening rather than about what exists.
-                  */}
-                {i === STRUCTURE_TABS && <span className="rail-tab-divider" aria-hidden />}
-                <button
-                  className={leftTab === t.id ? 'is-active' : ''}
-                  onClick={() => setLeftTab(t.id)}
-                  title={`${t.label} — ${t.hint}`}
-                  aria-label={t.label}
-                  aria-pressed={leftTab === t.id}
-                >
-                  <Icon name={t.icon} size={15} />
-                </button>
-              </Fragment>
+            {LEFT_TABS.map((t) => (
+              <button
+                key={t.id}
+                className={leftTab === t.id ? 'is-active' : ''}
+                onClick={() => setLeftTab(t.id)}
+                title={`${t.label} — ${t.hint}`}
+                aria-label={t.label}
+                aria-pressed={leftTab === t.id}
+              >
+                <Icon name={t.icon} size={15} />
+              </button>
             ))}
           </nav>
 
@@ -507,40 +477,52 @@ function Editor({ source, onHome, appearance, onAppearance, session }: {
             )}
             {leftTab === 'components' && <Components />}
             {leftTab === 'tokens' && <Tokens />}
-            {leftTab === 'comments' && <Comments />}
-            {leftTab === 'review' && <Review />}
-            {leftTab === 'history' && <History />}
           </ScrollArea>
         </aside>
 
         <main className="stage">
           <Canvas onContextMenu={setContextMenu} />
-          <AgentChangeBar />
-          <Toolbar compact={mode === 'narrow'} />
+
+          {/*
+            * One stack along the bottom, rather than three things each pinned at
+            * their own offset: the history bar changes height when it opens, and
+            * a toolbar positioned a fixed distance above it ends up underneath.
+            */}
+          <div className="stage-bottom">
+            <AgentChangeBar />
+            <Toolbar compact={mode === 'narrow'} />
+            {/* History is a record of what has been done to the document, not
+                part of what the document is, so it is not in a rail. */}
+            <HistoryBar />
+          </div>
         </main>
 
         <aside className={`rail rail-right${rightOpen ? ' is-open' : ''}`} {...hiddenWhenClosed(rightOpen)}>
-          {/*
-            * The app's segmented control, not a new kind of tab: this is two
-            * choices about one object, which is what `.segmented` already means
-            * everywhere else — including the Base/:hover row inside this very
-            * rail.
-            */}
-          <div className="rail-switch">
-            <div className="segmented">
-              {RIGHT_TABS.map((t) => (
-                <button
-                  key={t.id}
-                  className={rightTab === t.id ? 'is-active' : ''}
-                  onClick={() => setRightTab(t.id)}
-                  title={`${t.label} — ${t.hint}`}
-                  aria-pressed={rightTab === t.id}
-                >{t.label}</button>
-              ))}
-            </div>
+          {/* The same tabs as the left rail. One tab style in the application. */}
+          <nav className="rail-tabs" aria-label="Inspector">
+            {RIGHT_TABS.map((t) => (
+              <button
+                key={t.id}
+                className={rightTab === t.id ? 'is-active' : ''}
+                onClick={() => setRightTab(t.id)}
+                title={`${t.label} — ${t.hint}`}
+                aria-label={t.label}
+                aria-pressed={rightTab === t.id}
+              >
+                <Icon name={t.icon} size={15} />
+              </button>
+            ))}
+          </nav>
+
+          <div className="rail-heading">
+            {RIGHT_TABS.find((t) => t.id === rightTab)?.label}
           </div>
+
           <ScrollArea className="rail-body">
-            {rightTab === 'spec' ? <Spec /> : (
+            {rightTab === 'spec' && <Spec />}
+            {rightTab === 'comments' && <Comments />}
+            {rightTab === 'review' && <Review />}
+            {rightTab === 'properties' && (
               /*
                 * A viewer keeps the properties panel — reading the real values is
                 * most of why you send someone a link — but every control inside is

@@ -19,8 +19,7 @@ export function Comments() {
   const setOpenComment = useCanvas((s) => s.setOpenComment);
   const setViewport = useCanvas((s) => s.setViewport);
   const select = useCanvas((s) => s.select);
-  const prefs = useCanvas((s) => s.canvasPrefs);
-  const setPrefs = useCanvas((s) => s.setCanvasPrefs);
+  const setCommentLens = useCanvas((s) => s.setCommentLens);
   const doc = getDoc();
   const page = currentPage();
 
@@ -29,6 +28,13 @@ export function Comments() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [doc, version, pageId],
   );
+
+  // The pins come on while this panel is open and go back to the preference
+  // when it closes.
+  useEffect(() => {
+    setCommentLens(true);
+    return () => setCommentLens(false);
+  }, [setCommentLens]);
 
   // The same lens as Review: while the list is open the canvas points at the
   // layers the threads are about.
@@ -59,11 +65,6 @@ export function Comments() {
         <span className="dim">
           {open.length} open{resolved.length ? ` · ${resolved.length} resolved` : ''}
         </span>
-        <button
-          className="button subtle"
-          title={prefs.comments ? 'Hide the pins on the canvas' : 'Show the pins on the canvas'}
-          onClick={() => setPrefs({ comments: !prefs.comments })}
-        >{prefs.comments ? 'Hide pins' : 'Show pins'}</button>
         {resolved.length > 0 && (
           <button className="button subtle" onClick={() => setShowResolved(!showResolved)}>
             {showResolved ? 'Hide resolved' : 'Show resolved'}

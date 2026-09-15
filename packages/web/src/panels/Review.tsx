@@ -67,6 +67,21 @@ export function Review() {
 
   return (
     <div className="review">
+      {/*
+        * What this panel is, said once at the top.
+        *
+        * "Review" on a tab could mean approvals, or a design critique, or
+        * someone else's comments. It is none of those: it is a set of checks
+        * run against the rendered page, and knowing that is the difference
+        * between using it and ignoring it.
+        */}
+      <p className="review-about">
+        Automatic checks against the rendered design — text contrast, tap-target
+        size, spacing off the token scale, and layers that repeat. Nothing here is
+        an opinion about the design; each finding is a measurement with a
+        threshold. While this panel is open the canvas outlines what it found.
+      </p>
+
       <div className="review-scope">
         <button className={scope === 'page' ? 'is-active' : ''} onClick={() => setScope('page')}>
           Whole page

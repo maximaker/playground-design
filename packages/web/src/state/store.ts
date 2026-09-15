@@ -174,6 +174,15 @@ interface CanvasState {
   highlight: { ids: NodeId[]; kind: 'review' | 'comments' | 'changes' } | null;
 
   /**
+   * True while the Comments panel is open.
+   *
+   * Opening it shows the pins whatever the saved preference says — that is what
+   * makes it a lens rather than a list beside the canvas. The preference decides
+   * what happens the rest of the time.
+   */
+  commentLens: boolean;
+
+  /**
    * What this person is called, as the server knows them: their account name,
    * or the guest name a share-link viewer gets. Comments are signed with it.
    */
@@ -243,6 +252,7 @@ interface CanvasActions {
   setCanvasPrefs(v: Partial<CanvasPrefs>): void;
   setIdentity(name: string): void;
   setHighlight(highlight: { ids: NodeId[]; kind: 'review' | 'comments' | 'changes' } | null): void;
+  setCommentLens(on: boolean): void;
   setTool(t: Tool): void;
   setSpacePanning(v: boolean): void;
   setPage(id: string): void;
@@ -357,6 +367,7 @@ export const useCanvas = create<CanvasState & CanvasActions>((set, get) => ({
   viewport: { x: 80, y: 80, zoom: 0.55 },
   identity: 'Guest',
   highlight: null,
+  commentLens: false,
   canvasPrefs: loadCanvasPrefs(),
   tool: 'move',
   spacePanning: false,
@@ -626,6 +637,9 @@ export const useCanvas = create<CanvasState & CanvasActions>((set, get) => ({
 
   setViewport(v) { set({ viewport: { ...get().viewport, ...v } }); },
   setIdentity(identity) { set({ identity }); },
+  setCommentLens(commentLens) {
+    if (get().commentLens !== commentLens) set({ commentLens });
+  },
   setHighlight(highlight) {
     // Compared before setting: a panel re-renders constantly and an identical
     // list would otherwise re-measure the whole overlay each time.

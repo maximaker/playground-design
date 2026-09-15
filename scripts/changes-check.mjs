@@ -133,7 +133,9 @@ const page = await browser.newPage({ viewport: { width: 1500, height: 950 } });
 page.on('pageerror', (e) => errors.push(e.message));
 await page.goto(`${BASE}/d/${doc.id}`, { waitUntil: 'networkidle' });
 await page.waitForSelector('.artboard-frame iframe', { timeout: 30000 });
-await page.click('.rail-left .rail-tabs button[aria-label="History"]');
+// History lives along the bottom of the canvas now, not in a rail: it is a
+// record of what has been done rather than part of what the document is.
+await page.click('.history-bar-strip');
 await page.waitForTimeout(900);
 
 const compare = page.locator('.history-row button', { hasText: 'Compare' }).first();
@@ -149,7 +151,7 @@ check('with the old and new values on the row',
 await call('set_text_content', { updates: [{ id: heading, text: 'Pricing, plans and add-ons' }] });
 await page.waitForTimeout(1500);
 check('and it keeps up as the document changes',
-  (await page.locator('.changes').innerText()).includes('add-ons')
+  (await page.locator('.history-bar-body').innerText()).includes('add-ons')
   || (await page.locator('.change-field').allInnerTexts()).some((t) => t.includes('add-ons')),
   'text change appeared');
 

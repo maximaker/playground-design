@@ -264,19 +264,28 @@ check('nothing is painted over an open thread',
 
 // --- Hiding the pins ------------------------------------------------------------
 
+// Hiding the pins is for looking at the work; the comments stay where they are.
 const pinsBefore = await page.locator('.comment-pin').count();
 await page.evaluate(() => window.__playground.store.getState().setCanvasPrefs({ comments: false }));
 await page.waitForTimeout(400);
 check('pins can be hidden to look at the work',
   pinsBefore > 0 && (await page.locator('.comment-pin').count()) === 0, `${pinsBefore} → 0`);
 
-await page.click('.rail-left .rail-tabs button[aria-label="Comments"]');
-await page.waitForTimeout(400);
+// ...except while the Comments panel is open, which is the lens: opening it
+// shows the pins whatever the preference says.
+await page.click('.rail-right .rail-tabs button[aria-label="Comments"]');
+await page.waitForTimeout(600);
 check('and the comments are still in the panel',
   (await page.locator('.comment-row').count()) > 0,
   `${await page.locator('.comment-row').count()} rows`);
-check('the panel offers the toggle back',
-  (await page.locator('button', { hasText: 'Show pins' }).count()) === 1);
+check('opening the panel brings the pins back, preference or not',
+  (await page.locator('.comment-pin').count()) > 0,
+  `${await page.locator('.comment-pin').count()} pins`);
+
+await page.click('.rail-right .rail-tabs button[aria-label="Design"]');
+await page.waitForTimeout(500);
+check('and closing it returns to the preference',
+  (await page.locator('.comment-pin').count()) === 0);
 await page.evaluate(() => window.__playground.store.getState().setCanvasPrefs({ comments: true }));
 
 check('no runtime errors', errors.length === 0, errors[0] ?? '');
