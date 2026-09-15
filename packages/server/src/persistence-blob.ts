@@ -56,7 +56,17 @@ export class BlobPersistence implements Persistence {
     this.listCache.delete(key);
   }
 
-  constructor(private token: string) {}
+  private token: string;
+
+  // Assigned in the body rather than declared as a parameter property: Node
+  // runs this project's TypeScript by stripping types, and a parameter property
+  // is not erasable syntax — it throws ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX. It
+  // never surfaced because Vercel bundles this file with esbuild and no other
+  // environment had a Blob token to load it with, but a self-hosted instance
+  // pointed at Blob storage would have crashed on its first read.
+  constructor(token: string) {
+    this.token = token;
+  }
 
   private async blob(): Promise<BlobModule> {
     if (!this.blobPromise) this.blobPromise = import('@vercel/blob');

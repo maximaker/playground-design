@@ -7,7 +7,7 @@
     "dev": "node --experimental-strip-types --experimental-sqlite --watch src/index.ts",
     "start": "node --experimental-strip-types --experimental-sqlite src/index.ts",
     "build": "tsc -p tsconfig.json --noEmit",
-    "test": "node --experimental-strip-types --experimental-sqlite --test --test-timeout=60000 src/mcp.test.ts src/fidelity.test.ts"
+    "test": "node ../../scripts/strip-check.mjs && node --experimental-strip-types --experimental-sqlite --test --test-timeout=60000 src/mcp.test.ts src/fidelity.test.ts"
   },
   "dependencies": {
     "@hono/node-server": "^1.13.7",
