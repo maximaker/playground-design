@@ -9,6 +9,7 @@
  * the drag figure should be ignored.
  */
 
+import './lib/session.mjs';  // signs these checks in; see the module header
 import { chromium } from 'playwright';
 
 const URL_BASE = process.argv[2] ?? 'http://localhost:4000';

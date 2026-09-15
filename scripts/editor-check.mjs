@@ -8,6 +8,7 @@
  * caught it, because nothing here drew anything.
  */
 
+import './lib/session.mjs';  // signs these checks in; see the module header
 import { chromium } from 'playwright';
 
 const BASE = process.argv[2] ?? 'http://localhost:4000';

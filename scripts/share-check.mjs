@@ -11,6 +11,7 @@
  * and the whole feature is decoration.
  */
 
+import './lib/session.mjs';  // signs these checks in; see the module header
 import { chromium } from 'playwright';
 import WebSocket from 'ws';
 

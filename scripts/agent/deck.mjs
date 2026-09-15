@@ -11,6 +11,7 @@
  * Re-running replaces the slides on the existing "Deck" page rather than adding
  * a second one, so this stays the way the deck is edited.
  */
+import '../lib/session.mjs';
 import { readFileSync } from 'node:fs';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';

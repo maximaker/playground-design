@@ -6,6 +6,7 @@
  * so a build that lints clean on its own says nothing about whether its
  * controls can actually be hit. This opens a tab first and then asks.
  */
+import '../lib/session.mjs';
 import { chromium } from 'playwright';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';

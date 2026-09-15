@@ -34,6 +34,13 @@ const PATHS = {
   // Angle brackets around a diamond: a component that is source code.
   codeComponent: 'M5.2 3.8 2.2 8l3 4.2M10.8 3.8 13.8 8l-3 4.2M8 5.9 9.8 8 8 10.1 6.2 8z',
 
+  // Angle brackets: source code, as opposed to a component made of source code.
+  code: 'M5.6 3.6 1.8 8l3.8 4.4M10.4 3.6 14.2 8l-3.8 4.4',
+  // Two people, for anything about who is in the document.
+  users: 'M6 7.4a2.3 2.3 0 1 0 0-4.6 2.3 2.3 0 0 0 0 4.6ZM1.8 13.4c0-2.1 1.9-3.6 4.2-3.6s4.2 1.5 4.2 3.6M10.6 3.1a2.3 2.3 0 0 1 0 4.4M11.6 9.9c1.6.3 2.6 1.4 2.6 3',
+  // The play-in-a-circle mark from the topbar, for the landing page.
+  logo: 'M8 1.6a6.4 6.4 0 1 1 0 12.8A6.4 6.4 0 0 1 8 1.6ZM6.6 5.4l4.2 2.6-4.2 2.6z',
+  logout: 'M9.6 11.4v1.4a1.2 1.2 0 0 1-1.2 1.2H3.6a1.2 1.2 0 0 1-1.2-1.2V3.2A1.2 1.2 0 0 1 3.6 2h4.8a1.2 1.2 0 0 1 1.2 1.2v1.4M11.6 5.6 14 8l-2.4 2.4M6.4 8h7.4',
   folder: 'M2.2 12.4V4.6a1.2 1.2 0 0 1 1.2-1.2h2.7l1.5 1.8h4.8a1.2 1.2 0 0 1 1.2 1.2v6a1.2 1.2 0 0 1-1.2 1.2H3.4a1.2 1.2 0 0 1-1.2-1.2z',
   comment: 'M13.6 9.6a1.6 1.6 0 0 1-1.6 1.6H5.6L2.4 14.4V3.2a1.6 1.6 0 0 1 1.6-1.6h8a1.6 1.6 0 0 1 1.6 1.6z',
   share: 'M11.2 5.4a2 2 0 1 0 0-3.4 2 2 0 0 0 0 3.4zM4.8 9.7a2 2 0 1 0 0-3.4 2 2 0 0 0 0 3.4zM11.2 14a2 2 0 1 0 0-3.4 2 2 0 0 0 0 3.4zM6.5 7.1l3.1-1.7M6.5 8.9l3.1 1.7',

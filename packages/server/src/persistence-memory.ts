@@ -2,7 +2,8 @@
 
 import type { CanvasDocument } from '@playground/shared';
 import type {
-  DocSummary, Persistence, StoredAsset, StoredConnection, StoredProject, StoredShare, StoredSnapshot,
+  DocSummary, Persistence, StoredAsset, StoredConnection, StoredMembership, StoredProject,
+  StoredSession, StoredShare, StoredSnapshot, StoredUser,
 } from './persistence.ts';
 
 export class MemoryPersistence implements Persistence {
@@ -15,6 +16,9 @@ export class MemoryPersistence implements Persistence {
   private projects = new Map<string, StoredProject>();
   private assets = new Map<string, StoredAsset>();
   private snapshots = new Map<string, StoredSnapshot>();
+  private users = new Map<string, StoredUser>();
+  private sessions = new Map<string, StoredSession>();
+  private memberships = new Map<string, StoredMembership>();
 
   async loadDocument(id: string) { return this.docs.get(id)?.doc ?? null; }
   async saveDocument(doc: CanvasDocument) {
@@ -36,6 +40,37 @@ export class MemoryPersistence implements Persistence {
     return [...this.connections.values()].filter((c) => !docId || c.docId === docId);
   }
   async loadConnection(code: string) { return this.connections.get(code) ?? null; }
+
+  async saveUser(u: StoredUser) { this.users.set(u.id, u); }
+  async loadUser(id: string) { return this.users.get(id) ?? null; }
+  async loadUserByEmail(email: string) {
+    const wanted = email.toLowerCase();
+    return [...this.users.values()].find((u) => u.email.toLowerCase() === wanted) ?? null;
+  }
+  async countUsers() { return this.users.size; }
+  async listUsers(ids?: string[]) {
+    const all = [...this.users.values()].sort((a, b) => a.createdAt - b.createdAt);
+    return ids ? all.filter((u) => ids.includes(u.id)) : all;
+  }
+
+  async saveSession(s: StoredSession) { this.sessions.set(s.token, s); }
+  async loadSession(token: string) { return this.sessions.get(token) ?? null; }
+  async deleteSession(token: string) { this.sessions.delete(token); }
+  async deleteSessionsForUser(userId: string) {
+    for (const [token, s] of this.sessions) if (s.userId === userId) this.sessions.delete(token);
+  }
+
+  async saveMembership(m: StoredMembership) { this.memberships.set(`${m.docId}:${m.userId}`, m); }
+  async loadMembership(docId: string, userId: string) {
+    return this.memberships.get(`${docId}:${userId}`) ?? null;
+  }
+  async loadMemberships(opts: { docId?: string; userId?: string }) {
+    return [...this.memberships.values()].filter((m) =>
+      (!opts.docId || m.docId === opts.docId) && (!opts.userId || m.userId === opts.userId));
+  }
+  async deleteMembership(docId: string, userId: string) {
+    this.memberships.delete(`${docId}:${userId}`);
+  }
 
   async saveProject(project: StoredProject) { this.projects.set(project.id, project); }
   async loadProjects() {

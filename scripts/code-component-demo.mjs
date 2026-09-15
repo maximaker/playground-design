@@ -3,6 +3,7 @@
  * bundle a real component from a repo, register it, place it, vary its props,
  * and export JSX that imports the original rather than copying its markup.
  */
+import './lib/session.mjs';  // signs these checks in; see the module header
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { build } from 'esbuild';

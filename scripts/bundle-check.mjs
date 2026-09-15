@@ -10,6 +10,7 @@
  * document changes.
  */
 
+import './lib/session.mjs';  // signs these checks in; see the module header
 import { writeFileSync } from 'node:fs';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';

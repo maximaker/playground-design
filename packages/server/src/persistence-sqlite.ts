@@ -6,8 +6,8 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { CanvasDocument } from '@playground/shared';
 import type {
-  DocSummary, Persistence, ShareRole, StoredAsset, StoredConnection, StoredProject, StoredShare,
-  StoredSnapshot,
+  DocSummary, MemberRole, Persistence, ShareRole, StoredAsset, StoredConnection, StoredMembership,
+  StoredProject, StoredSession, StoredShare, StoredSnapshot, StoredUser,
 } from './persistence.ts';
 
 // Anchored to the package, not the working directory: resolving against cwd
@@ -71,6 +71,37 @@ export class SqlitePersistence implements Persistence {
         rev INTEGER NOT NULL, label TEXT, data TEXT NOT NULL, ts INTEGER NOT NULL
       );
       CREATE INDEX IF NOT EXISTS snapshots_doc ON snapshots(doc_id, ts DESC);
+
+      CREATE TABLE IF NOT EXISTS users (
+        id TEXT PRIMARY KEY,
+        email TEXT NOT NULL UNIQUE COLLATE NOCASE,
+        name TEXT NOT NULL,
+        password_hash TEXT,
+        created_at INTEGER NOT NULL,
+        email_verified_at INTEGER,
+        color TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS sessions (
+        token TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        created_at INTEGER NOT NULL,
+        expires_at INTEGER NOT NULL,
+        last_seen_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS sessions_user ON sessions(user_id);
+
+      -- Who may open which document, and as what. A document with no rows here
+      -- belongs to nobody, which is what every document created before accounts
+      -- existed looks like; the first account claims those.
+      CREATE TABLE IF NOT EXISTS memberships (
+        doc_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        role TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        PRIMARY KEY (doc_id, user_id)
+      );
+      CREATE INDEX IF NOT EXISTS memberships_user ON memberships(user_id);
     `);
   }
 
@@ -178,6 +209,91 @@ export class SqlitePersistence implements Persistence {
     };
   }
 
+  // --- Accounts -------------------------------------------------------------
+
+  async saveUser(u: StoredUser): Promise<void> {
+    this.db.prepare(`
+      INSERT INTO users (id, email, name, password_hash, created_at, email_verified_at, color)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET email = excluded.email, name = excluded.name,
+        password_hash = excluded.password_hash, email_verified_at = excluded.email_verified_at,
+        color = excluded.color
+    `).run(u.id, u.email, u.name, u.passwordHash, u.createdAt, u.emailVerifiedAt, u.color);
+  }
+
+  async loadUser(id: string): Promise<StoredUser | null> {
+    return userRow(this.db.prepare('SELECT * FROM users WHERE id = ?').get(id));
+  }
+
+  async loadUserByEmail(email: string): Promise<StoredUser | null> {
+    return userRow(this.db.prepare('SELECT * FROM users WHERE email = ? COLLATE NOCASE').get(email));
+  }
+
+  async countUsers(): Promise<number> {
+    const row = this.db.prepare('SELECT COUNT(*) AS n FROM users').get() as { n: number };
+    return row.n;
+  }
+
+  async listUsers(ids?: string[]): Promise<StoredUser[]> {
+    if (ids && ids.length === 0) return [];
+    const rows = ids
+      ? this.db.prepare(`SELECT * FROM users WHERE id IN (${ids.map(() => '?').join(',')})`).all(...ids)
+      : this.db.prepare('SELECT * FROM users ORDER BY created_at').all();
+    return (rows as unknown[]).map((r) => userRow(r)!).filter(Boolean);
+  }
+
+  async saveSession(s: StoredSession): Promise<void> {
+    this.db.prepare(`
+      INSERT INTO sessions (token, user_id, created_at, expires_at, last_seen_at)
+      VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT(token) DO UPDATE SET expires_at = excluded.expires_at,
+        last_seen_at = excluded.last_seen_at
+    `).run(s.token, s.userId, s.createdAt, s.expiresAt, s.lastSeenAt);
+  }
+
+  async loadSession(token: string): Promise<StoredSession | null> {
+    const r = this.db.prepare('SELECT * FROM sessions WHERE token = ?').get(token) as
+      { token: string; user_id: string; created_at: number; expires_at: number; last_seen_at: number } | undefined;
+    return r ? {
+      token: r.token, userId: r.user_id, createdAt: r.created_at,
+      expiresAt: r.expires_at, lastSeenAt: r.last_seen_at,
+    } : null;
+  }
+
+  async deleteSession(token: string): Promise<void> {
+    this.db.prepare('DELETE FROM sessions WHERE token = ?').run(token);
+  }
+
+  async deleteSessionsForUser(userId: string): Promise<void> {
+    this.db.prepare('DELETE FROM sessions WHERE user_id = ?').run(userId);
+  }
+
+  async saveMembership(m: StoredMembership): Promise<void> {
+    this.db.prepare(`
+      INSERT INTO memberships (doc_id, user_id, role, created_at) VALUES (?, ?, ?, ?)
+      ON CONFLICT(doc_id, user_id) DO UPDATE SET role = excluded.role
+    `).run(m.docId, m.userId, m.role, m.createdAt);
+  }
+
+  async loadMembership(docId: string, userId: string): Promise<StoredMembership | null> {
+    return membershipRow(this.db.prepare(
+      'SELECT * FROM memberships WHERE doc_id = ? AND user_id = ?').get(docId, userId));
+  }
+
+  async loadMemberships(opts: { docId?: string; userId?: string }): Promise<StoredMembership[]> {
+    const where: string[] = [];
+    const args: string[] = [];
+    if (opts.docId) { where.push('doc_id = ?'); args.push(opts.docId); }
+    if (opts.userId) { where.push('user_id = ?'); args.push(opts.userId); }
+    const rows = this.db.prepare(
+      `SELECT * FROM memberships${where.length ? ` WHERE ${where.join(' AND ')}` : ''}`).all(...args);
+    return (rows as unknown[]).map((r) => membershipRow(r)!).filter(Boolean);
+  }
+
+  async deleteMembership(docId: string, userId: string): Promise<void> {
+    this.db.prepare('DELETE FROM memberships WHERE doc_id = ? AND user_id = ?').run(docId, userId);
+  }
+
   async saveSnapshot(s: StoredSnapshot): Promise<void> {
     this.db.prepare('INSERT INTO snapshots (id, doc_id, rev, label, data, ts) VALUES (?, ?, ?, ?, ?, ?)')
       .run(s.id, s.docId, s.rev, s.label, JSON.stringify(s.data), s.ts);
@@ -219,4 +335,24 @@ function shareRow(row: Record<string, unknown>): StoredShare {
     lastUsedAt: row.last_used_at == null ? null : Number(row.last_used_at),
     revoked: Number(row.revoked) === 1,
   };
+}
+
+// SQLite hands back snake_case rows; these two keep the mapping in one place.
+
+function userRow(r: unknown): StoredUser | null {
+  if (!r) return null;
+  const row = r as {
+    id: string; email: string; name: string; password_hash: string | null;
+    created_at: number; email_verified_at: number | null; color: string;
+  };
+  return {
+    id: row.id, email: row.email, name: row.name, passwordHash: row.password_hash,
+    createdAt: row.created_at, emailVerifiedAt: row.email_verified_at, color: row.color,
+  };
+}
+
+function membershipRow(r: unknown): StoredMembership | null {
+  if (!r) return null;
+  const row = r as { doc_id: string; user_id: string; role: MemberRole; created_at: number };
+  return { docId: row.doc_id, userId: row.user_id, role: row.role, createdAt: row.created_at };
 }

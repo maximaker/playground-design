@@ -16,6 +16,7 @@
  * rather than parsing the CSS export: it emits every theme into one stylesheet,
  * and a regex over it picks up the dark value.
  */
+import '../lib/session.mjs';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 

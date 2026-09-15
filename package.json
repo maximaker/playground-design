@@ -14,7 +14,8 @@
     "start": "npm run start --workspace=@playground/server",
     "typecheck": "tsc -p packages/shared/tsconfig.json --noEmit && tsc -p packages/server/tsconfig.json --noEmit && tsc -p packages/web/tsconfig.json --noEmit",
     "test": "npm run test --workspace=@playground/shared && npm run test --workspace=@playground/server",
-    "build:api": "node scripts/build-api.mjs"
+    "build:api": "node scripts/build-api.mjs",
+    "cli": "npm run cli --workspace @playground/server --"
   },
   "devDependencies": {
     "esbuild": "^0.28.2",

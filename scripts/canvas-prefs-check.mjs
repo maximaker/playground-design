@@ -10,6 +10,7 @@
  *   node scripts/canvas-prefs-check.mjs [base]
  */
 
+import './lib/session.mjs';  // signs these checks in; see the module header
 import { chromium } from 'playwright';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';

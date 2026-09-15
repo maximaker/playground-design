@@ -330,6 +330,23 @@ content. Detach bakes everything in and drops the link.
 control from browser zoom, because browser zoom scales the canvas too — and the canvas has to stay at
 its true size while you design.
 
+**Accounts.** Email and password, hashed with scrypt, session cookies, all inside the instance — a
+self-hosted server with no mail service must still be able to sign its owner in. One consequence is
+stated rather than hidden: addresses are recorded but **not verified**, and there is no reset-by-email,
+so `npm run cli -- set-password <email> <password>` on the server is the reset. The record is shaped
+for magic links and OAuth to arrive without a migration.
+
+A gate sits in front of the whole API rather than on each route — the failure mode of per-route checks
+is the route added later that quietly has none. Documents have members with roles (owner, editor,
+viewer): an editor cannot delete the document, a viewer cannot write, and a document nobody is a
+member of is open to any signed-in user, which is what everything made before accounts looks like
+until the first account claims it at sign-up. The WebSocket authenticates from the same cookie, since
+every edit travels over the socket rather than over REST. A connection code stays its own credential,
+so agents keep working with no session — but only an editor can mint one.
+
+Set `PLAYGROUND_SIGNUP_CODE` before putting an instance on the internet: without it, sign-up is open,
+and on a fresh instance the first account claims everything already on it.
+
 **Canvas preferences.** The dot grid, pixel rulers along the top and left edges, and snapping are each
 switchable in Appearance (and from the command palette). Ruler ticks are canvas pixels, not screen
 pixels — the number beside a tick is the coordinate a layer would have there, whatever the zoom — and
@@ -530,6 +547,9 @@ that export emits the import rather than the markup.
   surface the way an agent does, including the error paths
 - `packages/server/src/fidelity.test.ts` — the export-fidelity gate: render an artboard, export it,
   re-import the export into a fresh document, render that, and pixel-diff the two
+- `scripts/accounts-check.mjs` — the gate, end to end: signed-out requests, a second account that
+  cannot reach the first's work, viewer versus editor versus owner, the socket refusing an
+  unauthenticated join, and the landing page's sign-in and sign-out in a real browser
 - `scripts/canvas-prefs-check.mjs` — grid, rulers and snapping each toggle, stick across a reload, and
   change what the canvas does: snapping is checked by dragging an artboard and reading back where it
   landed, not by reading the switch

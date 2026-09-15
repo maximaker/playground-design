@@ -6,8 +6,9 @@
  */
 
 import { serveStatic } from '@hono/node-server/serve-static';
-import { Hono } from 'hono';
+import { Hono, type Context } from 'hono';
 import { cors } from 'hono/cors';
+import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
 import { existsSync } from 'node:fs';
 import { relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -36,7 +37,12 @@ import {
 import { importUrl, ImportError } from './import.ts';
 import { getTemplate, templateSummaries, type Template } from './templates.ts';
 import { renderNode } from './render.ts';
-import { persistence } from './persistence.ts';
+import { persistence, type MemberRole } from './persistence.ts';
+import {
+  AuthError, SESSION_COOKIE, atLeast, authenticate, createAccount, documentsFor, endSession, grant,
+  hasAccounts, membersOf, publicUser, revokeMembership, roleFor, sessionUser, signupCodeRequired,
+  startSession,
+} from './accounts.ts';
 import { DB_PATH } from './persistence-sqlite.ts';
 import { isOnMountedVolume } from './volume.ts';
 import { dirname } from 'node:path';
@@ -83,6 +89,9 @@ app.use('*', cors({ origin: (o) => o ?? '*', credentials: true }));
  */
 app.onError((err, c) => {
   const message = err instanceof Error ? err.message : String(err);
+  // A rejected sign-up or sign-in is the caller's problem to fix and says so;
+  // it is not a server fault and must not be logged as one.
+  if (err instanceof AuthError) return c.json({ error: message }, err.status as 400);
   const storage = /blob|suspended|store|token|quota|billing/i.test(message);
   if (storage) {
     console.error('[playground] storage failure:', message);
@@ -100,7 +109,84 @@ app.onError((err, c) => {
 // Documents
 // ---------------------------------------------------------------------------
 
-const api = new Hono();
+type Vars = { user: import('./persistence.ts').StoredUser | null; role: MemberRole | null };
+const api = new Hono<{ Variables: Vars }>();
+
+/**
+ * Paths that work without an account.
+ *
+ * `/shares/*` is not an exception to access control — a share token *is* the
+ * credential, and the share layer already refuses edits from a view-only one.
+ */
+const PUBLIC_PATHS = [/^\/health$/, /^\/auth(\/|$)/, /^\/shares(\/|$)/];
+
+/** Paths where being an editor is not enough. */
+const OWNER_ONLY: { method: string; pattern: RegExp }[] = [
+  { method: 'DELETE', pattern: /^\/documents\/[^/]+$/ },
+  { method: 'POST', pattern: /^\/documents\/[^/]+\/members$/ },
+  { method: 'DELETE', pattern: /^\/documents\/[^/]+\/members\/[^/]+$/ },
+  { method: 'POST', pattern: /^\/documents\/[^/]+\/shares$/ },
+  { method: 'DELETE', pattern: /^\/shares\/[^/]+$/ },
+];
+
+/**
+ * One gate in front of the whole API.
+ *
+ * Per-route checks were the alternative, and the failure mode there is a route
+ * added later that quietly has none — which is exactly the state this instance
+ * was in before accounts: every document readable and writable by anyone who
+ * knew the URL.
+ *
+ * A document nobody is a member of is reachable by any signed-in user. That is
+ * the state of a fresh instance with no accounts yet, and of anything created
+ * before this existed; the first account claims all of it at sign-up.
+ */
+api.use('*', async (c, next) => {
+  const path = c.req.path.replace(/^\/api/, '') || '/';
+  const user = await sessionUser(getCookie(c, SESSION_COOKIE));
+  c.set('user', user);
+  c.set('role', null);
+
+  if (PUBLIC_PATHS.some((p) => p.test(path))) return next();
+  if (!user) return c.json({ error: 'Sign in to continue.', needsAuth: true }, 401);
+
+  const docId = await documentIdFor(c.req.method, path);
+  if (!docId) return next();
+
+  // An unknown document is a 404 to a member and a 404 to everyone else: a
+  // "you may not" on an id that exists tells a stranger it exists.
+  const role = await roleFor(docId, user.id);
+  const memberships = await (await persistence()).loadMemberships({ docId });
+  const unowned = memberships.length === 0;
+  if (!role && !unowned) return c.json({ error: 'You do not have access to this document.' }, 404);
+  c.set('role', role ?? 'owner');
+
+  const needed: MemberRole =
+    OWNER_ONLY.some((r) => r.method === c.req.method && r.pattern.test(path)) ? 'owner'
+      : c.req.method === 'GET' ? 'viewer'
+        : 'editor';
+  if (!unowned && !atLeast(role, needed)) {
+    return c.json({ error: `This document is ${role === 'viewer' ? 'view-only for you' : 'not yours to change'}.` }, 403);
+  }
+  return next();
+});
+
+/**
+ * The document a request acts on, or null when it acts on none.
+ *
+ * `/documents/import` is the trap: it looks exactly like `/documents/:id` and
+ * the id it would yield is the word "import".
+ */
+async function documentIdFor(method: string, path: string): Promise<string | null> {
+  const seg = path.split('/').filter(Boolean);
+  if (seg[0] === 'documents' && seg[1] && seg[1] !== 'import') return seg[1];
+  // Revoking a connection names the code, not the document it belongs to.
+  if (seg[0] === 'connections' && seg[1] && method === 'DELETE') {
+    const conn = await (await persistence()).loadConnection(seg[1]);
+    return conn?.docId ?? null;
+  }
+  return null;
+}
 
 /**
  * Health, plus the two settings that are wrong most often on a fresh deploy.
@@ -128,7 +214,93 @@ api.get('/health', async (c) => {
   });
 });
 
-api.get('/documents', async (c) => c.json({ documents: await listDocuments() }));
+// --- Accounts ---------------------------------------------------------------
+
+/**
+ * Whether this instance has any accounts, which is all a signed-out visitor is
+ * told. An empty instance offers to create the first account; one with accounts
+ * offers to sign in, and says nothing about who is on it.
+ */
+api.get('/auth/state', async (c) => c.json({
+  hasAccounts: await hasAccounts(),
+  signupCodeRequired: signupCodeRequired(),
+  user: c.get('user') ? publicUser(c.get('user')!) : null,
+}));
+
+api.get('/auth/me', async (c) => {
+  const user = c.get('user');
+  return user ? c.json({ user: publicUser(user) }) : c.json({ user: null }, 401);
+});
+
+api.post('/auth/signup', async (c) => {
+  const { email, password, name, code } =
+    await c.req.json<{ email?: string; password?: string; name?: string; code?: string }>();
+  const { user, claimed } = await createAccount(String(email ?? ''), String(password ?? ''), name, code);
+  await issueSession(c, user.id);
+  return c.json({ user: publicUser(user), claimed }, 201);
+});
+
+api.post('/auth/login', async (c) => {
+  const { email, password } = await c.req.json<{ email?: string; password?: string }>();
+  const user = await authenticate(String(email ?? ''), String(password ?? ''));
+  await issueSession(c, user.id);
+  return c.json({ user: publicUser(user) });
+});
+
+api.post('/auth/logout', async (c) => {
+  const token = getCookie(c, SESSION_COOKIE);
+  if (token) await endSession(token);
+  deleteCookie(c, SESSION_COOKIE, { path: '/' });
+  return c.json({ ok: true });
+});
+
+/** Members of one document, and the calling user's own role in it. */
+api.get('/documents/:id/members', async (c) => c.json({
+  members: await membersOf(c.req.param('id')),
+  role: c.get('role'),
+}));
+
+api.post('/documents/:id/members', async (c) => {
+  const { email, role } = await c.req.json<{ email?: string; role?: MemberRole }>();
+  const store = await persistence();
+  const invitee = await store.loadUserByEmail(String(email ?? '').trim().toLowerCase());
+  // No invitation email to send yet, so an unknown address is an error rather
+  // than a pending invite that would never arrive.
+  if (!invitee) {
+    return c.json({ error: 'No account with that address yet. Ask them to sign up first.' }, 404);
+  }
+  const wanted: MemberRole = role === 'owner' || role === 'viewer' ? role : 'editor';
+  await grant(c.req.param('id'), invitee.id, wanted);
+  return c.json({ members: await membersOf(c.req.param('id')) }, 201);
+});
+
+api.delete('/documents/:id/members/:userId', async (c) => {
+  const docId = c.req.param('id');
+  const userId = c.req.param('userId');
+  const members = await membersOf(docId);
+  // Removing the last owner leaves a document nobody can administer, which on
+  // this model also means one any signed-in user can take over.
+  if (members.filter((m) => m.role === 'owner').length === 1
+    && members.find((m) => m.user.id === userId)?.role === 'owner') {
+    return c.json({ error: 'A document needs an owner. Make someone else an owner first.' }, 400);
+  }
+  await revokeMembership(docId, userId);
+  return c.json({ members: await membersOf(docId) });
+});
+
+/**
+ * The library: documents this person is a member of, plus anything still
+ * unowned. Ordering comes from the store, so the newest is first either way.
+ */
+api.get('/documents', async (c) => {
+  const user = c.get('user')!;
+  const mine = await documentsFor(user.id);
+  const owned = new Set((await (await persistence()).loadMemberships({})).map((m) => m.docId));
+  const documents = (await listDocuments())
+    .filter((d) => mine.has(d.id) || !owned.has(d.id))
+    .map((d) => ({ ...d, role: mine.get(d.id) ?? 'owner' }));
+  return c.json({ documents });
+});
 
 api.get('/templates', (c) => c.json({ templates: templateSummaries() }));
 
@@ -142,6 +314,9 @@ api.post('/documents', async (c) => {
   }
 
   const doc = await createDocument(body.name?.trim() || template?.name || 'Untitled');
+  // Whoever creates it owns it. Without this the creator is a member of nothing
+  // and the document is one of the "unowned" ones any signed-in user can open.
+  await grant(doc.id, c.get('user')!.id, 'owner');
 
   // Filed at creation, so "new document in this project" is one call rather
   // than a create followed by a move that can half-fail.
@@ -472,6 +647,7 @@ api.post('/documents/import', async (c) => {
   // reusing it replaces that document when the two happen to be on the same
   // instance. An import creates; it never overwrites.
   const doc = await createDocument(name, { ...structuredClone(document), id: newId('doc'), name });
+  await grant(doc.id, c.get('user')!.id, 'owner');
   remapAssets(doc, remap);
   if (c.req.query('projectId')) {
     try { await fileDocument(doc.id, c.req.query('projectId')!); } catch { /* an unknown project just leaves it unfiled */ }
@@ -688,6 +864,24 @@ if (SERVE_CLIENT && existsSync(WEB_DIST)) {
  * touches a document has to go through here rather than reading the cache
  * directly.
  */
+/**
+ * Sets the session cookie.
+ *
+ * `secure` follows the public URL rather than NODE_ENV: a local HTTP instance
+ * would drop a secure cookie on the floor and nobody could ever sign in, and a
+ * production instance behind TLS must not hand its cookie out over plain HTTP.
+ */
+async function issueSession(c: Context<{ Variables: Vars }>, userId: string): Promise<void> {
+  const token = await startSession(userId);
+  setCookie(c, SESSION_COOKIE, token, {
+    path: '/',
+    httpOnly: true,
+    sameSite: 'Lax',
+    secure: PUBLIC_URL.startsWith('https://'),
+    maxAge: 30 * 24 * 60 * 60,
+  });
+}
+
 async function requireDocument(id: string): Promise<CanvasDocument> {
   await ensureLoaded(id);
   const doc = getDocument(id);

@@ -20,6 +20,13 @@ let server: ReturnType<typeof serve>;
 let base: string;
 let client: Client;
 let docId: string;
+/** Session cookie for the test account, so REST calls get past the auth gate. */
+let cookie = '';
+
+/** `fetch`, signed in. The MCP transport has its own credential and needs none. */
+async function api(path: string, init: RequestInit = {}): Promise<Response> {
+  return fetch(`${base}${path}`, { ...init, headers: { ...init.headers, cookie } });
+}
 
 function textOf(res: unknown): string {
   const content = (res as { content: { type: string; text?: string }[] }).content;
@@ -32,6 +39,14 @@ before(async () => {
   const port = 4100 + Math.floor(Math.random() * 400);
   base = `http://127.0.0.1:${port}`;
   server = serve({ fetch: app.fetch, port });
+
+  // The REST API needs an account now. The MCP endpoint does not — a connection
+  // code is its own credential — which is what most of this file exercises.
+  const signup = await fetch(`${base}/api/auth/signup`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ email: 'test@example.com', password: 'a-long-test-password' }),
+  });
+  cookie = (signup.headers.get('set-cookie') ?? '').split(';')[0]!;
 
   docId = (await createDocument('MCP Test')).id;
   const conn = await createConnection(docId, 'Test Agent');
@@ -307,7 +322,7 @@ test('delete_nodes reports the full subtree size', async () => {
 });
 
 test('agent edits are attributed in history', async () => {
-  const res = await fetch(`${base}/api/documents/${docId}/history`);
+  const res = await api(`/api/documents/${docId}/history`);
   const { history } = (await res.json()) as { history: { origin: { kind: string; label?: string } }[] };
   assert.ok(history.length > 0);
   assert.ok(history.some((h) => h.origin.kind === 'agent' && h.origin.label === 'Test Agent'));
@@ -321,7 +336,7 @@ test('start_working_on_nodes creates a restore point', async () => {
   }));
   assert.deepEqual(res.marked, [artboard]);
 
-  const snaps = (await (await fetch(`${base}/api/documents/${docId}/snapshots`)).json()) as
+  const snaps = (await (await api(`/api/documents/${docId}/snapshots`)).json()) as
     { snapshots: { label: string }[] };
   assert.ok(snaps.snapshots.some((s) => s.label.includes('Adding a footer')));
 

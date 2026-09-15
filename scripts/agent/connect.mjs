@@ -6,6 +6,7 @@
  * at a time and re-minting a connection for each would be wasteful and would
  * clutter the document's connection list.
  */
+import '../lib/session.mjs';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';

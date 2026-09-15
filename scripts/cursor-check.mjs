@@ -11,6 +11,7 @@
  * the remote cursor lands on the same *design* point, not the same screen point.
  */
 
+import './lib/session.mjs';  // signs these checks in; see the module header
 import { chromium } from 'playwright';
 import WebSocket from 'ws';
 
@@ -103,7 +104,11 @@ const onBob = await bob.evaluate(() => {
 });
 
 check('the other tab sees a cursor', !!onBob, onBob ? onBob.name : '(none)');
-check('it is labelled with the peer’s name', onBob?.name === 'Alice', onBob?.name ?? '');
+// The tab asked to be called "Alice" in localStorage; the server labels the
+// cursor with the signed-in account instead. A name a tab can choose for itself
+// is not identity, and the whole point of accounts is that this one cannot lie.
+check('it is labelled with the account, not with what the tab asked to be called',
+  !!onBob?.name && onBob.name !== 'Alice', onBob?.name ?? '');
 check('it lands on the same point of the design',
   !!onBob && Math.abs(onBob.world.x - WORLD.x) <= 3 && Math.abs(onBob.world.y - WORLD.y) <= 3,
   onBob ? `world ${onBob.world.x},${onBob.world.y} (expected ${WORLD.x},${WORLD.y})` : '');

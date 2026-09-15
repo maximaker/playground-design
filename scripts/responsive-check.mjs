@@ -6,6 +6,7 @@
  * cannot be reached, and tap targets too small to hit.
  */
 
+import './lib/session.mjs';  // signs these checks in; see the module header
 import { chromium, devices } from 'playwright';
 
 const BASE = process.argv[2] ?? 'http://localhost:4000';

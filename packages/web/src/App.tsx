@@ -24,6 +24,9 @@ import { Shortcuts } from './ui/Shortcuts.tsx';
 import { Icon, type IconName } from './ui/Icon.tsx';
 import { Logo } from './ui/Logo.tsx';
 import { Settings } from './ui/Settings.tsx';
+import { Landing } from './Landing.tsx';
+import { AccountMenu } from './ui/AccountMenu.tsx';
+import { useSession } from './state/session.ts';
 import { OverflowMenu } from './ui/OverflowMenu.tsx';
 import { CommandPalette } from './ui/CommandPalette.tsx';
 import { AgentChangeBar } from './ui/AgentChangeBar.tsx';
@@ -47,6 +50,7 @@ const LEFT_TABS: { id: LeftTab; icon: IconName; label: string; hint: string }[] 
 
 export function App() {
   const [source, setSource] = useState<Source | null>(() => sourceFromLocation());
+  const session = useSession();
   const [appearance, setAppearance] = useState<Appearance>(loadAppearance);
 
   useEffect(() => {
@@ -66,12 +70,29 @@ export function App() {
     return () => window.removeEventListener('popstate', onPop);
   }, []);
 
+  // A share link is the one route that works signed out: the token is the
+  // credential, and sending a reviewer to a sign-in form would defeat the link.
+  if (session.loading && source?.kind !== 'share') {
+    return <div className="boot" aria-busy>Loading…</div>;
+  }
+
+  if (!session.user && source?.kind !== 'share') {
+    return (
+      <Landing
+        hasAccounts={session.hasAccounts}
+        signupCodeRequired={session.signupCodeRequired}
+        onSignedIn={() => { void session.refresh(); }}
+      />
+    );
+  }
+
   if (!source) {
     return (
       <Home
         onOpen={(id) => { history.pushState({}, '', `/d/${id}`); setSource({ kind: 'doc', id }); }}
         appearance={appearance}
         onAppearance={setAppearance}
+        session={session}
       />
     );
   }
@@ -86,6 +107,7 @@ export function App() {
         : null}
       appearance={appearance}
       onAppearance={setAppearance}
+      session={session}
     />
   );
 }
@@ -106,7 +128,8 @@ function sourceFromLocation(): Source | null {
   return null;
 }
 
-function Editor({ source, onHome, appearance, onAppearance }: {
+function Editor({ source, onHome, appearance, onAppearance, session }: {
+  session: ReturnType<typeof useSession>;
   source: Source;
   onHome: (() => void) | null;
   appearance: Appearance;
@@ -308,6 +331,10 @@ function Editor({ source, onHome, appearance, onAppearance }: {
               aria-expanded={showSettings}
               onClick={() => setShowSettings((v) => !v)}
             ><Icon name="settings" size={15} /></button>
+
+            {session.user && (
+              <AccountMenu user={session.user} onSignedOut={() => { void session.refresh(); }} />
+            )}
 
             <span className="topbar-divider" />
 

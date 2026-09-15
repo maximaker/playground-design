@@ -56,6 +56,48 @@ export interface StoredAsset {
   createdAt: number;
 }
 
+/**
+ * A person with an account.
+ *
+ * `passwordHash` is the only credential for now. The record is shaped for the
+ * other two sign-in methods to arrive without a migration: an email-link login
+ * sets `emailVerifiedAt` and leaves the hash null, and an OAuth identity is a
+ * row in `identities` pointing here.
+ */
+export interface StoredUser {
+  id: string;
+  /** Lower-cased and trimmed. Unique across the instance. */
+  email: string;
+  name: string;
+  passwordHash: string | null;
+  createdAt: number;
+  /**
+   * Null until there is a mail service to verify with. Deliberately not a gate:
+   * an instance with no SMTP configured would otherwise lock out every account
+   * it created, including the first one.
+   */
+  emailVerifiedAt: number | null;
+  /** Stable presence colour, so a person looks the same to everyone, every session. */
+  color: string;
+}
+
+export interface StoredSession {
+  token: string;
+  userId: string;
+  createdAt: number;
+  expiresAt: number;
+  lastSeenAt: number;
+}
+
+export type MemberRole = 'owner' | 'editor' | 'viewer';
+
+export interface StoredMembership {
+  docId: string;
+  userId: string;
+  role: MemberRole;
+  createdAt: number;
+}
+
 export interface StoredSnapshot {
   id: string;
   docId: string;
@@ -89,6 +131,22 @@ export interface Persistence {
 
   saveAsset(asset: StoredAsset): Promise<void>;
   loadAsset(id: string): Promise<StoredAsset | null>;
+
+  saveUser(user: StoredUser): Promise<void>;
+  loadUser(id: string): Promise<StoredUser | null>;
+  loadUserByEmail(email: string): Promise<StoredUser | null>;
+  countUsers(): Promise<number>;
+  listUsers(ids?: string[]): Promise<StoredUser[]>;
+
+  saveSession(session: StoredSession): Promise<void>;
+  loadSession(token: string): Promise<StoredSession | null>;
+  deleteSession(token: string): Promise<void>;
+  deleteSessionsForUser(userId: string): Promise<void>;
+
+  saveMembership(m: StoredMembership): Promise<void>;
+  loadMembership(docId: string, userId: string): Promise<StoredMembership | null>;
+  loadMemberships(opts: { docId?: string; userId?: string }): Promise<StoredMembership[]>;
+  deleteMembership(docId: string, userId: string): Promise<void>;
 
   saveSnapshot(snapshot: StoredSnapshot): Promise<void>;
   loadSnapshots(docId: string): Promise<Omit<StoredSnapshot, 'data'>[]>;

@@ -14,12 +14,16 @@ import type { Server } from 'node:http';
 import type { OpEnvelope } from '@playground/shared';
 import { applyOps, ensureLoaded, getDocument, subscribe, StoreError, autoSnapshotIfStale } from './store.ts';
 import { redactForViewer, resolveShare, viewerMayApply } from './shares.ts';
+import { SESSION_COOKIE, atLeast, cookieValue, roleFor, sessionUser } from './accounts.ts';
+import { persistence } from './persistence.ts';
 
 export interface Peer {
   clientId: string;
   name: string;
   color: string;
   kind: 'human' | 'agent';
+  /** The account behind this peer, when there is one. Absent for share-link viewers. */
+  userId?: string;
   selection: string[];
   cursor?: { x: number; y: number };
   pageId?: string;
@@ -51,8 +55,12 @@ const PEER_COLORS = ['#ef4444', '#f59e0b', '#10b981', '#3b82f6', '#8b5cf6', '#ec
 export function attachRealtime(server: Server): WebSocketServer {
   const wss = new WebSocketServer({ server, path: '/ws' });
 
-  wss.on('connection', (ws) => {
+  wss.on('connection', (ws, req) => {
     let session: Session | null = null;
+    // The handshake carries the browser's cookies, so the socket authenticates
+    // exactly the way the API does. Without this the API gate is decorative:
+    // every op already travels over this socket, not over REST.
+    const cookie = req.headers.cookie;
 
     ws.on('message', (raw) => {
       let msg: Record<string, unknown>;
@@ -69,11 +77,28 @@ export function attachRealtime(server: Server): WebSocketServer {
             if (msg.shareToken) {
               const share = await resolveShare(String(msg.shareToken));
               if (!share) return send(ws, { type: 'error', message: 'This link has been revoked or never existed.' });
-              if (!session) session = handleJoin(ws, msg, share.docId, false);
+              if (!session) session = handleJoin(ws, msg, share.docId, false, null);
               return;
             }
-            await ensureLoaded(String(msg.docId ?? ''));
-            if (!session) session = handleJoin(ws, msg, String(msg.docId ?? ''), true);
+
+            const docId = String(msg.docId ?? '');
+            const user = await sessionUser(cookieValue(cookie, SESSION_COOKIE));
+            if (!user) {
+              return send(ws, { type: 'error', code: 'unauthenticated', message: 'Sign in to open this document.' });
+            }
+            const role = await roleFor(docId, user.id);
+            // As in the REST gate: a document nobody is a member of is open to
+            // any signed-in user, which is what everything made before accounts
+            // looks like until the first account claims it.
+            const unowned = (await (await persistence()).loadMemberships({ docId })).length === 0;
+            if (!role && !unowned) {
+              return send(ws, { type: 'error', code: 'forbidden', message: 'You do not have access to this document.' });
+            }
+            await ensureLoaded(docId);
+            if (!session) {
+              session = handleJoin(ws, msg, docId, unowned || atLeast(role, 'editor'),
+                { id: user.id, name: user.name, color: user.color });
+            }
           })();
           break;
         }
@@ -139,6 +164,8 @@ function handleJoin(
   msg: Record<string, unknown>,
   docId: string,
   canWrite: boolean,
+  /** The signed-in person, or null for a share-link viewer. */
+  account: { id: string; name: string; color: string } | null,
 ): Session | null {
   const doc = getDocument(docId);
   if (!doc) { send(ws, { type: 'error', message: `document ${docId} not found` }); return null; }
@@ -147,9 +174,13 @@ function handleJoin(
   const existing = byDoc.get(docId)?.size ?? 0;
   const peer: Peer = {
     clientId,
-    name: String(msg.name ?? `Guest ${existing + 1}`),
-    color: PEER_COLORS[existing % PEER_COLORS.length]!,
+    // An account's own name and colour win over anything the client sends:
+    // presence is an identity claim, and one a tab can set is worth nothing.
+    // A share-link viewer has no account, so they stay a guest.
+    name: account?.name ?? String(msg.name ?? `Guest ${existing + 1}`),
+    color: account?.color ?? PEER_COLORS[existing % PEER_COLORS.length]!,
     kind: msg.kind === 'agent' ? 'agent' : 'human',
+    userId: account?.id,
     selection: [],
   };
 

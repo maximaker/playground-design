@@ -8,6 +8,7 @@
  *
  *   node scripts/agent/update-page.mjs <base> <docId>
  */
+import '../lib/session.mjs';
 import { readFileSync } from 'node:fs';
 import { chromium } from 'playwright';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';

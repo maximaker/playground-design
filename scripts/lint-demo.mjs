@@ -1,4 +1,5 @@
 /** An agent checking its own work: build something flawed, lint it, fix it. */
+import './lib/session.mjs';  // signs these checks in; see the module header
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 

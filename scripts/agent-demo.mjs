@@ -1,3 +1,4 @@
+import './lib/session.mjs';  // signs these checks in; see the module header
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 

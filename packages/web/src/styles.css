@@ -1171,6 +1171,7 @@ code { font-family: var(--mono); font-size: 0.92em; }
   .context-item { padding: 0.5rem var(--s3); }
 
   .icon-button,
+  .account-button,
   .topbar .button,
   .topbar .logo,
   .toolbar button {
@@ -1855,3 +1856,114 @@ code { font-family: var(--mono); font-size: 0.92em; }
   background: #fff; transform: translate(0.78rem, -50%);
 }
 .settings-toggle .toggle-hint { display: block; font-size: 0.82rem; color: var(--fg-muted); }
+
+/* --- Boot ------------------------------------------------------------------ */
+.boot {
+  position: fixed; inset: 0; display: grid; place-items: center;
+  color: var(--fg-muted); font-size: 0.95rem;
+}
+
+/* --- Landing ---------------------------------------------------------------
+ *
+ * Two columns: what this is on the left, the way in on the right. The form is
+ * on the page rather than behind a button, because the person who uses this
+ * most is the one who owns the instance and signs in every day.
+ */
+.landing {
+  min-height: 100vh; background: var(--bg-sunken); color: var(--fg);
+  display: flex; flex-direction: column;
+}
+.landing-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: var(--s5) var(--s6); gap: var(--s5);
+}
+.landing-brand { display: inline-flex; align-items: center; gap: var(--s3); font-weight: 600; font-size: 1.05rem; }
+.landing-link { color: var(--fg-muted); text-decoration: none; font-size: 0.92rem; }
+.landing-link:hover { color: var(--fg); }
+
+.landing-main {
+  flex: 1; display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(320px, 0.85fr);
+  gap: 3rem; align-items: start;
+  padding: 2.4rem var(--s6) 3rem;
+  max-width: 78rem; width: 100%; margin: 0 auto; box-sizing: border-box;
+}
+.landing-eyebrow {
+  font-size: 0.78rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--fg-muted);
+}
+.landing-pitch h1 {
+  margin: var(--s4) 0 0; font-size: clamp(2rem, 4.2vw, 3.2rem); line-height: 1.05;
+  letter-spacing: -0.03em; max-width: 18ch;
+}
+.landing-lead {
+  margin: var(--s5) 0 0; font-size: 1.05rem; line-height: 1.65; color: var(--fg-muted); max-width: 48ch;
+}
+.landing-points { list-style: none; margin: 2.4rem 0 0; padding: 0; display: grid; gap: var(--s5); }
+.landing-points li { display: flex; gap: var(--s4); align-items: flex-start; }
+.landing-points div { display: flex; flex-direction: column; gap: 0.2rem; }
+.landing-points strong { font-size: 0.98rem; }
+.landing-points span { color: var(--fg-muted); font-size: 0.92rem; line-height: 1.6; }
+.landing-point-icon {
+  flex: 0 0 auto; display: grid; place-items: center; width: 2rem; height: 2rem;
+  border-radius: var(--radius); background: var(--bg-raised); border: 1px solid var(--border);
+  color: var(--fg-muted);
+}
+
+.auth-card {
+  display: flex; flex-direction: column; gap: var(--s4);
+  background: var(--bg-raised); border: 1px solid var(--border);
+  border-radius: var(--radius-lg); padding: var(--s6);
+  position: sticky; top: var(--s6);
+}
+.auth-card h2 { margin: 0; font-size: 1.25rem; letter-spacing: -0.01em; }
+.auth-card label { display: flex; flex-direction: column; gap: var(--s2); font-size: 0.88rem; color: var(--fg-muted); }
+.auth-card input {
+  font: inherit; font-size: 0.95rem; color: var(--fg);
+  background: var(--bg-input); border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm); padding: 0.55rem 0.7rem; min-height: 2.5rem;
+}
+.auth-card input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.auth-card .button { justify-content: center; min-height: 2.6rem; }
+.auth-note, .auth-hint, .auth-fineprint { margin: 0; color: var(--fg-muted); font-size: 0.85rem; line-height: 1.55; }
+.auth-fineprint { border-top: 1px solid var(--border); padding-top: var(--s4); font-size: 0.8rem; }
+.auth-error { margin: 0; color: var(--danger, #ef4444); font-size: 0.88rem; }
+.auth-switch {
+  background: none; border: 0; color: var(--accent); font: inherit; font-size: 0.88rem;
+  cursor: pointer; padding: 0; text-align: left;
+}
+
+@media (max-width: 900px) {
+  .landing-main { grid-template-columns: minmax(0, 1fr); gap: var(--s6); padding: var(--s5); }
+  /* The form first on a phone: the pitch is for people who have not decided. */
+  .landing-auth { order: -1; }
+  .auth-card { position: static; }
+}
+
+/* --- Account ---------------------------------------------------------------- */
+.avatar-chip {
+  display: inline-grid; place-items: center; border-radius: 999px;
+  color: #fff; font-weight: 600; letter-spacing: 0.02em; flex: 0 0 auto;
+  /* White initials on a mid-tone presence colour; the shadow keeps them legible
+     on the lighter end of the palette. */
+  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.25);
+}
+.account-menu { position: relative; display: inline-flex; }
+.account-button {
+  background: none; border: 0; padding: 0.15rem; border-radius: 999px; cursor: pointer;
+  display: inline-grid; place-items: center;
+}
+.account-button:hover { background: var(--bg-hover); }
+.account-popover {
+  position: absolute; top: calc(100% + 0.4rem); right: 0; z-index: 40;
+  min-width: 15rem; display: flex; flex-direction: column; gap: var(--s2);
+  background: var(--bg-raised); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: var(--s3); box-shadow: var(--shadow-popover, 0 12px 32px rgba(0,0,0,.25));
+}
+.account-identity { display: flex; gap: var(--s3); align-items: center; padding: var(--s2); }
+.account-identity div { display: flex; flex-direction: column; min-width: 0; }
+.account-identity .dim { font-size: 0.82rem; overflow: hidden; text-overflow: ellipsis; }
+.account-item {
+  display: flex; align-items: center; gap: var(--s3); width: 100%;
+  background: none; border: 0; color: var(--fg); font: inherit; font-size: 0.9rem;
+  padding: var(--s3); border-radius: var(--radius-sm); cursor: pointer; text-align: left;
+}
+.account-item:hover { background: var(--bg-hover); }

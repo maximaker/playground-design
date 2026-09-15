@@ -20,9 +20,11 @@
  * after it is written and a stale copy there would be a lost edit.
  */
 
+import { createHash } from 'node:crypto';
 import type { CanvasDocument } from '@playground/shared';
 import type {
-  DocSummary, Persistence, StoredAsset, StoredConnection, StoredProject, StoredShare, StoredSnapshot,
+  DocSummary, Persistence, StoredAsset, StoredConnection, StoredMembership, StoredProject,
+  StoredSession, StoredShare, StoredSnapshot, StoredUser,
 } from './persistence.ts';
 
 type BlobModule = typeof import('@vercel/blob');
@@ -160,6 +162,91 @@ export class BlobPersistence implements Persistence {
     return all.filter((c): c is StoredConnection => !!c && (!docId || c.docId === docId));
   }
 
+  // --- Accounts -------------------------------------------------------------
+  //
+  // Users are indexed by id and, separately, by a hash of the address, because
+  // Blob has no queries: finding an account by email any other way means
+  // listing every user and reading each one.
+
+  async saveUser(u: StoredUser): Promise<void> {
+    this.invalidate('users');
+    await this.putJson(`users/${u.id}.json`, u);
+    await this.putJson(`users-by-email/${emailKey(u.email)}.json`, { id: u.id });
+  }
+
+  async loadUser(id: string) { return this.getJson<StoredUser>(`users/${id}.json`); }
+
+  async loadUserByEmail(email: string): Promise<StoredUser | null> {
+    const ref = await this.getJson<{ id: string }>(`users-by-email/${emailKey(email)}.json`);
+    return ref ? this.loadUser(ref.id) : null;
+  }
+
+  async countUsers(): Promise<number> {
+    return (await this.listUsers()).length;
+  }
+
+  async listUsers(ids?: string[]): Promise<StoredUser[]> {
+    if (ids) {
+      const loaded = await Promise.all(ids.map((id) => this.loadUser(id)));
+      return loaded.filter((u): u is StoredUser => !!u);
+    }
+    return this.cachedList('users', async () => {
+      const { list } = await this.blob();
+      const { blobs } = await list({ prefix: 'users/', token: this.token, limit: 500 });
+      const loaded = await Promise.all(blobs.map((b) => this.getJson<StoredUser>(b.pathname)));
+      return loaded.filter((u): u is StoredUser => !!u).sort((a, b) => a.createdAt - b.createdAt);
+    });
+  }
+
+  async saveSession(s: StoredSession): Promise<void> {
+    await this.putJson(`sessions/${s.token}.json`, s);
+  }
+
+  async loadSession(token: string) { return this.getJson<StoredSession>(`sessions/${token}.json`); }
+
+  async deleteSession(token: string): Promise<void> {
+    const { del } = await this.blob();
+    try { await del(`sessions/${token}.json`, { token: this.token }); } catch { /* already gone */ }
+  }
+
+  async deleteSessionsForUser(userId: string): Promise<void> {
+    const { list, del } = await this.blob();
+    const { blobs } = await list({ prefix: 'sessions/', token: this.token, limit: 1000 });
+    const loaded = await Promise.all(blobs.map(async (b) =>
+      ({ path: b.pathname, session: await this.getJson<StoredSession>(b.pathname) })));
+    for (const { path, session } of loaded) {
+      if (session?.userId !== userId) continue;
+      try { await del(path, { token: this.token }); } catch { /* already gone */ }
+    }
+  }
+
+  async saveMembership(m: StoredMembership): Promise<void> {
+    this.invalidate('memberships');
+    await this.putJson(`memberships/${m.docId}__${m.userId}.json`, m);
+  }
+
+  async loadMembership(docId: string, userId: string) {
+    return this.getJson<StoredMembership>(`memberships/${docId}__${userId}.json`);
+  }
+
+  async loadMemberships(opts: { docId?: string; userId?: string }): Promise<StoredMembership[]> {
+    const all = await this.cachedList('memberships', async () => {
+      const { list } = await this.blob();
+      const { blobs } = await list({ prefix: 'memberships/', token: this.token, limit: 1000 });
+      const loaded = await Promise.all(blobs.map((b) => this.getJson<StoredMembership>(b.pathname)));
+      return loaded.filter((m): m is StoredMembership => !!m);
+    });
+    return all.filter((m) =>
+      (!opts.docId || m.docId === opts.docId) && (!opts.userId || m.userId === opts.userId));
+  }
+
+  async deleteMembership(docId: string, userId: string): Promise<void> {
+    const { del } = await this.blob();
+    this.invalidate('memberships');
+    try { await del(`memberships/${docId}__${userId}.json`, { token: this.token }); }
+    catch { /* already gone */ }
+  }
+
   async saveProject(p: StoredProject) {
     this.invalidate('projects');
     await this.putJson(`projects/${p.id}.json`, p);
@@ -235,4 +322,16 @@ export class BlobPersistence implements Persistence {
   async loadSnapshot(docId: string, id: string) {
     return this.getJson<StoredSnapshot>(`snapshots/${docId}/${id}.json`);
   }
+}
+
+/**
+ * A blob-safe key for an email address.
+ *
+ * Addresses contain characters that are awkward in a path and are
+ * case-insensitive in practice, so the key is a hash of the lower-cased
+ * address rather than the address itself. It also keeps the address out of
+ * a listing that only needs to answer "does this account exist".
+ */
+function emailKey(email: string): string {
+  return createHash('sha256').update(email.trim().toLowerCase()).digest('hex').slice(0, 32);
 }

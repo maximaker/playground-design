@@ -6,6 +6,7 @@
  * Goes through the document bundle rather than HTML, so tokens, components and
  * assets arrive with it instead of being flattened away.
  */
+import '../lib/session.mjs';
 import { writeFileSync } from 'node:fs';
 
 const [from, docId, to, name] = process.argv.slice(2);

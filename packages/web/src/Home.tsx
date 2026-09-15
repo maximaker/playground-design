@@ -16,6 +16,8 @@ import { Logo } from './ui/Logo.tsx';
 import { Icon } from './ui/Icon.tsx';
 import { Settings } from './ui/Settings.tsx';
 import type { Appearance } from './state/appearance.ts';
+import type { useSession } from './state/session.ts';
+import { AccountMenu } from './ui/AccountMenu.tsx';
 
 interface DocSummary {
   id: string; name: string; rev: number; updatedAt: number; nodeCount: number; projectId?: string;
@@ -26,8 +28,9 @@ interface TemplateSummary { id: string; name: string; description: string; token
 /** `null` is everything; `'unfiled'` is everything with no project. */
 type Filter = string | null | 'unfiled';
 
-export function Home({ onOpen, appearance, onAppearance }: {
+export function Home({ onOpen, appearance, onAppearance, session }: {
   onOpen: (id: string) => void;
+  session: ReturnType<typeof useSession>;
   appearance: Appearance;
   onAppearance: (next: Appearance) => void;
 }) {
@@ -257,6 +260,9 @@ export function Home({ onOpen, appearance, onAppearance }: {
           ><Icon name="settings" size={15} /></button>
           {showSettings && (
             <Settings appearance={appearance} onChange={onAppearance} onClose={() => setShowSettings(false)} />
+          )}
+          {session.user && (
+            <AccountMenu user={session.user} onSignedOut={() => { void session.refresh(); }} />
           )}
         </div>
       </header>

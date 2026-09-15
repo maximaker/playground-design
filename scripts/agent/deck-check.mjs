@@ -10,6 +10,7 @@
  *
  *   node scripts/agent/deck-check.mjs <base> <docId> [page] [outDir]
  */
+import '../lib/session.mjs';
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { chromium } from 'playwright';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
