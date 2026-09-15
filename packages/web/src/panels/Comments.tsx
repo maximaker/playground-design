@@ -7,7 +7,7 @@
  */
 
 import { useMemo } from 'react';
-import { commentsOf } from '@playground/shared';
+import { NOTE_KIND_LABELS, commentsOf } from '@playground/shared';
 import { useCanvas, getDoc, currentPage } from '../state/store.ts';
 import { Icon } from '../ui/Icon.tsx';
 
@@ -73,6 +73,13 @@ export function Comments() {
             onClick={() => focus(c.id, c.x, c.y, c.nodeId)}
           >
             <div className="comment-row-head">
+              {/* A typed note is handover, not conversation. Saying so here as
+                  well as in the Spec panel stops the two reading as one pile. */}
+              {c.kind && c.kind !== 'comment' && (
+                <span className={`note-kind note-${c.kind}`}>
+                  {NOTE_KIND_LABELS[c.kind] ?? c.kind}
+                </span>
+              )}
               <strong>{c.author}</strong>
               {c.resolved && <Icon name="check" size={11} />}
               {c.replies.length > 0 && <span className="dim">{c.replies.length} repl{c.replies.length === 1 ? 'y' : 'ies'}</span>}

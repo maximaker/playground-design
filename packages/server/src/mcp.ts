@@ -13,7 +13,7 @@ import { z } from 'zod';
 import {
   type CanvasDocument, type CanvasNode, type NodeId, type Op, type OpEnvelope, type Page, type StyleMap,
   applyOp, artboardOf, basicInfo, cloneSubtree, descendants, emitHtml, emitJsx, getNode,
-  makeNode, makeNote, newId, parseHtml, treeSummary, describeNode, getArtboardPosition, getArtboardSize,
+  makeComment, makeNode, makeNote, newId, parseHtml, treeSummary, describeNode, getArtboardPosition, getArtboardSize,
   batchId, tokenToCssVar, DEFAULT_ARTBOARD_STYLES, DEFINITIONS_PAGE,
   componentsOf, collectSlots, detachedNodes, expandInstance, instancesOf,
   resolvedProps, variantMatrix, lintDocument, summarise, RULES,
@@ -22,12 +22,13 @@ import {
   type CodeComponent, type CodeProp, codeComponentsOf, codeComponentOf, resolvedCodeProps,
   codeElementJsx, explicitCodeProps, MOUNT_CONTRACT,
   type Comment, commentsOf, newId as newIdOf,
+  NOTE_KINDS, NOTE_KIND_HINTS, specFor,
 } from '@playground/shared';
 import { applyOps, getDocument, StoreError, createSnapshot } from './store.ts';
 import { persistence } from './persistence.ts';
 import { pageArtboard, slugify } from './publish.ts';
 import { callTab, notifyTabs, selectionOf, hasLiveTab, NoTabError } from './realtime.ts';
-import { renderNode } from './render.ts';
+import { renderNode, measureSubtree } from './render.ts';
 import { storeAsset } from './assets.ts';
 import { GUIDES, guideList } from './guides.ts';
 import { importUrl } from './import.ts';
@@ -2427,6 +2428,86 @@ function resolveCodeComponent(doc: CanvasDocument, ref: string): CodeComponent {
 // ---------------------------------------------------------------------------
 
 function registerCommentTools(server: McpServer, ctx: McpContext): void {
+  // --- Handover ---------------------------------------------------------------
+
+  server.registerTool('get_spec', {
+    title: 'Get the build spec for a layer',
+    description:
+      'Everything a developer needs to build one layer: its measured size, its styles grouped and ' +
+      'with colours and spacing resolved back to the token names they came from, what changes on ' +
+      'hover and at other widths, the notes people attached, and the HTML and JSX it emits. ' +
+      'Derived from the document on request, so it cannot disagree with it.',
+    inputSchema: {
+      id: z.string().describe('The layer. An artboard gives the spec for the whole screen.'),
+      theme: z.string().optional().describe('Resolve token values in this theme. Defaults to `default`.'),
+      includeCode: z.boolean().optional().default(true),
+      measure: z.boolean().optional().default(true)
+        .describe('Render headlessly to get real sizes. Off is faster and reports authored values only.'),
+    },
+    annotations: { readOnlyHint: true },
+  }, async ({ id, theme, includeCode, measure }) => guard(async () => {
+    const doc = requireDoc(ctx);
+    node(doc, id);
+
+    // Authored styles say `width: fit-content`, which is not a width. Measuring
+    // is what makes this a spec rather than a copy of the stylesheet.
+    let boxes: Record<string, { width: number; height: number; x: number; y: number }> | null = null;
+    if (measure) {
+      const artboard = artboardOf(doc, id) ?? id;
+      boxes = await measureSubtree(doc, artboard, ctx.baseUrl).catch(() => null);
+    }
+
+    const spec = specFor(doc, id, { box: boxes?.[id], theme });
+    return json({
+      ...spec,
+      children: spec.children.map((c) => ({ ...c, box: boxes?.[c.id] })),
+      ...(includeCode ? {
+        html: emitHtml(doc, id, { mode: 'inline' }).html,
+        jsx: emitJsx(doc, id, { format: 'inline' }),
+      } : {}),
+      ...(measure && !boxes
+        ? { note: 'No renderer on this server, so sizes are the authored values only.' }
+        : {}),
+    });
+  }));
+
+  server.registerTool('annotate', {
+    title: 'Note something the design cannot say',
+    description:
+      'Attaches a typed note to a layer, for the handover spec. Use it for what CSS cannot carry — ' +
+      'what happens on click, where the data comes from, what must stay true — not for measurements, ' +
+      'which get_spec already reports exactly. ' +
+      Object.entries(NOTE_KIND_HINTS).map(([k, v]) => `${k}: ${v}`).join(' '),
+    inputSchema: {
+      id: z.string().describe('The layer the note is about.'),
+      kind: z.enum(NOTE_KINDS),
+      text: z.string().min(1).max(2000),
+    },
+    annotations: { destructiveHint: false },
+  }, async ({ id, kind, text }) => guard(() => {
+    const doc = requireDoc(ctx);
+    const target = node(doc, id);
+    const pageId = doc.pages.find((p) => p.artboards.includes(artboardOf(doc, id) ?? ''))?.id
+      ?? pageOf(ctx, doc).id;
+    const pos = getArtboardPosition(doc.nodes[artboardOf(doc, id) ?? ''] ?? target);
+
+    const comment = makeComment({
+      pageId,
+      kind,
+      nodeId: id,
+      // Pinned at the artboard's corner: an agent has no pointer, and a pin at
+      // 0,0 of the canvas would sit in empty space miles from the thing.
+      x: pos.x, y: pos.y,
+      author: ctx.connection.label ?? 'Agent',
+      text,
+    });
+    commit(ctx, [{ t: 'comment', action: 'add', comment }]);
+    return json({
+      id: comment.id, kind, about: { id, name: target.name },
+      next: 'get_spec on this layer, or on the artboard, now includes it.',
+    });
+  }));
+
   server.registerTool('list_comments', {
     title: 'Read the feedback on this design',
     description:

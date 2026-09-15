@@ -80,6 +80,14 @@ export interface EmitOptions {
   includeTokens?: boolean;
   theme?: string;
   pretty?: boolean;
+  /**
+   * Emit `data-node-id` on every element.
+   *
+   * Off by default — published pages and exports should carry no trace of the
+   * editor. On, it lets a headless render be measured and mapped back to the
+   * document, which is how a spec gets real sizes with no browser tab open.
+   */
+  includeNodeIds?: boolean;
 }
 
 export interface EmitResult {
@@ -113,6 +121,9 @@ export function emitHtml(doc: CanvasDocument, rootId: NodeId, opts: EmitOptions 
 
     const needsClass = node.variants.length > 0 || mode === 'stylesheet';
     if (needsClass) attrs.push(`class="${cls}"`);
+    // The definition node's id, not the expanded key: a spec is about the node
+    // as it exists in the document.
+    if (opts.includeNodeIds) attrs.push(`data-node-id="${escapeAttr(node.id)}"`);
 
     if (mode === 'inline') {
       // Properties a variant overrides move to the stylesheet: an inline style

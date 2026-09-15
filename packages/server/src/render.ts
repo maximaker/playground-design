@@ -336,14 +336,64 @@ export const RENDERER_VERSION = 'r3';
 
 async function load(
   page: PlaywrightPage, doc: CanvasDocument, nodeId: NodeId, baseUrl?: string, inherit = false,
+  opts: { includeNodeIds?: boolean } = {},
 ) {
-  let html = emitStandalone(doc, nodeId, { mode: 'stylesheet' });
+  let html = emitStandalone(doc, nodeId, { mode: 'stylesheet', includeNodeIds: opts.includeNodeIds });
   if (inherit) html = html.replace('</head>', `${INHERITED}\n</head>`);
   if (baseUrl) html = html.replace('<head>', `<head>\n<base href="${baseUrl}" />`);
   await page.setContent(html, { waitUntil: 'networkidle' });
   // Web fonts arrive after first paint; without this, text rasterizes in the
   // fallback face.
   await page.evaluate(() => (document as unknown as { fonts: FontFaceSet }).fonts.ready);
+}
+
+/**
+ * Measured boxes for a node and its descendants.
+ *
+ * The spec quotes authored values — `padding: var(--space-6)` is what a
+ * developer should write — but the *size* of a thing is only knowable after
+ * layout: `width: fit-content` says nothing, and `flex: 1 1 0` says less.
+ *
+ * `get_computed_styles` can already measure, but only when a browser tab has
+ * the document open, which an agent working alone does not have. This renders
+ * the artboard headlessly and measures there, so a spec is exact with nobody
+ * watching.
+ */
+export async function measureSubtree(
+  doc: CanvasDocument,
+  artboardId: NodeId,
+  baseUrl?: string,
+): Promise<Record<string, { width: number; height: number; x: number; y: number }> | null> {
+  const pw = await tryLoadPlaywright();
+  if (!pw) return null;
+
+  const { width, height } = sizeOf(doc, artboardId);
+  const browser = await getBrowser(pw);
+  const context = await browser.newContext({
+    viewport: { width: Math.ceil(width), height: Math.ceil(height) },
+    deviceScaleFactor: 1,
+  });
+  const page = await context.newPage();
+  try {
+    await load(page, doc, artboardId, baseUrl, false, { includeNodeIds: true });
+    return (await page.evaluate(`(() => {
+      const out = {};
+      const root = document.body.firstElementChild;
+      const origin = root ? root.getBoundingClientRect() : { left: 0, top: 0 };
+      for (const el of document.querySelectorAll('[data-node-id]')) {
+        const r = el.getBoundingClientRect();
+        out[el.getAttribute('data-node-id')] = {
+          width: Math.round(r.width * 100) / 100,
+          height: Math.round(r.height * 100) / 100,
+          x: Math.round((r.left - origin.left) * 100) / 100,
+          y: Math.round((r.top - origin.top) * 100) / 100,
+        };
+      }
+      return out;
+    })()` as unknown as () => unknown)) as Record<string, { width: number; height: number; x: number; y: number }>;
+  } finally {
+    await context.close();
+  }
 }
 
 export async function shutdownRenderer(): Promise<void> {

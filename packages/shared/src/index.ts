@@ -15,3 +15,4 @@ export * from './sanitize.ts';
 export * from './numeric.ts';
 export * from './align.ts';
 export * from './bundle.ts';
+export * from './spec.ts';

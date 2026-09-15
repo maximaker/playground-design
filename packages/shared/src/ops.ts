@@ -559,6 +559,10 @@ function applyComment(doc: CanvasDocument, op: Extract<Op, { t: 'comment' }>): O
     if (!pageId) throw new OpError('a comment needs a pageId');
     doc.comments.push({
       id, pageId,
+      // The kind is what makes a note part of the spec rather than a
+      // conversation; dropping it here quietly turned every typed note back
+      // into an ordinary comment.
+      kind: op.comment.kind ?? 'comment',
       nodeId: op.comment.nodeId,
       x: op.comment.x ?? 0,
       y: op.comment.y ?? 0,

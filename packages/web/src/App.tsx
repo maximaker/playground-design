@@ -12,6 +12,7 @@ import { Properties } from './panels/Properties.tsx';
 import { Tokens } from './panels/Tokens.tsx';
 import { Components } from './panels/Components.tsx';
 import { Review } from './panels/Review.tsx';
+import { Spec } from './panels/Spec.tsx';
 import { Comments } from './panels/Comments.tsx';
 import { History } from './panels/History.tsx';
 import { ConnectAgent } from './panels/ConnectAgent.tsx';
@@ -37,7 +38,7 @@ import {
 } from './state/appearance.ts';
 import { Home } from './Home.tsx';
 
-type LeftTab = 'layers' | 'pages' | 'components' | 'tokens' | 'comments' | 'review' | 'history';
+type LeftTab = 'layers' | 'pages' | 'components' | 'tokens' | 'comments' | 'spec' | 'review' | 'history';
 
 const LEFT_TABS: { id: LeftTab; icon: IconName; label: string; hint: string }[] = [
   { id: 'layers', icon: 'layers', label: 'Layers', hint: 'The structure of this page' },
@@ -45,6 +46,7 @@ const LEFT_TABS: { id: LeftTab; icon: IconName; label: string; hint: string }[] 
   { id: 'components', icon: 'component', label: 'Components', hint: 'Reusable components and their variants' },
   { id: 'tokens', icon: 'palette', label: 'Tokens', hint: 'Design tokens and themes' },
   { id: 'comments', icon: 'comment', label: 'Comments', hint: 'Feedback on this design — agents can read and answer it' },
+  { id: 'spec', icon: 'ruler', label: 'Spec', hint: 'Build spec for the selection — sizes, tokens, notes and code' },
   { id: 'review', icon: 'check', label: 'Review', hint: 'Contrast, tap targets, token consistency and layout shape' },
   { id: 'history', icon: 'history', label: 'History', hint: 'Changes and saved versions' },
 ];
@@ -479,6 +481,7 @@ function Editor({ source, onHome, appearance, onAppearance, session }: {
             {leftTab === 'components' && <Components />}
             {leftTab === 'tokens' && <Tokens />}
             {leftTab === 'comments' && <Comments />}
+            {leftTab === 'spec' && <Spec />}
             {leftTab === 'review' && <Review />}
             {leftTab === 'history' && <History />}
           </ScrollArea>

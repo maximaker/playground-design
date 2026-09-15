@@ -167,6 +167,15 @@ export interface Page {
 export interface Comment {
   id: string;
   pageId: string;
+  /**
+   * What sort of note this is.
+   *
+   * `comment` is a conversation. The others are handover: the things the
+   * document itself cannot say — what happens on click, where the data comes
+   * from, what has to stay true — which is the only part of a redline worth
+   * writing down when the design is already real CSS.
+   */
+  kind?: 'comment' | 'behaviour' | 'data' | 'constraint' | 'accessibility' | 'todo';
   /** The node it concerns, when it was placed on one. */
   nodeId?: NodeId;
   /** Canvas-space pin position. */
@@ -192,6 +201,7 @@ export function makeComment(partial: Partial<Comment> & { pageId: string }): Com
   return {
     id: partial.id ?? newId('cm'),
     pageId: partial.pageId,
+    kind: partial.kind ?? 'comment',
     nodeId: partial.nodeId,
     x: partial.x ?? 0,
     y: partial.y ?? 0,

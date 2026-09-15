@@ -162,6 +162,7 @@ need a real layout engine reach into a connected tab, and they say so plainly wh
 | `get_guide` | Workflow briefs: `layout`, `styling`, `responsive`, `components`, `export`, `figma-import` |
 | `list_templates` | Built-in starter design systems |
 | `list_pages` | Pages, their artboard counts, and which one this session is on |
+| `get_spec` | Build spec for a layer: measured size, tokens by name, variants in words, notes, HTML and JSX |
 | `find_repeated_shapes` | Subtrees built more than once — "should be a component" before anyone named it |
 
 **Writing**
@@ -172,6 +173,7 @@ need a real layout engine reach into a connected tab, and they say so plainly wh
 | `create_artboard` | New screen, placed clear of existing work, on the current page |
 | `create_page` / `set_current_page` / `rename_page` / `delete_page` | Pages. Each connection has its own current page |
 | `publish_page` / `unpublish_page` / `get_publication` | Put an artboard on the public web, or take it down |
+| `annotate` | A typed note on a layer — behaviour, data, constraint, accessibility, to-do |
 | `componentise` | Registers a shape and swaps every identical copy for an instance, text and links carried as overrides. Refuses if any artboard would render differently |
 | `update_styles` | Batch CSS, with `:hover` / `@media` variants via `selector` |
 | `set_text_content` | Batch text |
@@ -354,6 +356,20 @@ hole in the grid. Search, sort (last edited, name, size) and a grid-or-list view
 person. Each document carries a tint derived from its id — the same colour every time, so a document
 becomes findable by shape before you have read a title, and never the only signal since the name is
 beside it. A role badge appears only when a document is not yours outright.
+
+**Handover, without redlines.** Every design tool grows a redlining mode: arrows and labels someone
+types over a picture, saying what the padding is. That exists because in those tools the design *is* a
+picture — the values are unreadable, so a human transcribes them, and the transcription is wrong the
+first time anyone nudges a card. Here the document is the CSS, so the Spec panel derives it instead:
+measured size from the live frame (`width: fit-content` is not a width), colours and spacing resolved
+back to the token names they came from, what changes on hover and at other widths in plain language,
+and the HTML and JSX to paste. Change the padding and the spec changes with it; there is nothing to
+re-publish and nothing that can disagree with the document.
+
+The only part worth *storing* is what CSS genuinely cannot say, so notes are typed — behaviour, data,
+constraint, accessibility, to-do — attached to a layer, gathered into the spec of anything containing
+it, and written or read by agents through `annotate` and `get_spec`. A developer opens all of it
+through an ordinary view-only link, with no account and no way to change anything.
 
 **Publishing.** Any artboard can go on the public web at `/p/<slug>`: no editor, no account, no share
 token. Because the documents here are already HTML and CSS, this is not an export — the page is
@@ -607,6 +623,9 @@ that export emits the import rather than the markup.
 - `scripts/dashboard-check.mjs` — thumbnails (really an image, cached, 304 on revalidate) and the
   column grid: it computes where the twelve lines are and asserts every band starts on one, at three
   widths
+- `scripts/spec-check.mjs` — the claim that a spec cannot go stale, checked by editing the design and
+  watching it change, plus typed notes surviving a round trip between the panel and MCP, and a
+  view-only visitor reading the whole thing
 - `scripts/publish-check.mjs` — what a stranger gets: the page without an account, no editor chrome,
   the document's own media queries stacking it at 420px, and a real 404 once the link is withdrawn
 - `scripts/agent-pack-check.mjs` — pages over MCP, including the bug where every page-shaped tool
