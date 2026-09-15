@@ -52,9 +52,11 @@ docker compose up --build        # PLAYGROUND_PUBLIC_URL must be set
 1. **New Resource → Application → Public or Private Repository**, pointing at this repo.
 2. Build pack: **Dockerfile** (or **Docker Compose** if you would rather review `docker-compose.yml`).
 3. **Port**: `4000`.
-4. **Persistent storage**: mount a volume at `/data`. Everything durable — documents, version
-   snapshots, and every uploaded asset — is in one SQLite file there, so that volume is the whole
-   backup.
+4. **Persistent storage**: attach a volume mounted at `/data`. This is not optional and it is the
+   step that is easiest to skip, because skipping it looks like it worked: the container writes
+   happily, survives restarts, and loses everything the next time it is replaced. Everything durable
+   — documents, version snapshots, every uploaded asset — is one SQLite file there, so that volume is
+   also the whole backup.
 5. **Environment variables**:
 
    | | |
@@ -64,6 +66,18 @@ docker compose up --build        # PLAYGROUND_PUBLIC_URL must be set
    | `PORT` | `4000` |
 
 6. Set the domain, and leave Coolify's proxy to terminate TLS.
+
+After deploying, `GET /api/health` reports what the server actually resolved, which is quicker than
+reading container logs:
+
+```json
+{ "publicUrl": "https://your.domain", "publicUrlConfigured": true,
+  "storage": "sqlite", "database": "/data/playground.db" }
+```
+
+`publicUrlConfigured` is reported separately from `publicUrl` on purpose: a deployment behind a proxy
+can look right while the variable is still missing. And if the database is not on a mounted volume,
+the server says so at startup rather than waiting for a redeploy to prove it.
 
 `PLAYGROUND_PUBLIC_URL` is the one that bites. Connection codes and share links are built from it, so
 if it is missing, every link you hand an agent points at `localhost` and fails silently on their

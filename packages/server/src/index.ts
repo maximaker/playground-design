@@ -13,6 +13,39 @@ import { createDocument, listDocuments, flushAll } from './store.ts';
 import { shutdownRenderer } from './render.ts';
 import { persistence } from './persistence.ts';
 import { DB_PATH } from './persistence-sqlite.ts';
+import { readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+
+/**
+ * Whether a path sits on a mounted volume rather than the container's own
+ * filesystem. Returns null where it cannot tell, which is anywhere without
+ * /proc — development machines, mostly.
+ *
+ * This exists because the failure it catches is silent and expensive. A
+ * container without an attached volume still writes happily; the data is simply
+ * discarded the next time the container is replaced, and the only symptom is an
+ * empty database after a deploy. Worse, `VOLUME` in a Dockerfile creates an
+ * anonymous volume, so the data survives a *restart* — which makes it look
+ * persistent right up until the first real redeploy destroys it.
+ */
+function isOnMountedVolume(path: string): boolean | null {
+  let mounts: string[];
+  try {
+    mounts = readFileSync('/proc/self/mountinfo', 'utf8')
+      .split('\n').map((line) => line.split(' ')[4]).filter((p): p is string => !!p);
+  } catch {
+    return null;
+  }
+  // Walk up to the nearest mount point. If that is the root filesystem, the
+  // path is in the container layer and will not survive.
+  let dir = resolve(path);
+  for (;;) {
+    if (mounts.includes(dir)) return dir !== '/';
+    const parent = dirname(dir);
+    if (parent === dir) return false;
+    dir = parent;
+  }
+}
 
 const store = await persistence();
 
@@ -24,6 +57,12 @@ const server = serve({ fetch: app.fetch, port: PORT }, (info) => {
   // was actually mounted. A missing mount is silent: writes succeed, and the
   // data is thrown away on the next deploy.
   console.log(`  Storage        \u2192  ${store.kind}${store.kind === 'sqlite' ? ` at ${DB_PATH}` : ''}`);
+  const onVolume = store.kind === 'sqlite' ? isOnMountedVolume(dirname(DB_PATH)) : null;
+  if (onVolume === false) {
+    console.log('\n  ! The database is on the container filesystem, not a mounted volume.');
+    console.log(`    Everything will be lost the next time this container is replaced.`);
+    console.log(`    Attach a volume at ${dirname(DB_PATH)}, or point PLAYGROUND_DB at one.`);
+  }
   if (PUBLIC_URL.includes('localhost') && process.env.NODE_ENV === 'production') {
     console.log('\n  ! PLAYGROUND_PUBLIC_URL is not set, so connection codes and share');
     console.log('    links will point at localhost and fail on anyone else\'s machine.');

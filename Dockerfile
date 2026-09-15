@@ -61,9 +61,14 @@ COPY packages/server/src packages/server/src
 COPY --from=builder /app/packages/web/dist packages/web/dist
 
 # Everything durable lives here: the document database and, in the same file,
-# every uploaded asset. One volume is the whole backup.
+# every uploaded asset — so one volume is the whole backup. You must attach one:
+#
+# `VOLUME ["/data"]` used to be declared here and has been removed deliberately.
+# It makes Docker create an anonymous volume when nothing is attached, which
+# survives a container restart and is destroyed on the next redeploy — so the
+# storage looks persistent for exactly as long as it takes to trust it. Without
+# it the server detects the container filesystem at startup and says so.
 RUN mkdir -p /data
-VOLUME ["/data"]
 
 EXPOSE 4000
 
