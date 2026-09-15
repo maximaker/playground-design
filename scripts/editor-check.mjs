@@ -363,6 +363,80 @@ const artboardSpot = (fx, fy) => () => page.evaluate(([ax, ay]) => {
   }
 }
 
+// --- Zoom keys must never reach the browser ------------------------------
+
+{
+  /*
+   * Browser zoom shrinks the CSS viewport, which trips the responsive layout
+   * and takes the side panels with it. Text inputs stop propagation on keydown
+   * so editor shortcuts do not fire mid-word, and that used to swallow the zoom
+   * keys as well — so with focus in the document name or any property field,
+   * Cmd-minus zoomed the browser and the interface appeared to lose its rails.
+   */
+  await page.evaluate(() => {
+    window.__zoomSeen = [];
+    window.addEventListener('keydown', (e) => {
+      if ((e.metaKey || e.ctrlKey) && ['=', '+', '-', '0'].includes(e.key)) {
+        // A macrotask: defaultPrevented is only final once dispatch has ended.
+        setTimeout(() => window.__zoomSeen.push(e.defaultPrevented ? 'handled' : 'browser'), 0);
+      }
+    }, true);
+  });
+
+  const zoomOf = () => page.evaluate(() => window.__playground.store.getState().viewport.zoom);
+  const pressZoom = async (key) => {
+    const before = await zoomOf();
+    await page.keyboard.down('Control');
+    await page.keyboard.press(key);
+    await page.keyboard.up('Control');
+    await page.waitForTimeout(250);
+    const seen = await page.evaluate(() => { const v = window.__zoomSeen; window.__zoomSeen = []; return v; });
+    return { handled: seen[0] === 'handled', changed: (await zoomOf()) !== before };
+  };
+
+  await page.click('.doc-name');
+  const named = await pressZoom('Minus');
+  check('zoom keys are caught while typing the document name',
+    named.handled && named.changed, JSON.stringify(named));
+
+  await page.evaluate(() => {
+    const s = window.__playground.store.getState();
+    const frame = Object.values(s.doc.nodes).find((n) => n.type === 'frame');
+    if (frame) s.select([frame.id]);
+  });
+  await page.waitForTimeout(500);
+  const field = await page.$('.rail-right input.input');
+  if (field) {
+    await field.click();
+    const inField = await pressZoom('Equal');
+    check('and inside a property field', inField.handled && inField.changed, JSON.stringify(inField));
+  }
+
+  check('the layout never reflowed', await page.locator('.rail').count() === 2);
+}
+
+// --- Interface size stepping ---------------------------------------------
+
+{
+  await page.click('.topbar .icon-button[aria-label="Appearance"]');
+  await page.waitForTimeout(400);
+  const shown = () => page.locator('.settings-scale output').textContent();
+  const before = await shown();
+  await page.click('.settings-scale button[aria-label="Larger interface"]');
+  await page.waitForTimeout(200);
+  const bigger = await shown();
+  await page.click('.settings-scale button[aria-label="Smaller interface"]');
+  await page.waitForTimeout(200);
+  const back = await shown();
+  check('the interface size buttons step it', bigger !== before && back === before,
+    `${before} -> ${bigger} -> ${back}`);
+
+  const applied = await page.evaluate(() =>
+    getComputedStyle(document.documentElement).getPropertyValue('--ui-scale').trim());
+  check('and the step reaches the stylesheet', !!applied && applied !== '', applied);
+  await page.keyboard.press('Escape');
+}
+
 check('no runtime errors', errors.length === 0, errors[0] ?? '');
 
 await browser.close();

@@ -48,7 +48,7 @@ export function useKeyboard(actions: KeyboardActions = {}): void {
 
       const mod = e.metaKey || e.ctrlKey;
       const key = e.key.toLowerCase();
-      const { selection, dispatch, select, setTool, setViewport, viewport } = state;
+      const { selection, dispatch, select, setTool } = state;
       const doc = getDoc();
       const ids = topLevelSelection(selection);
 
@@ -120,9 +120,6 @@ export function useKeyboard(actions: KeyboardActions = {}): void {
       if (mod && e.shiftKey && key === 'e') { e.preventDefault(); onExport?.(); return; }
 
       // --- Zoom and pan ----------------------------------------------------
-      if (mod && e.key === '0') { e.preventDefault(); setViewport({ zoom: 1 }); return; }
-      if (mod && (e.key === '=' || e.key === '+')) { e.preventDefault(); setViewport({ zoom: Math.min(8, viewport.zoom * 1.25) }); return; }
-      if (mod && e.key === '-') { e.preventDefault(); setViewport({ zoom: Math.max(0.02, viewport.zoom / 1.25) }); return; }
       if (!mod && e.key === '1') { e.preventDefault(); zoomToFit(); return; }
       if (!mod && e.key === '2') { e.preventDefault(); zoomToSelection(); return; }
       if (!mod && e.key === '3') { e.preventDefault(); zoomToSelection(); return; }
@@ -175,10 +172,33 @@ export function useKeyboard(actions: KeyboardActions = {}): void {
       useCanvas.getState().setMeasureTo(null);
     };
 
+    /**
+     * Zoom is caught in the capture phase, before anything can swallow it.
+     *
+     * Text inputs stop propagation on keydown so that editor shortcuts do not
+     * fire mid-word — correct, but it also meant Cmd-plus never reached the
+     * window and the *browser* zoomed instead. Browser zoom shrinks the CSS
+     * viewport, which trips the responsive layout and takes the side panels
+     * with it; since the document name is an input and so is every property
+     * field, that was most of the interface. Capture runs before any of them,
+     * so this cannot be intercepted by a component again.
+     */
+    const onZoom = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || e.altKey) return;
+      const { setViewport, viewport } = useCanvas.getState();
+      if (e.key === '0') { e.preventDefault(); setViewport({ zoom: 1 }); }
+      else if (e.key === '=' || e.key === '+') { e.preventDefault(); setViewport({ zoom: Math.min(8, viewport.zoom * 1.25) }); }
+      else if (e.key === '-') { e.preventDefault(); setViewport({ zoom: Math.max(0.02, viewport.zoom / 1.25) }); }
+      else return;
+      // Handled here; the bubble listener must not act on it a second time.
+      e.stopPropagation();
+    };
+    window.addEventListener('keydown', onZoom, true);
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
     window.addEventListener('blur', onBlur);
     return () => {
+      window.removeEventListener('keydown', onZoom, true);
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
       window.removeEventListener('blur', onBlur);

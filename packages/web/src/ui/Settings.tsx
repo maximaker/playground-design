@@ -16,6 +16,18 @@ const THEMES: { value: Theme; icon: IconName; label: string }[] = [
   { value: 'system', icon: 'contrast', label: 'System' },
 ];
 
+/**
+ * One step of the scale, rounded onto the step grid.
+ *
+ * Floating point turns 0.85 + 0.05 into 0.8999999999999999, which then shows as
+ * 90% here and never lands on a round number again.
+ */
+function step(scale: number, direction: 1 | -1): number {
+  const next = scale + direction * SCALE_RANGE.step;
+  const snapped = Math.round(next / SCALE_RANGE.step) * SCALE_RANGE.step;
+  return Math.min(SCALE_RANGE.max, Math.max(SCALE_RANGE.min, Number(snapped.toFixed(2))));
+}
+
 const DENSITIES = [
   { value: 12, label: 'Compact' },
   { value: 13, label: 'Default' },
@@ -67,7 +79,19 @@ export function Settings({ appearance, onChange, onClose }: {
       <div className="settings-group">
         <span>Interface size</span>
         <div className="settings-scale">
-          <Icon name="minus" size={12} />
+          {/*
+            * These were decorative glyphs, which is worse than not having them:
+            * a minus beside a slider reads as a control, and clicking it did
+            * nothing. Stepping is also the only way to hit an exact value with
+            * a keyboard or an unsteady hand.
+            */}
+          <button
+            className="icon-button"
+            title="Smaller interface"
+            aria-label="Smaller interface"
+            disabled={appearance.scale <= SCALE_RANGE.min}
+            onClick={() => onChange({ ...appearance, scale: step(appearance.scale, -1) })}
+          ><Icon name="minus" size={12} /></button>
           <input
             type="range"
             min={SCALE_RANGE.min}
@@ -77,7 +101,13 @@ export function Settings({ appearance, onChange, onClose }: {
             aria-label="Interface size"
             onChange={(e) => onChange({ ...appearance, scale: Number(e.target.value) })}
           />
-          <Icon name="plus" size={14} />
+          <button
+            className="icon-button"
+            title="Larger interface"
+            aria-label="Larger interface"
+            disabled={appearance.scale >= SCALE_RANGE.max}
+            onClick={() => onChange({ ...appearance, scale: step(appearance.scale, 1) })}
+          ><Icon name="plus" size={14} /></button>
           <output>{Math.round(appearance.scale * 100)}%</output>
         </div>
         <p className="panel-hint" style={{ padding: 0 }}>
