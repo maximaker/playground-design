@@ -47,6 +47,7 @@ const GROUPS: { title: string; items: [string, string][] }[] = [
       ['⌘C / ⌘V', 'Copy / paste as HTML'],
       ['⌫', 'Delete'],
       ['Arrows', 'Nudge 1px (⇧ for 10px)'],
+      ['⌘/Ctrl + Arrows', 'Move one place along inside the parent'],
     ],
   },
   {

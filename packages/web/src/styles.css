@@ -713,6 +713,18 @@ code { font-family: var(--mono); font-size: 0.92em; }
 .token-add-actions { display: flex; gap: var(--s2); }
 
 .components-actions { display: flex; flex-direction: column; gap: 0.2rem; margin-bottom: var(--s4); }
+
+/* The armed-replacement banner: the library is showing components for a
+   different reason than usual, and it has to say so before the click. */
+.components-replacing {
+  display: flex; align-items: center; gap: var(--s2);
+  padding: var(--s2) var(--s3); margin-bottom: var(--s3);
+  border: 1px solid var(--accent); border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  font-size: 11px; line-height: 1.35;
+}
+.components-replacing span { flex: 1 1 auto; min-width: 0; }
+.components-replacing .button { flex: none; }
 .component-row { display: flex; align-items: center; gap: 0.1rem; border-bottom: 1px solid var(--border); }
 .component-main {
   flex: 1; display: flex; flex-direction: column; gap: 0.1rem; align-items: flex-start;

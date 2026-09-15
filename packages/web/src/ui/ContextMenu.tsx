@@ -10,7 +10,7 @@ import type { NodeId } from '@playground/shared';
 import { emitHtml, emitJsx } from '@playground/shared';
 import { useCanvas, getDoc, topLevelSelection } from '../state/store.ts';
 import { reorder } from '../canvas/arrange.ts';
-import { duplicateSelection, wrapInFrame } from '../hooks/commands.ts';
+import { createComponentFromSelection, duplicateSelection, wrapInFrame } from '../hooks/commands.ts';
 
 export interface ContextMenuState { x: number; y: number; nodeId: NodeId | null }
 
@@ -70,6 +70,8 @@ export function ContextMenu({ state, onClose, onExport }: {
     toast(`Copied ${what.toUpperCase()}`, 'success');
   };
 
+  const hasComponents = Object.keys(doc?.components ?? {}).length > 0;
+
   const items: Item[] = [
     { label: 'Copy as JSX + Tailwind', run: () => void copy('tailwind'), disabled: !has },
     { label: 'Copy as JSX + inline styles', run: () => void copy('jsx'), disabled: !has },
@@ -78,6 +80,18 @@ export function ContextMenu({ state, onClose, onExport }: {
     { label: '', separator: true },
     { label: 'Duplicate', shortcut: '⌘D', run: duplicateSelection, disabled: !has },
     { label: 'Wrap in frame', shortcut: '⌘G', run: wrapInFrame, disabled: !has },
+    { label: 'Create component', run: createComponentFromSelection, disabled: !has },
+    {
+      // Arms the library rather than opening a submenu of names: which
+      // component you want is a question you answer by looking at them, and
+      // the panel already shows what each one is.
+      label: node?.type === 'instance' ? 'Swap component…' : 'Replace with component…',
+      run: () => {
+        useCanvas.getState().setReplaceTarget(ids);
+        useCanvas.getState().requestPanel('components');
+      },
+      disabled: !has || !hasComponents,
+    },
     {
       label: 'Edit text',
       shortcut: '↵',

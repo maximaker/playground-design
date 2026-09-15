@@ -6,12 +6,14 @@
  * instances each one has, because that count is the reason to use one.
  */
 
-import { useMemo } from 'react';
+import { useEffect, useMemo } from 'react';
 import {
   codeComponentsOf, componentsOf, collectSlots, instancesOf, makeNode, usageOf,
 } from '@playground/shared';
 import { useCanvas, getDoc, currentPage } from '../state/store.ts';
-import { createComponentFromSelection, detachSelection, revealSelection } from '../hooks/commands.ts';
+import {
+  createComponentFromSelection, detachSelection, replaceWithComponent, revealSelection,
+} from '../hooks/commands.ts';
 import { Icon } from '../ui/Icon.tsx';
 import { VariantEditor, selectedDefinition } from './VariantEditor.tsx';
 import { ComponentPreview } from './ComponentPreview.tsx';
@@ -23,7 +25,42 @@ export function Components() {
   const select = useCanvas((s) => s.select);
   const toast = useCanvas((s) => s.toast);
   const docId = useCanvas((s) => s.docId);
+  const replaceTarget = useCanvas((s) => s.replaceTarget);
+  const setReplaceTarget = useCanvas((s) => s.setReplaceTarget);
   const doc = getDoc();
+
+  /*
+   * An armed replacement is a half-finished sentence, and a stale one is worse
+   * than none: it turns the next click on a component — normally an insert —
+   * into a deletion of something the person has since stopped thinking about.
+   * So it lasts until it is used, until Escape, or until the selection moves on.
+   */
+  useEffect(() => {
+    if (!replaceTarget) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setReplaceTarget(null); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [replaceTarget, setReplaceTarget]);
+
+  useEffect(() => {
+    if (!replaceTarget) return;
+    const same = replaceTarget.length === selection.length
+      && replaceTarget.every((id) => selection.some((key) => key.split('::')[0] === id));
+    if (!same) setReplaceTarget(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selection]);
+
+  const replaceable = useMemo(() => {
+    if (!doc) return [];
+    return selection
+      .map((key) => key.split('::')[0]!)
+      .filter((id, i, all) => all.indexOf(id) === i)
+      .filter((id) => {
+        const node = doc.nodes[id];
+        return !!node?.parent && node.type !== 'artboard';
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [doc, selection, version]);
 
   const components = useMemo(
     () => (doc ? componentsOf(doc) : []),
@@ -53,6 +90,11 @@ export function Components() {
     // appears to have done nothing at all.
     revealSelection();
     toast(`${def?.name ?? 'Instance'} inserted`, 'info');
+  };
+
+  const replace = (componentId: string) => {
+    replaceWithComponent(componentId, replaceTarget ?? replaceable);
+    setReplaceTarget(null);
   };
 
   const remove = (componentId: string, name: string) => {
@@ -118,6 +160,18 @@ export function Components() {
         )}
       </div>
 
+      {replaceTarget && (
+        <div className="components-replacing">
+          <Icon name="swap" size={12} />
+          <span>
+            Replacing {replaceTarget.length === 1
+              ? `“${doc?.nodes[replaceTarget[0]!]?.name ?? 'a layer'}”`
+              : `${replaceTarget.length} layers`} — click a component.
+          </span>
+          <button className="button subtle" onClick={() => setReplaceTarget(null)}>Cancel</button>
+        </div>
+      )}
+
       {components.length === 0 && (
         <p className="panel-empty">
           No components yet.<br />
@@ -142,7 +196,11 @@ export function Components() {
           const count = usage.onPages.length;
           return (
             <div key={c.id} className="component-tile">
-              <button className="component-main" onClick={() => insert(c.id)} title="Insert an instance">
+              <button
+                className="component-main"
+                onClick={() => (replaceTarget ? replace(c.id) : insert(c.id))}
+                title={replaceTarget ? `Replace the selection with ${c.name}` : 'Insert an instance'}
+              >
                 <ComponentPreview docId={docId} componentId={c.id} name={c.name} stamp={version} />
                 <span className="component-name">{c.name}</span>
                 <span className="dim">
@@ -160,6 +218,14 @@ export function Components() {
                 )}
               </button>
               <div className="component-tile-actions">
+                {replaceable.length > 0 && !replaceTarget && (
+                  <button
+                    className="icon-button"
+                    title={`Replace the selection with ${c.name}`}
+                    aria-label={`Replace the selection with ${c.name}`}
+                    onClick={() => replace(c.id)}
+                  ><Icon name="swap" size={12} /></button>
+                )}
                 <button
                   className="icon-button"
                   title="Edit the component definition"
@@ -230,7 +296,9 @@ export function Components() {
           instance and use <strong>Go to component</strong> to edit the original — changes there
           reach every instance, while editing an instance overrides just that one.
           {' '}A component can contain an instance of another one: insert into a definition's layers
-          above and the outer component follows the inner one from then on. Mark a layer with a
+          above and the outer component follows the inner one from then on. To turn something you already built into a component,
+          select it and use <strong>Replace with component</strong> from the right-click menu, or the
+          swap button on a tile — it keeps the layer's place in the flow. Mark a layer with a
           <code> data-slot</code> attribute to let instances put their own content there.
         </p>
       )}

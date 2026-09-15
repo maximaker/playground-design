@@ -10,7 +10,7 @@ import { useEffect } from 'react';
 import { useCanvas, getDoc, currentPage, topLevelSelection } from '../state/store.ts';
 import { reorder } from '../canvas/arrange.ts';
 import {
-  copyProperties, duplicateSelection, nudge, pasteProperties, selectChildren,
+  copyProperties, duplicateSelection, moveInParent, nudge, pasteProperties, selectChildren,
   selectParent, selectSibling, toggleLock, toggleVisibility, wrapInFrame,
   zoomToFit, zoomToSelection,
 } from './commands.ts';
@@ -151,7 +151,11 @@ export function useKeyboard(actions: KeyboardActions = {}): void {
       }
       if (e.key.startsWith('Arrow') && selection.length) {
         e.preventDefault();
-        nudge(e.key, e.shiftKey ? 10 : 1);
+        // With the modifier, move the layer along inside its parent instead of
+        // nudging it: in flex flow there is no position to nudge, and its place
+        // in the flow is what "move it up" means there.
+        if (mod) moveInParent(e.key);
+        else nudge(e.key, e.shiftKey ? 10 : 1);
         return;
       }
 

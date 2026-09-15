@@ -328,6 +328,150 @@ export function createComponentFromSelection(): void {
   toast(`Created component "${name}"`, 'success');
 }
 
+/**
+ * Move the selection one place along inside its parent.
+ *
+ * Nudging is the wrong tool for a layer in flex flow — there is no x to change,
+ * so it writes a margin, which moves the thing without moving it in the layout.
+ * What people mean by "move this up" inside a group is almost always its
+ * position in the flow, and until now the only way to do that was to drag it in
+ * the layer tree and hit a 4px drop zone.
+ *
+ * All four arrows map to earlier/later rather than only the parent's own axis:
+ * a row and a column read differently to different people, and being forgiving
+ * costs nothing when the wrong guess is one keystroke to undo.
+ */
+export function moveInParent(key: string): void {
+  const doc = getDoc();
+  const { selection, dispatch, toast } = useCanvas.getState();
+  if (!doc) return;
+
+  const delta = key === 'ArrowUp' || key === 'ArrowLeft' ? -1 : 1;
+  const ids = topLevelSelection(selection);
+  const indexOfIn = (id: NodeId): number => {
+    const parent = doc.nodes[id]?.parent;
+    return parent ? doc.nodes[parent]!.children.indexOf(id) : -1;
+  };
+
+  // Moving later, the last one goes first — otherwise each move shifts the one
+  // behind it and a multiple selection scrambles its own order.
+  const ordered = [...ids].sort((a, b) => (indexOfIn(a) - indexOfIn(b)) * -delta);
+
+  const moves: { id: NodeId; parent: NodeId; index: number }[] = [];
+  let atEdge = 0;
+  let unparented = 0;
+
+  for (const id of ordered) {
+    const node = doc.nodes[id];
+    if (!node) continue;
+    // An artboard's place in the page list is not where it sits on the canvas,
+    // so reordering one would look like nothing happening.
+    if (!node.parent) { unparented++; continue; }
+    const siblings = doc.nodes[node.parent]!.children;
+    const from = siblings.indexOf(id);
+    const to = from + delta;
+    if (from < 0 || to < 0 || to >= siblings.length) { atEdge++; continue; }
+    moves.push({ id, parent: node.parent, index: to });
+  }
+
+  if (!moves.length) {
+    if (unparented) toast('Artboards are placed on the canvas, not ordered in a parent', 'info');
+    else if (atEdge) toast(delta < 0 ? 'Already first in its group' : 'Already last in its group', 'info');
+    return;
+  }
+  dispatch([{ t: 'move', moves }]);
+}
+
+/**
+ * Replace layers with an instance of a component.
+ *
+ * The gap this fills: a library grows *after* the screens do, so the common
+ * case is a hand-built button sitting in a layout that should now be the
+ * component. Rebuilding it meant deleting, inserting, and then dragging the new
+ * instance back to where the old one was in the flow — three chances to get it
+ * wrong for something that is one idea.
+ *
+ * On an instance this is a swap, which is the same operation seen from the
+ * other side: the props that both components declare come across, and
+ * overrides do not, because they are keyed to layers of the definition being
+ * left behind and would land on whatever happened to share an id.
+ */
+export function replaceWithComponent(componentId: string, targetIds?: NodeId[]): void {
+  const doc = getDoc();
+  const { selection, dispatch, select, toast } = useCanvas.getState();
+  if (!doc) return;
+
+  const def = doc.components?.[componentId];
+  if (!def) { toast('That component no longer exists', 'error'); return; }
+
+  const inside = (id: NodeId, rootId: NodeId): boolean => {
+    let current: NodeId | null | undefined = id;
+    while (current) {
+      if (current === rootId) return true;
+      current = doc.nodes[current]?.parent ?? null;
+    }
+    return false;
+  };
+
+  const ops: Op[] = [];
+  const made: NodeId[] = [];
+  let skipped = 0;
+  let swapped = 0;
+
+  for (const id of targetIds ?? topLevelSelection(selection)) {
+    const node = doc.nodes[id];
+    if (!node || !node.parent) { skipped++; continue; }
+    // A component cannot contain itself: replacing one of its own layers with
+    // an instance of it is a loop the renderer would have to cut anyway.
+    if (inside(id, def.root)) { skipped++; continue; }
+
+    const index = doc.nodes[node.parent]!.children.indexOf(id);
+    const carried = node.type === 'instance'
+      ? Object.fromEntries(Object.entries(node.props ?? {})
+        .filter(([k]) => def.props?.some((p) => p.name === k)))
+      : {};
+    if (node.type === 'instance') swapped++;
+
+    const instance = makeNode({
+      type: 'instance',
+      name: def.name,
+      componentRef: componentId,
+      // How it sat among its siblings belongs to the layout, not to the thing
+      // that was there: a card that filled its column should still fill it.
+      // Its own size and looks are the component's business now.
+      styles: Object.fromEntries(
+        Object.entries(node.styles).filter(([k]) => PLACEMENT.has(k)),
+      ),
+      ...(Object.keys(carried).length ? { props: carried } : {}),
+    });
+
+    ops.push({ t: 'remove', ids: [id] });
+    ops.push({ t: 'insert', nodes: [instance], parent: node.parent, index });
+    made.push(instance.id);
+  }
+
+  if (!made.length) {
+    toast(skipped ? 'Nothing there can be replaced by that component' : 'Select a layer to replace', 'error');
+    return;
+  }
+  dispatch(ops);
+  select(made);
+  revealSelection();
+  toast(
+    `${swapped === made.length ? 'Swapped' : 'Replaced'} ${made.length === 1 ? 'a layer' : `${made.length} layers`} with "${def.name}"`
+    + (skipped ? ` · ${skipped} skipped` : ''),
+    'success',
+  );
+}
+
+/** Where a layer sits among its siblings, as opposed to what it looks like. */
+const PLACEMENT = new Set([
+  'margin', 'margin-top', 'margin-right', 'margin-bottom', 'margin-left',
+  'align-self', 'justify-self', 'order', 'flex', 'flex-grow', 'flex-shrink', 'flex-basis',
+  'grid-area', 'grid-column', 'grid-row',
+  'position', 'top', 'right', 'bottom', 'left', 'z-index',
+]);
+
 /** Converts instances back into ordinary layers, baking in their overrides. */
 export function detachSelection(): void {
   const doc = getDoc();

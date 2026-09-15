@@ -202,6 +202,17 @@ interface CanvasState {
   panelRequest: string | null;
 
   /**
+   * Layers armed to be replaced by the next component picked in the library.
+   *
+   * "Swap this for a component" has two halves — the thing and the component —
+   * and they live in different parts of the interface, so one of them has to
+   * wait. Holding the *targets* rather than a chosen component is what lets the
+   * library stay a library: it keeps showing previews, and a click means
+   * replace only while something is waiting to be replaced.
+   */
+  replaceTarget: NodeId[] | null;
+
+  /**
    * What this person is called, as the server knows them: their account name,
    * or the guest name a share-link viewer gets. Comments are signed with it.
    */
@@ -274,6 +285,7 @@ interface CanvasActions {
   setCommentLens(on: boolean): void;
   setDeepHover(id: NodeId | null): void;
   requestPanel(name: string | null): void;
+  setReplaceTarget(ids: NodeId[] | null): void;
   setTool(t: Tool): void;
   setSpacePanning(v: boolean): void;
   setPage(id: string): void;
@@ -391,6 +403,7 @@ export const useCanvas = create<CanvasState & CanvasActions>((set, get) => ({
   commentLens: false,
   deepHover: null,
   panelRequest: null,
+  replaceTarget: null,
   canvasPrefs: loadCanvasPrefs(),
   tool: 'move',
   spacePanning: false,
@@ -661,6 +674,7 @@ export const useCanvas = create<CanvasState & CanvasActions>((set, get) => ({
   setViewport(v) { set({ viewport: { ...get().viewport, ...v } }); },
   setIdentity(identity) { set({ identity }); },
   requestPanel(panelRequest) { set({ panelRequest }); },
+  setReplaceTarget(replaceTarget) { set({ replaceTarget }); },
   setDeepHover(deepHover) {
     if (get().deepHover !== deepHover) set({ deepHover });
   },
