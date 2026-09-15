@@ -6,7 +6,7 @@
  * are scattered across three artboards and half of them are off screen.
  */
 
-import { useMemo } from 'react';
+import { useEffect, useMemo } from 'react';
 import { NOTE_KIND_LABELS, commentsOf } from '@playground/shared';
 import { useCanvas, getDoc, currentPage } from '../state/store.ts';
 import { Icon } from '../ui/Icon.tsx';
@@ -29,6 +29,17 @@ export function Comments() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [doc, version, pageId],
   );
+
+  // The same lens as Review: while the list is open the canvas points at the
+  // layers the threads are about.
+  const setHighlight = useCanvas((s) => s.setHighlight);
+  useEffect(() => {
+    setHighlight({
+      kind: 'comments',
+      ids: [...new Set(comments.filter((c) => !c.resolved && c.nodeId).map((c) => c.nodeId!))],
+    });
+    return () => setHighlight(null);
+  }, [comments, setHighlight]);
 
   const open = comments.filter((c) => !c.resolved);
   const resolved = comments.filter((c) => c.resolved);

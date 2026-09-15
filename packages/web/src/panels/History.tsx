@@ -87,6 +87,16 @@ export function History() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rev]);
 
+  // A comparison is a lens too: while one is open the canvas outlines what
+  // moved, so "6 changes on Landing — 1440" is somewhere you can look rather
+  // than a number.
+  const setHighlight = useCanvas((s) => s.setHighlight);
+  useEffect(() => {
+    if (!changes) { setHighlight(null); return; }
+    setHighlight({ kind: 'changes', ids: changes.nodes.map((n) => n.id) });
+    return () => setHighlight(null);
+  }, [changes, setHighlight]);
+
   const restore = async (snapshot: Snapshot) => {
     if (!docId) return;
     const ok = window.confirm(

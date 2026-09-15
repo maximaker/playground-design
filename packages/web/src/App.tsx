@@ -1,6 +1,6 @@
 /** Application shell: routing, layout, panels and global interactions. */
 
-import { useEffect, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import { useCanvas } from './state/store.ts';
 import { type Source, connectDocument } from './net/socket.ts';
 import { useKeyboard } from './hooks/useKeyboard.ts';
@@ -38,7 +38,25 @@ import {
 } from './state/appearance.ts';
 import { Home } from './Home.tsx';
 
-type LeftTab = 'layers' | 'pages' | 'components' | 'tokens' | 'comments' | 'spec' | 'review' | 'history';
+type LeftTab = 'layers' | 'pages' | 'components' | 'tokens' | 'comments' | 'review' | 'history';
+
+/**
+ * The right rail describes the selection; the left rail describes the document.
+ *
+ * Which is why the spec moved: it is the same object as the properties panel
+ * seen from the other side — one to change the layer, one to hand it over —
+ * and reading a layer's spec on the left while its properties sat on the right
+ * meant looking in two places at one thing.
+ */
+type RightTab = 'properties' | 'spec';
+
+/** How many of the left tabs are about structure; the rest are about activity. */
+const STRUCTURE_TABS = 4;
+
+const RIGHT_TABS: { id: RightTab; icon: IconName; label: string; hint: string }[] = [
+  { id: 'properties', icon: 'settings', label: 'Design', hint: 'Edit the selected layer' },
+  { id: 'spec', icon: 'ruler', label: 'Spec', hint: 'Measured size, tokens, notes and code to paste' },
+];
 
 const LEFT_TABS: { id: LeftTab; icon: IconName; label: string; hint: string }[] = [
   { id: 'layers', icon: 'layers', label: 'Layers', hint: 'The structure of this page' },
@@ -46,7 +64,6 @@ const LEFT_TABS: { id: LeftTab; icon: IconName; label: string; hint: string }[] 
   { id: 'components', icon: 'component', label: 'Components', hint: 'Reusable components and their variants' },
   { id: 'tokens', icon: 'palette', label: 'Tokens', hint: 'Design tokens and themes' },
   { id: 'comments', icon: 'comment', label: 'Comments', hint: 'Feedback on this design — agents can read and answer it' },
-  { id: 'spec', icon: 'ruler', label: 'Spec', hint: 'Build spec for the selection — sizes, tokens, notes and code' },
   { id: 'review', icon: 'check', label: 'Review', hint: 'Contrast, tap targets, token consistency and layout shape' },
   { id: 'history', icon: 'history', label: 'History', hint: 'Changes and saved versions' },
 ];
@@ -181,6 +198,9 @@ function Editor({ source, onHome, appearance, onAppearance, session }: {
   const dispatch = useCanvas((s) => s.dispatch);
 
   const [leftTab, setLeftTab] = useState<LeftTab>('layers');
+  // Someone holding a view-only link is there to read the design, not to look at
+  // controls they cannot use: the inspector opens on the spec for them.
+  const [rightTab, setRightTab] = useState<RightTab>(source.kind === 'share' ? 'spec' : 'properties');
   const [modal, setModal] = useState<'connect' | 'share' | 'export' | 'import' | 'shortcuts' | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [showSettings, setShowSettings] = useState(false);
@@ -435,17 +455,24 @@ function Editor({ source, onHome, appearance, onAppearance, session }: {
 
         <aside className={`rail rail-left${leftOpen ? ' is-open' : ''}`} {...hiddenWhenClosed(leftOpen)}>
           <nav className="rail-tabs" aria-label="Panels">
-            {LEFT_TABS.map((t) => (
-              <button
-                key={t.id}
-                className={leftTab === t.id ? 'is-active' : ''}
-                onClick={() => setLeftTab(t.id)}
-                title={`${t.label} — ${t.hint}`}
-                aria-label={t.label}
-                aria-pressed={leftTab === t.id}
-              >
-                <Icon name={t.icon} size={15} />
-              </button>
+            {LEFT_TABS.map((t, i) => (
+              <Fragment key={t.id}>
+                {/*
+                  * Structure above, activity below. Eight identical icons in a
+                  * strip is a list nobody reads; the break says the panels below
+                  * are about what is happening rather than about what exists.
+                  */}
+                {i === STRUCTURE_TABS && <span className="rail-tab-divider" aria-hidden />}
+                <button
+                  className={leftTab === t.id ? 'is-active' : ''}
+                  onClick={() => setLeftTab(t.id)}
+                  title={`${t.label} — ${t.hint}`}
+                  aria-label={t.label}
+                  aria-pressed={leftTab === t.id}
+                >
+                  <Icon name={t.icon} size={15} />
+                </button>
+              </Fragment>
             ))}
           </nav>
 
@@ -481,7 +508,6 @@ function Editor({ source, onHome, appearance, onAppearance, session }: {
             {leftTab === 'components' && <Components />}
             {leftTab === 'tokens' && <Tokens />}
             {leftTab === 'comments' && <Comments />}
-            {leftTab === 'spec' && <Spec />}
             {leftTab === 'review' && <Review />}
             {leftTab === 'history' && <History />}
           </ScrollArea>
@@ -494,16 +520,31 @@ function Editor({ source, onHome, appearance, onAppearance, session }: {
         </main>
 
         <aside className={`rail rail-right${rightOpen ? ' is-open' : ''}`} {...hiddenWhenClosed(rightOpen)}>
+          <nav className="rail-tabs is-wide" aria-label="Inspector">
+            {RIGHT_TABS.map((t) => (
+              <button
+                key={t.id}
+                className={rightTab === t.id ? 'is-active' : ''}
+                onClick={() => setRightTab(t.id)}
+                title={`${t.label} — ${t.hint}`}
+                aria-pressed={rightTab === t.id}
+              >
+                <Icon name={t.icon} size={14} /> {t.label}
+              </button>
+            ))}
+          </nav>
           <ScrollArea className="rail-body">
-            {/*
-              * A viewer keeps the properties panel — reading the real values is
-              * most of why you send someone a link — but every control inside is
-              * disabled natively. A `fieldset` does that in one place and cannot
-              * be forgotten, which a per-control `disabled` prop could.
-              */}
-            <fieldset className="rail-fieldset" disabled={readOnly}>
-              <Properties />
-            </fieldset>
+            {rightTab === 'spec' ? <Spec /> : (
+              /*
+                * A viewer keeps the properties panel — reading the real values is
+                * most of why you send someone a link — but every control inside is
+                * disabled natively. A `fieldset` does that in one place and cannot
+                * be forgotten, which a per-control `disabled` prop could.
+                */
+              <fieldset className="rail-fieldset" disabled={readOnly}>
+                <Properties />
+              </fieldset>
+            )}
           </ScrollArea>
         </aside>
       </div>

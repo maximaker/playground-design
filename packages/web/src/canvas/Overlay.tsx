@@ -19,6 +19,8 @@ interface Rects {
   peers: { color: string; rect: DOMRect }[];
   /** Layers an agent just changed, outlined until the review bar is dismissed. */
   changed: DOMRect[];
+  /** Layers the open panel is pointing at — findings, threads, what moved. */
+  highlight: DOMRect[];
 }
 
 interface OverlayProps {
@@ -39,12 +41,15 @@ export const Overlay = memo(function Overlay({ version, dropTarget, guides, live
   // The id list, not the whole change: it is stable for the life of a run, so
   // this does not re-measure on every unrelated store update.
   const changedIds = useCanvas((s) => s.agentChange?.nodeIds);
+  const highlight = useCanvas((s) => s.highlight);
 
-  const [rects, setRects] = useState<Rects>({ selection: {}, hovered: null, peers: [], changed: [] });
+  const [rects, setRects] = useState<Rects>({
+    selection: {}, hovered: null, peers: [], changed: [], highlight: [],
+  });
   const raf = useRef<number>(0);
 
   const measure = useCallback(() => {
-    const next: Rects = { selection: {}, hovered: null, peers: [], changed: [] };
+    const next: Rects = { selection: {}, hovered: null, peers: [], changed: [], highlight: [] };
     for (const id of selection) {
       const r = nodeRect(id);
       if (r) next.selection[id] = r;
@@ -60,8 +65,12 @@ export const Overlay = memo(function Overlay({ version, dropTarget, guides, live
       const r = nodeRect(id);
       if (r) next.changed.push(r);
     }
+    for (const id of highlight?.ids ?? []) {
+      const r = nodeRect(id);
+      if (r) next.highlight.push(r);
+    }
     setRects((prev) => (sameRects(prev, next) ? prev : next));
-  }, [selection, hovered, peers, changedIds]);
+  }, [selection, hovered, peers, changedIds, highlight]);
 
   /**
    * Measure on change, not on a loop.
@@ -107,6 +116,13 @@ export const Overlay = memo(function Overlay({ version, dropTarget, guides, live
 
   return (
     <div className="overlay">
+      {rects.highlight.map((rect, i) => (
+        <div
+          key={`highlight-${i}`}
+          className={`overlay-highlight is-${highlight?.kind}`}
+          style={boxStyle(rect)}
+        />
+      ))}
       {rects.changed.map((rect, i) => (
         <div key={`changed-${i}`} className="overlay-changed" style={boxStyle(rect)} />
       ))}
@@ -287,6 +303,10 @@ function sameRects(a: Rects, b: Rects): boolean {
   if (a.changed.length !== b.changed.length) return false;
   for (let i = 0; i < a.changed.length; i++) {
     if (!sameRect(a.changed[i]!, b.changed[i]!)) return false;
+  }
+  if (a.highlight.length !== b.highlight.length) return false;
+  for (let i = 0; i < a.highlight.length; i++) {
+    if (!sameRect(a.highlight[i]!, b.highlight[i]!)) return false;
   }
   return true;
 }

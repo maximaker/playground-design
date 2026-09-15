@@ -163,6 +163,17 @@ interface CanvasState {
 
   viewport: Viewport;
   /**
+   * Layers a panel is asking the canvas to point at.
+   *
+   * The lists on the left — review findings, comment threads, what changed
+   * since a version — are all about particular layers, and until now they were
+   * only lists: you clicked a row to find out where it was. While one of those
+   * panels is open it names its layers here and the canvas outlines them, which
+   * is the difference between a list and a lens.
+   */
+  highlight: { ids: NodeId[]; kind: 'review' | 'comments' | 'changes' } | null;
+
+  /**
    * What this person is called, as the server knows them: their account name,
    * or the guest name a share-link viewer gets. Comments are signed with it.
    */
@@ -231,6 +242,7 @@ interface CanvasActions {
   setViewport(v: Partial<Viewport>): void;
   setCanvasPrefs(v: Partial<CanvasPrefs>): void;
   setIdentity(name: string): void;
+  setHighlight(highlight: { ids: NodeId[]; kind: 'review' | 'comments' | 'changes' } | null): void;
   setTool(t: Tool): void;
   setSpacePanning(v: boolean): void;
   setPage(id: string): void;
@@ -344,6 +356,7 @@ export const useCanvas = create<CanvasState & CanvasActions>((set, get) => ({
   editingVariant: null,
   viewport: { x: 80, y: 80, zoom: 0.55 },
   identity: 'Guest',
+  highlight: null,
   canvasPrefs: loadCanvasPrefs(),
   tool: 'move',
   spacePanning: false,
@@ -613,6 +626,15 @@ export const useCanvas = create<CanvasState & CanvasActions>((set, get) => ({
 
   setViewport(v) { set({ viewport: { ...get().viewport, ...v } }); },
   setIdentity(identity) { set({ identity }); },
+  setHighlight(highlight) {
+    // Compared before setting: a panel re-renders constantly and an identical
+    // list would otherwise re-measure the whole overlay each time.
+    const current = get().highlight;
+    const same = current?.kind === highlight?.kind
+      && current?.ids.length === highlight?.ids.length
+      && !!current?.ids.every((id, i) => highlight?.ids[i] === id);
+    if (!same) set({ highlight });
+  },
   setCanvasPrefs(v) {
     const next = { ...get().canvasPrefs, ...v };
     set({ canvasPrefs: next });

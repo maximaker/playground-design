@@ -6,7 +6,7 @@
  * list nobody reads.
  */
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { type Finding, type RuleId, RULES, lintDocument, summarise } from '@playground/shared';
 import { useCanvas, getDoc, currentPage } from '../state/store.ts';
 import { Icon, type IconName } from '../ui/Icon.tsx';
@@ -44,6 +44,20 @@ export function Review() {
     }
     return [...byRule.entries()];
   }, [findings]);
+
+  // While this panel is open the canvas outlines what the findings are about.
+  // A list of forty contrast problems that you have to click one at a time to
+  // locate is a list; pointing at them is a review.
+  const setHighlight = useCanvas((s) => s.setHighlight);
+  useEffect(() => {
+    setHighlight({
+      kind: 'review',
+      ids: [...new Set(findings
+        .filter((f) => f.severity === 'error' || f.severity === 'warning')
+        .map((f) => f.nodeId))],
+    });
+    return () => setHighlight(null);
+  }, [findings, setHighlight]);
 
   const counts = summarise(findings);
   const errors = findings.filter((f) => f.severity === 'error').length;

@@ -2400,3 +2400,31 @@ code { font-family: var(--mono); font-size: 0.92em; }
   background: var(--bg-input); padding: 0 0.2rem; border-radius: 0.2rem;
   max-width: 9rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
+
+/* --- Rail tabs ---------------------------------------------------------------- */
+.rail-tab-divider {
+  width: 1.2rem; height: 1px; background: var(--border-strong); margin: var(--s2) auto;
+  display: block; flex: 0 0 auto;
+}
+/* The right rail's tabs carry words: there are two of them and "Design" and
+   "Spec" are not obvious as icons. */
+.rail-tabs.is-wide { gap: var(--s2); padding: var(--s2) var(--s3); }
+.rail-tabs.is-wide button {
+  flex: 1 1 auto; display: inline-flex; align-items: center; justify-content: center;
+  gap: var(--s2); font-size: 0.85rem; padding: 0.3rem var(--s3); border-radius: var(--radius-sm);
+}
+
+/* --- Lens highlights -----------------------------------------------------------
+ *
+ * What the open panel is talking about, outlined on the canvas. Dashed and
+ * tinted rather than solid, so it never reads as a selection — the selection is
+ * a thing you are about to change, and these are things a list is pointing at.
+ */
+.overlay-highlight {
+  position: absolute; pointer-events: none; border-radius: 2px;
+  border: 1px dashed currentColor;
+  background: color-mix(in srgb, currentColor 8%, transparent);
+}
+.overlay-highlight.is-review { color: #b4690e; }
+.overlay-highlight.is-comments { color: #6d5cf5; }
+.overlay-highlight.is-changes { color: #0d8a72; }

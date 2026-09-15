@@ -125,7 +125,10 @@ const page = await browser.newPage({ viewport: { width: 1500, height: 950 } });
 page.on('pageerror', (e) => errors.push(e.message));
 await page.goto(`${BASE}/d/${doc.id}`, { waitUntil: 'networkidle' });
 await page.waitForSelector('.artboard-frame iframe', { timeout: 30000 });
-await page.click('.rail-left .rail-tabs button[aria-label="Spec"]');
+// The spec lives in the right rail now, beside the properties: both describe
+// the selection, and reading one on the left while the other sat on the right
+// meant looking in two places at one thing.
+await page.click('.rail-right .rail-tabs button:has-text("Spec")');
 await page.waitForTimeout(1200);
 check('the panel asks for a selection before it has one',
   (await page.locator('.spec').count()) === 0 && (await page.locator('.panel-empty').count()) > 0);
@@ -176,9 +179,10 @@ const viewer = await signedOutPage(browser, { viewport: { width: 1400, height: 9
 viewer.on('pageerror', (e) => errors.push(e.message));
 await viewer.goto(share.url, { waitUntil: 'networkidle' });
 await viewer.waitForSelector('.artboard-frame iframe', { timeout: 30000 });
-const specTab = viewer.locator('.rail-left .rail-tabs button[aria-label="Spec"]');
-check('a view-only visitor gets the spec panel', (await specTab.count()) === 1);
-await specTab.click();
+// A viewer's inspector opens on the spec: they cannot use the controls, and
+// reading the design is most of why someone is sent a link.
+check('a view-only visitor gets the spec panel, already open',
+  (await viewer.locator('.rail-right .rail-tabs button:has-text("Spec")[aria-pressed="true"]').count()) === 1);
 await viewer.evaluate((id) => window.__playground.store.getState().select([id]), cta.id);
 await viewer.waitForTimeout(900);
 check('and can read the spec and the notes',
