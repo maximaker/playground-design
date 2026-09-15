@@ -1,0 +1,14 @@
+import './lib/session.mjs';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+const B='http://localhost:4000', D=process.argv[2];
+const raw=await (await fetch(`${B}/api/documents/${D}/connections`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({label:'inspect'})})).text();
+const c=new Client({name:'i',version:'1'});
+await c.connect(new StreamableHTTPClientTransport(new URL(`${B}/mcp/${raw.match(/\/mcp\/([A-Z0-9-]+)/)[1]}`)));
+const call=async(n,a={})=>{const r=await c.callTool({name:n,arguments:a});const t=r.content.map(x=>x.text).join('\n');if(r.isError)throw new Error(t);return t;};
+console.log('components:', await call('list_components'));
+const info=JSON.parse(await call('get_basic_info'));
+console.log('artboards:', info.artboards.map(b=>`${b.name} ${b.width}x${b.height}`).join(' | '));
+const f=info.artboards.find(b=>b.name==='Foundations');
+console.log(await call('get_tree_summary',{id:f.id,depth:5}));
+await c.close();

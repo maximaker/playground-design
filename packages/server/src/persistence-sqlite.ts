@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import type { CanvasDocument } from '@playground/shared';
 import type {
   DocSummary, MemberRole, Persistence, ShareRole, StoredAsset, StoredConnection, StoredMembership,
-  StoredProject, StoredSession, StoredShare, StoredSnapshot, StoredUser,
+  StoredProject, StoredSession, StoredShare, StoredSnapshot, StoredThumbnail, StoredUser,
 } from './persistence.ts';
 
 // Anchored to the package, not the working directory: resolving against cwd
@@ -102,6 +102,11 @@ export class SqlitePersistence implements Persistence {
         PRIMARY KEY (doc_id, user_id)
       );
       CREATE INDEX IF NOT EXISTS memberships_user ON memberships(user_id);
+
+      CREATE TABLE IF NOT EXISTS thumbnails (
+        doc_id TEXT PRIMARY KEY REFERENCES documents(id) ON DELETE CASCADE,
+        rev INTEGER NOT NULL, mime TEXT NOT NULL, bytes BLOB NOT NULL, created_at INTEGER NOT NULL
+      );
     `);
   }
 
@@ -292,6 +297,22 @@ export class SqlitePersistence implements Persistence {
 
   async deleteMembership(docId: string, userId: string): Promise<void> {
     this.db.prepare('DELETE FROM memberships WHERE doc_id = ? AND user_id = ?').run(docId, userId);
+  }
+
+  async saveThumbnail(t: StoredThumbnail): Promise<void> {
+    this.db.prepare(`
+      INSERT INTO thumbnails (doc_id, rev, mime, bytes, created_at) VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT(doc_id) DO UPDATE SET rev = excluded.rev, mime = excluded.mime,
+        bytes = excluded.bytes, created_at = excluded.created_at
+    `).run(t.docId, t.rev, t.mime, t.bytes, t.createdAt);
+  }
+
+  async loadThumbnail(docId: string): Promise<StoredThumbnail | null> {
+    const r = this.db.prepare('SELECT * FROM thumbnails WHERE doc_id = ?').get(docId) as
+      { doc_id: string; rev: number; mime: string; bytes: Uint8Array; created_at: number } | undefined;
+    return r ? {
+      docId: r.doc_id, rev: r.rev, mime: r.mime, bytes: Buffer.from(r.bytes), createdAt: r.created_at,
+    } : null;
   }
 
   async saveSnapshot(s: StoredSnapshot): Promise<void> {

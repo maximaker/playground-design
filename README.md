@@ -330,7 +330,13 @@ content. Detach bakes everything in and drops the link.
 control from browser zoom, because browser zoom scales the canvas too — and the canvas has to stay at
 its true size while you design.
 
-**The library.** Search, sort (last edited, name, size) and a grid-or-list view that is remembered per
+**The library.** Every band — header, kit strip, sidebar, toolbar, cards — sits on one twelve-column
+grid, using CSS subgrid so a card's left edge is the same line as the kit above it rather than
+approximately the same line. Cards carry a **thumbnail**: the busiest artboard of the first page,
+rendered headlessly at 480px, cached against the revision it was taken at and re-rendered when that
+moves (one at a time server-wide, so twenty cards opening at once do not ask Chromium for twenty
+pages). An instance with no renderer, or a document still rendering, falls back to the tint — never a
+hole in the grid. Search, sort (last edited, name, size) and a grid-or-list view that is remembered per
 person. Each document carries a tint derived from its id — the same colour every time, so a document
 becomes findable by shape before you have read a title, and never the only signal since the name is
 beside it. A role badge appears only when a document is not yours outright.
@@ -381,6 +387,16 @@ always creates; it never overwrites. Connection codes, share tokens and version 
 deliberately left out: the first two are credentials for one instance, and the third is the document's
 history rather than the document. `scripts/agent/transfer.mjs <fromBase> <docId> <toBase>` does the
 round trip between two instances in one command.
+
+**Componentising a document.** `scripts/agent/componentise.mjs <base> <docId>` turns a foundations
+sheet's specimens into real components and replaces every structurally identical copy elsewhere with
+an instance, carrying text *and attributes* across as overrides — the first run moved the text and not
+the links, and every button on the page ended up pointing at the definition's href. Matching is on
+structure and styles, never on text. The specimen is not automatically the source: in the Northsignal
+document the sheet drew its button as a `<span>` with no tap-target height while all fifteen real
+buttons were anchors with one, so the component is built from the shape actually in use and the sheet
+is brought up to date. Every artboard's HTML is compared before and after; anything outside the
+foundations sheet moving fails the run.
 
 **Starter design systems.** Four kits — Clean, Editorial, Brutalist, Soft — each a token set plus a
 foundations sheet. Mostly so that neither you nor an agent starts from a blank canvas inventing hex
@@ -552,6 +568,9 @@ that export emits the import rather than the markup.
   surface the way an agent does, including the error paths
 - `packages/server/src/fidelity.test.ts` — the export-fidelity gate: render an artboard, export it,
   re-import the export into a fresh document, render that, and pixel-diff the two
+- `scripts/dashboard-check.mjs` — thumbnails (really an image, cached, 304 on revalidate) and the
+  column grid: it computes where the twelve lines are and asserts every band starts on one, at three
+  widths
 - `scripts/accounts-check.mjs` — the gate, end to end: signed-out requests, a second account that
   cannot reach the first's work, viewer versus editor versus owner, the socket refusing an
   unauthenticated join, and the landing page's sign-in and sign-out in a real browser

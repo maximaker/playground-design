@@ -456,8 +456,23 @@ export function Home({ onOpen, appearance, onAppearance, session }: {
                     * document becomes findable by shape in a grid of twenty
                     * before you have read a single title.
                     */}
+                  {/*
+                    * The tint sits underneath and the picture loads over it, so
+                    * a card is never empty: a cold thumbnail takes a second to
+                    * render, an instance without a renderer never gets one, and
+                    * neither case should leave a hole in the grid.
+                    */}
                   <span className="home-card-face" style={faceStyle(d.id)} aria-hidden>
                     <span className="home-card-initial">{(d.name.trim()[0] ?? '?').toUpperCase()}</span>
+                    <img
+                      className="home-card-shot"
+                      src={`/api/documents/${d.id}/thumbnail?rev=${d.rev}`}
+                      alt=""
+                      loading="lazy"
+                      decoding="async"
+                      onLoad={(e) => e.currentTarget.classList.add('is-loaded')}
+                      onError={(e) => e.currentTarget.remove()}
+                    />
                   </span>
 
                   <div className="home-card-body">

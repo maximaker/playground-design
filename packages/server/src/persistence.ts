@@ -98,6 +98,21 @@ export interface StoredMembership {
   createdAt: number;
 }
 
+/**
+ * A cached picture of a document, keyed to the revision it was taken at.
+ *
+ * Derived data, so it lives beside the document rather than in it: rendering
+ * one costs a browser page and about a second, which is fine once and absurd on
+ * every library load.
+ */
+export interface StoredThumbnail {
+  docId: string;
+  rev: number;
+  mime: string;
+  bytes: Buffer;
+  createdAt: number;
+}
+
 export interface StoredSnapshot {
   id: string;
   docId: string;
@@ -147,6 +162,9 @@ export interface Persistence {
   loadMembership(docId: string, userId: string): Promise<StoredMembership | null>;
   loadMemberships(opts: { docId?: string; userId?: string }): Promise<StoredMembership[]>;
   deleteMembership(docId: string, userId: string): Promise<void>;
+
+  saveThumbnail(thumb: StoredThumbnail): Promise<void>;
+  loadThumbnail(docId: string): Promise<StoredThumbnail | null>;
 
   saveSnapshot(snapshot: StoredSnapshot): Promise<void>;
   loadSnapshots(docId: string): Promise<Omit<StoredSnapshot, 'data'>[]>;

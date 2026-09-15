@@ -24,7 +24,7 @@ import { createHash } from 'node:crypto';
 import type { CanvasDocument } from '@playground/shared';
 import type {
   DocSummary, Persistence, StoredAsset, StoredConnection, StoredMembership, StoredProject,
-  StoredSession, StoredShare, StoredSnapshot, StoredUser,
+  StoredSession, StoredShare, StoredSnapshot, StoredThumbnail, StoredUser,
 } from './persistence.ts';
 
 type BlobModule = typeof import('@vercel/blob');
@@ -160,6 +160,30 @@ export class BlobPersistence implements Persistence {
     const { blobs } = await list({ prefix: 'connections/', token: this.token, limit: 500 });
     const all = await Promise.all(blobs.map((b) => this.getJson<StoredConnection>(b.pathname)));
     return all.filter((c): c is StoredConnection => !!c && (!docId || c.docId === docId));
+  }
+
+  async saveThumbnail(t: StoredThumbnail): Promise<void> {
+    const { put } = await this.blob();
+    await put(`thumbnails/${t.docId}`, t.bytes, {
+      access: 'private', token: this.token, contentType: t.mime,
+      addRandomSuffix: false, allowOverwrite: true, cacheControlMaxAge: 0,
+    });
+    // The revision lives beside the bytes: Blob has no metadata to hang it on.
+    await this.putJson(`thumbnails/${t.docId}.json`, { rev: t.rev, mime: t.mime, createdAt: t.createdAt });
+  }
+
+  async loadThumbnail(docId: string): Promise<StoredThumbnail | null> {
+    const meta = await this.getJson<{ rev: number; mime: string; createdAt: number }>(`thumbnails/${docId}.json`);
+    if (!meta) return null;
+    const { get } = await this.blob();
+    try {
+      const result = await get(`thumbnails/${docId}`, { access: 'private', token: this.token, useCache: false });
+      if (!result) return null;
+      const bytes = Buffer.from(await new Response(result.stream).arrayBuffer());
+      return { docId, rev: meta.rev, mime: meta.mime, bytes, createdAt: meta.createdAt };
+    } catch {
+      return null;
+    }
   }
 
   // --- Accounts -------------------------------------------------------------

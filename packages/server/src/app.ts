@@ -36,7 +36,7 @@ import {
 } from '@playground/shared';
 import { importUrl, ImportError } from './import.ts';
 import { getTemplate, templateSummaries, type Template } from './templates.ts';
-import { renderNode } from './render.ts';
+import { renderNode, renderThumbnail } from './render.ts';
 import { persistence, type MemberRole } from './persistence.ts';
 import {
   AuthError, SESSION_COOKIE, atLeast, authenticate, createAccount, documentsFor, endSession, grant,
@@ -588,6 +588,47 @@ function bundleFilename(name: string): string {
 /** Assets inline as base64, so a bundle is one file you can email or commit. */
 const MAX_BUNDLE_ASSET_BYTES = 40 * 1024 * 1024;
 
+/**
+ * A picture of the document, for the library.
+ *
+ * Rendered from the first artboard, cached against the revision it was taken
+ * at, and re-rendered when that moves. One at a time across the whole server:
+ * a library of twenty documents opening at once would otherwise ask Chromium
+ * for twenty pages in the same second.
+ */
+const THUMBNAIL = { width: 480, ratio: 16 / 10 };
+let thumbnailQueue: Promise<unknown> = Promise.resolve();
+type Rendered = Awaited<ReturnType<typeof renderThumbnail>>;
+
+api.get('/documents/:id/thumbnail', async (c) => {
+  const doc = await requireDocument(c.req.param('id'));
+  const store = await persistence();
+  const cached = await store.loadThumbnail(doc.id);
+  if (cached && cached.rev === doc.rev) return thumbnailResponse(c, cached.bytes, cached.mime, doc.rev);
+
+  // The busiest artboard on the first page, not the first one: a document
+  // often opens with an empty starter frame beside the work, and a thumbnail of
+  // the empty one is a white rectangle that says nothing.
+  const artboard = (doc.pages[0]?.artboards ?? [])
+    .map((id) => ({ id, size: countDescendants(doc, id) }))
+    .sort((a, b) => b.size - a.size)[0]?.id;
+  if (!artboard) return c.json({ error: 'This document has no artboards yet.' }, 404);
+
+  const rendered = (await (thumbnailQueue = thumbnailQueue
+    .catch(() => {})
+    .then(() => renderThumbnail(doc, artboard, { ...THUMBNAIL, baseUrl: PUBLIC_URL })))) as Rendered;
+
+  if (!rendered) {
+    // No renderer on this deployment. Serving the stale picture beats none.
+    if (cached) return thumbnailResponse(c, cached.bytes, cached.mime, cached.rev);
+    return c.json({ error: 'This server cannot render thumbnails.' }, 501);
+  }
+  await store.saveThumbnail({
+    docId: doc.id, rev: doc.rev, mime: rendered.mime, bytes: rendered.data, createdAt: Date.now(),
+  });
+  return thumbnailResponse(c, rendered.data, rendered.mime, doc.rev);
+});
+
 api.get('/documents/:id/bundle', async (c) => {
   const doc = await requireDocument(c.req.param('id'));
   const includeAssets = c.req.query('assets') !== 'false';
@@ -879,6 +920,26 @@ async function issueSession(c: Context<{ Variables: Vars }>, userId: string): Pr
     sameSite: 'Lax',
     secure: PUBLIC_URL.startsWith('https://'),
     maxAge: 30 * 24 * 60 * 60,
+  });
+}
+
+/**
+ * Thumbnails are immutable for a revision, so they are cached hard and the
+ * revision is in the ETag — a document that has not changed costs a 304.
+ */
+function countDescendants(doc: CanvasDocument, id: string): number {
+  const node = doc.nodes[id];
+  if (!node) return 0;
+  return 1 + node.children.reduce((n, child) => n + countDescendants(doc, child), 0);
+}
+
+function thumbnailResponse(c: Context<{ Variables: Vars }>, bytes: Buffer, mime: string, rev: number) {
+  const etag = `"thumb-${rev}"`;
+  if (c.req.header('if-none-match') === etag) return c.body(null, 304);
+  return c.body(new Uint8Array(bytes), 200, {
+    'content-type': mime,
+    'cache-control': 'private, max-age=0, must-revalidate',
+    etag,
   });
 }
 

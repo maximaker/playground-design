@@ -178,6 +178,50 @@ function clampScale(scale: number | undefined): number {
   return Math.max(1, Math.min(3, s));
 }
 
+/**
+ * A small picture of the top of an artboard, for the library.
+ *
+ * Not `renderNode` with a scale: that clamps to 1× and up, because it exists for
+ * exports where you never want less detail than the design has. A thumbnail
+ * wants exactly the opposite — a 1440×3610 landing page has to come back as a
+ * few kilobytes, so the device scale factor goes *below* one and the shot is
+ * clipped to the first screenful rather than the whole page. A 3,610px-tall
+ * strip scaled to fit a card is a grey smear.
+ */
+export async function renderThumbnail(
+  doc: CanvasDocument,
+  nodeId: NodeId,
+  opts: { width: number; ratio: number; baseUrl?: string },
+): Promise<RenderResult | null> {
+  const pw = await tryLoadPlaywright();
+  // No Playwright, no thumbnail. The caller falls back to the tinted card, which
+  // is a perfectly good library; this is not worth failing a request over.
+  if (!pw) return null;
+
+  const { width, height } = sizeOf(doc, nodeId);
+  const scale = Math.min(1, opts.width / Math.max(1, width));
+  const browser = await getBrowser(pw);
+  const context = await browser.newContext({
+    viewport: { width: Math.ceil(width), height: Math.ceil(Math.min(height, width / opts.ratio)) },
+    deviceScaleFactor: scale,
+  });
+  const page = await context.newPage();
+  try {
+    let html = emitStandalone(doc, nodeId, { mode: 'stylesheet' });
+    if (opts.baseUrl) html = html.replace('<head>', `<head>\n<base href="${opts.baseUrl}" />`);
+    await page.setContent(html, { waitUntil: 'networkidle' });
+    await page.evaluate(() => (document as unknown as { fonts: FontFaceSet }).fonts.ready);
+    const buf = await page.screenshot({
+      type: 'jpeg',
+      quality: 72,
+      clip: { x: 0, y: 0, width: Math.ceil(width), height: Math.ceil(Math.min(height, width / opts.ratio)) },
+    });
+    return { data: Buffer.from(buf), mime: 'image/jpeg' };
+  } finally {
+    await context.close();
+  }
+}
+
 export async function shutdownRenderer(): Promise<void> {
   if (browserPromise) {
     const b = await browserPromise.catch(() => null);
