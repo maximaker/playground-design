@@ -12,6 +12,7 @@ import { useCanvas, getDoc, currentPage } from '../state/store.ts';
 import { createComponentFromSelection, detachSelection } from '../hooks/commands.ts';
 import { Icon } from '../ui/Icon.tsx';
 import { VariantEditor, selectedDefinition } from './VariantEditor.tsx';
+import { ComponentPreview } from './ComponentPreview.tsx';
 
 export function Components() {
   const version = useCanvas((s) => s.version);
@@ -19,6 +20,7 @@ export function Components() {
   const dispatch = useCanvas((s) => s.dispatch);
   const select = useCanvas((s) => s.select);
   const toast = useCanvas((s) => s.toast);
+  const docId = useCanvas((s) => s.docId);
   const doc = getDoc();
 
   const components = useMemo(
@@ -119,35 +121,46 @@ export function Components() {
         </p>
       )}
 
-      {components.map((c) => {
-        const root = doc?.nodes[c.root];
-        const slots = root && doc ? collectSlots(doc, root) : [];
-        const count = doc ? instancesOf(doc, c.id).length : 0;
-        return (
-          <div key={c.id} className="component-row">
-            <button className="component-main" onClick={() => insert(c.id)} title="Insert an instance">
-              <span className="component-name">{c.name}</span>
-              <span className="dim">
-                {count} instance{count === 1 ? '' : 's'}
-                {slots.length ? ` · ${slots.length} slot${slots.length === 1 ? '' : 's'}` : ''}
-                {c.props?.length ? ` · ${c.props.length} prop${c.props.length === 1 ? '' : 's'}` : ''}
-              </span>
-            </button>
-            <button
-              className="icon-button"
-              title="Edit the component definition"
-              aria-label={`Edit ${c.name}`}
-              onClick={() => root && select([root.id])}
-            ><Icon name="edit" size={12} /></button>
-            <button
-              className="icon-button"
-              title="Delete component"
-              aria-label={`Delete ${c.name}`}
-              onClick={() => remove(c.id, c.name)}
-            ><Icon name="trash" size={12} /></button>
-          </div>
-        );
-      })}
+      {/*
+        * A grid rather than a list: a component is a thing you recognise by
+        * sight, and a column of names is the one presentation that hides that.
+        * The tiles are auto-fitted, so the rail shows two and a wide rail or an
+        * expanded drawer shows three.
+        */}
+      <div className="component-grid">
+        {components.map((c) => {
+          const root = doc?.nodes[c.root];
+          const slots = root && doc ? collectSlots(doc, root) : [];
+          const count = doc ? instancesOf(doc, c.id).length : 0;
+          return (
+            <div key={c.id} className="component-tile">
+              <button className="component-main" onClick={() => insert(c.id)} title="Insert an instance">
+                <ComponentPreview docId={docId} componentId={c.id} name={c.name} stamp={version} />
+                <span className="component-name">{c.name}</span>
+                <span className="dim">
+                  {count} instance{count === 1 ? '' : 's'}
+                  {slots.length ? ` · ${slots.length} slot${slots.length === 1 ? '' : 's'}` : ''}
+                  {c.props?.length ? ` · ${c.props.length} prop${c.props.length === 1 ? '' : 's'}` : ''}
+                </span>
+              </button>
+              <div className="component-tile-actions">
+                <button
+                  className="icon-button"
+                  title="Edit the component definition"
+                  aria-label={`Edit ${c.name}`}
+                  onClick={() => root && select([root.id])}
+                ><Icon name="edit" size={12} /></button>
+                <button
+                  className="icon-button"
+                  title="Delete component"
+                  aria-label={`Delete ${c.name}`}
+                  onClick={() => remove(c.id, c.name)}
+                ><Icon name="trash" size={12} /></button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
 
       <div className="components-section">
         <h4 className="components-section-title">From your code</h4>

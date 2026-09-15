@@ -42,8 +42,8 @@ export class MemoryPersistence implements Persistence {
   }
   async loadConnection(code: string) { return this.connections.get(code) ?? null; }
 
-  async saveThumbnail(t: StoredThumbnail) { this.thumbnails.set(t.docId, t); }
-  async loadThumbnail(docId: string) { return this.thumbnails.get(docId) ?? null; }
+  async saveThumbnail(t: StoredThumbnail) { this.thumbnails.set(`${t.docId}:${t.key}`, t); }
+  async loadThumbnail(docId: string, key: string) { return this.thumbnails.get(`${docId}:${key}`) ?? null; }
 
   async saveUser(u: StoredUser) { this.users.set(u.id, u); }
   async loadUser(id: string) { return this.users.get(id) ?? null; }

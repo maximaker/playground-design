@@ -712,8 +712,80 @@ code { font-family: var(--mono); font-size: 0.92em; }
   color: var(--fg); min-width: 0; border-radius: var(--radius-sm);
 }
 .component-main:hover { background: var(--bg-hover); }
-.component-name { font-size: 0.88rem; font-weight: 500; }
-.component-row .dim { font-size: 0.78rem; }
+.component-name {
+  font-size: 0.88rem; font-weight: 500;
+  max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.component-row .dim, .component-tile .dim { font-size: 0.75rem; }
+
+/* --- Component tiles ---------------------------------------------------------
+ *
+ * auto-fit rather than a fixed count: the rail is ~19rem docked and wider as a
+ * drawer, which works out at two tiles and three respectively without either
+ * number being written down.
+ */
+.component-grid {
+  /* Two in the docked rail, three in the wider drawer. The floor is the number
+     that makes that split fall where it should: the rail's content box is about
+     215px and the drawer's about 254px, and 6rem is what fits twice in one and
+     three times in the other. */
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(6rem, 1fr));
+  gap: var(--s3); margin-bottom: var(--s4);
+}
+.component-tile {
+  position: relative; display: flex; flex-direction: column; min-width: 0;
+  border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-raised);
+}
+.component-tile:hover { border-color: var(--border-strong); }
+.component-tile .component-main { padding: 0 0 var(--s3); gap: var(--s2); }
+.component-tile .component-main:hover { background: none; }
+.component-tile .component-name,
+.component-tile .dim { padding: 0 var(--s3); max-width: 100%; }
+
+.component-preview {
+  display: block; width: 100%; aspect-ratio: 4 / 3; overflow: hidden;
+  border-radius: calc(var(--radius) - 1px) calc(var(--radius) - 1px) 0 0;
+  background: var(--bg-input);
+  border-bottom: 1px solid var(--border);
+  display: grid; place-items: center;
+}
+.component-preview img {
+  width: 100%; height: 100%; object-fit: contain;
+  /* Contain, not cover: a preview that crops the component is worse than one
+     with air around it — the shape is the information. */
+  padding: var(--s2); box-sizing: border-box;
+}
+.component-preview-fallback { font-size: 1.1rem; font-weight: 600; color: var(--fg-faint); }
+
+.component-tile-actions {
+  position: absolute; top: var(--s2); right: var(--s2);
+  display: flex; gap: 0.1rem; opacity: 0; transition: opacity 90ms ease;
+  background: color-mix(in srgb, var(--bg-raised) 85%, transparent);
+  border-radius: var(--radius-sm); backdrop-filter: blur(4px);
+}
+.component-tile:hover .component-tile-actions,
+.component-tile:focus-within .component-tile-actions { opacity: 1; }
+
+/* The hover overlay, portalled onto the body so the rail cannot clip it. */
+.component-overlay {
+  position: fixed; z-index: 90; pointer-events: none;
+  display: flex; flex-direction: column; gap: var(--s2);
+  padding: var(--s3); border-radius: var(--radius);
+  background: var(--bg-raised); border: 1px solid var(--border-strong);
+  box-shadow: 0 24px 60px -20px rgba(0, 0, 0, 0.45);
+  max-width: min(32rem, 45vw);
+}
+.component-overlay img {
+  display: block; max-width: 100%; max-height: 60vh; width: auto; height: auto;
+  border-radius: var(--radius-sm); background: var(--bg-input);
+}
+.component-overlay-name { font-size: 0.8rem; color: var(--fg-muted); }
+
+@media (pointer: coarse) {
+  /* Nothing hovers on a touch screen, and the tile is the tap target. */
+  .component-overlay { display: none; }
+  .component-tile-actions { opacity: 1; }
+}
 
 .component-detail { margin-top: var(--s5); border-top: 1px solid var(--border); padding-top: var(--s4); }
 .component-detail-title { margin: 0 0 var(--s3); font-size: 0.92rem; }

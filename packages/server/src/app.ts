@@ -9,6 +9,7 @@ import { serveStatic } from '@hono/node-server/serve-static';
 import { Hono, type Context } from 'hono';
 import { cors } from 'hono/cors';
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
+import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -36,7 +37,7 @@ import {
 } from '@playground/shared';
 import { importUrl, ImportError } from './import.ts';
 import { getTemplate, templateSummaries, type Template } from './templates.ts';
-import { renderNode, renderThumbnail } from './render.ts';
+import { RENDERER_VERSION, renderNode, renderThumbnail } from './render.ts';
 import { persistence, type MemberRole } from './persistence.ts';
 import {
   AuthError, SESSION_COOKIE, atLeast, authenticate, createAccount, documentsFor, endSession, grant,
@@ -597,36 +598,99 @@ const MAX_BUNDLE_ASSET_BYTES = 40 * 1024 * 1024;
  * for twenty pages in the same second.
  */
 const THUMBNAIL = { width: 480, ratio: 16 / 10 };
-let thumbnailQueue: Promise<unknown> = Promise.resolve();
+/** Two sizes: the tile in the panel, and the one the hover overlay shows. */
+const PREVIEW = { sm: 320, lg: 900 };
 type Rendered = Awaited<ReturnType<typeof renderThumbnail>>;
+
+/**
+ * Renders at most two pictures at once.
+ *
+ * Unbounded, a library of twenty cards or a panel of ten components asks
+ * Chromium for that many pages in the same second and every one of them gets
+ * slower. Strictly one at a time was the first version and made a panel of five
+ * take six seconds to fill; two halves that without the contention.
+ */
+const RENDER_SLOTS = 2;
+let running = 0;
+const waiting: (() => void)[] = [];
+
+async function queued<T>(work: () => Promise<T>): Promise<T> {
+  if (running >= RENDER_SLOTS) await new Promise<void>((resolve) => waiting.push(resolve));
+  running++;
+  try {
+    return await work();
+  } finally {
+    running--;
+    waiting.shift()?.();
+  }
+}
 
 api.get('/documents/:id/thumbnail', async (c) => {
   const doc = await requireDocument(c.req.param('id'));
   const store = await persistence();
-  const cached = await store.loadThumbnail(doc.id);
-  if (cached && cached.rev === doc.rev) return thumbnailResponse(c, cached.bytes, cached.mime, doc.rev);
+  const stamp = `${RENDERER_VERSION}:${doc.rev}`;
+  const cached = await store.loadThumbnail(doc.id, 'doc');
+  if (cached && cached.stamp === stamp) return pictureResponse(c, cached.bytes, cached.mime, stamp);
 
-  // The busiest artboard on the first page, not the first one: a document
-  // often opens with an empty starter frame beside the work, and a thumbnail of
-  // the empty one is a white rectangle that says nothing.
+  // The busiest artboard on the first page, not the first one: a document often
+  // opens with an empty starter frame beside the work, and a thumbnail of the
+  // empty one is a white rectangle that says nothing.
   const artboard = (doc.pages[0]?.artboards ?? [])
     .map((id) => ({ id, size: countDescendants(doc, id) }))
     .sort((a, b) => b.size - a.size)[0]?.id;
   if (!artboard) return c.json({ error: 'This document has no artboards yet.' }, 404);
 
-  const rendered = (await (thumbnailQueue = thumbnailQueue
-    .catch(() => {})
-    .then(() => renderThumbnail(doc, artboard, { ...THUMBNAIL, baseUrl: PUBLIC_URL })))) as Rendered;
+  const rendered = (await queued(() =>
+    renderThumbnail(doc, artboard, { ...THUMBNAIL, baseUrl: PUBLIC_URL }))) as Rendered;
 
   if (!rendered) {
-    // No renderer on this deployment. Serving the stale picture beats none.
-    if (cached) return thumbnailResponse(c, cached.bytes, cached.mime, cached.rev);
+    if (cached) return pictureResponse(c, cached.bytes, cached.mime, cached.stamp);
     return c.json({ error: 'This server cannot render thumbnails.' }, 501);
   }
   await store.saveThumbnail({
-    docId: doc.id, rev: doc.rev, mime: rendered.mime, bytes: rendered.data, createdAt: Date.now(),
+    docId: doc.id, key: 'doc', stamp, mime: rendered.mime, bytes: rendered.data, createdAt: Date.now(),
   });
-  return thumbnailResponse(c, rendered.data, rendered.mime, doc.rev);
+  return pictureResponse(c, rendered.data, rendered.mime, stamp);
+});
+
+/**
+ * A picture of one component.
+ *
+ * Stamped with a hash of the definition's own subtree rather than the document
+ * revision: a component's picture has to change when the component changes, and
+ * must *not* be thrown away every time someone moves an unrelated layer — which
+ * on a document being edited is several times a second.
+ */
+api.get('/documents/:id/components/:componentId/preview', async (c) => {
+  const doc = await requireDocument(c.req.param('id'));
+  const component = doc.components?.[c.req.param('componentId')];
+  if (!component) return c.json({ error: 'No such component.' }, 404);
+
+  const size = c.req.query('size') === 'lg' ? 'lg' : 'sm';
+  const key = `cmp:${component.id}:${size}`;
+  const stamp = `${RENDERER_VERSION}:${subtreeStamp(doc, component.root)}`;
+  const store = await persistence();
+  const cached = await store.loadThumbnail(doc.id, key);
+  if (cached && cached.stamp === stamp) return pictureResponse(c, cached.bytes, cached.mime, stamp);
+
+  const rendered = (await queued(() => renderThumbnail(doc, component.root, {
+    width: PREVIEW[size],
+    // Components are wide and short far more often than tall, and a fixed
+    // aspect box would crop a card or strand a button in white space. This asks
+    // for the whole thing and lets the renderer clip only what is absurdly long.
+    ratio: 1 / 3,
+    baseUrl: PUBLIC_URL,
+    fit: true,
+  }))) as Rendered;
+
+  if (!rendered) {
+    if (cached) return pictureResponse(c, cached.bytes, cached.mime, cached.stamp);
+    return c.json({ error: 'This server cannot render previews.' }, 501);
+  }
+  await store.saveThumbnail({
+    docId: doc.id, key, stamp, mime: rendered.mime, bytes: rendered.data, createdAt: Date.now(),
+  });
+  return pictureResponse(c, rendered.data, rendered.mime, stamp);
 });
 
 api.get('/documents/:id/bundle', async (c) => {
@@ -933,8 +997,31 @@ function countDescendants(doc: CanvasDocument, id: string): number {
   return 1 + node.children.reduce((n, child) => n + countDescendants(doc, child), 0);
 }
 
-function thumbnailResponse(c: Context<{ Variables: Vars }>, bytes: Buffer, mime: string, rev: number) {
-  const etag = `"thumb-${rev}"`;
+/**
+ * A short hash of everything about a subtree that a picture of it would show.
+ *
+ * Ids are included because a child being replaced changes what is drawn, but
+ * nothing outside the subtree is — which is the whole point.
+ */
+function subtreeStamp(doc: CanvasDocument, id: string): string {
+  const hash = createHash('sha1');
+  const walk = (nodeId: string) => {
+    const n = doc.nodes[nodeId];
+    if (!n) return;
+    hash.update(`${n.id}|${n.type}|${n.tag ?? ''}|${n.text ?? ''}|`);
+    hash.update(JSON.stringify(n.styles));
+    hash.update(JSON.stringify(n.attrs ?? {}));
+    hash.update(JSON.stringify(n.variants ?? []));
+    for (const child of n.children) walk(child);
+  };
+  walk(id);
+  // Tokens resolve inside the render, so a theme edit has to invalidate it too.
+  hash.update(JSON.stringify(doc.tokens ?? []));
+  return hash.digest('hex').slice(0, 16);
+}
+
+function pictureResponse(c: Context<{ Variables: Vars }>, bytes: Buffer, mime: string, stamp: string) {
+  const etag = `"thumb-${stamp}"`;
   if (c.req.header('if-none-match') === etag) return c.body(null, 304);
   return c.body(new Uint8Array(bytes), 200, {
     'content-type': mime,

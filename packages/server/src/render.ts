@@ -191,7 +191,19 @@ function clampScale(scale: number | undefined): number {
 export async function renderThumbnail(
   doc: CanvasDocument,
   nodeId: NodeId,
-  opts: { width: number; ratio: number; baseUrl?: string },
+  opts: {
+    width: number;
+    ratio: number;
+    baseUrl?: string;
+    /**
+     * Shoot the element rather than a fixed window onto it.
+     *
+     * A page thumbnail wants the first screenful of something enormous; a
+     * component preview wants the whole button, whatever shape it is. `ratio`
+     * then only caps how long a thing may be before it gets clipped.
+     */
+    fit?: boolean;
+  },
 ): Promise<RenderResult | null> {
   const pw = await tryLoadPlaywright();
   // No Playwright, no thumbnail. The caller falls back to the tinted card, which
@@ -199,27 +211,139 @@ export async function renderThumbnail(
   if (!pw) return null;
 
   const { width, height } = sizeOf(doc, nodeId);
-  const scale = Math.min(1, opts.width / Math.max(1, width));
   const browser = await getBrowser(pw);
+  const page = opts.fit
+    ? await fitShot(browser, doc, nodeId, opts)
+    : await windowShot(browser, doc, nodeId, opts, { width, height });
+  return page;
+}
+
+/** The first screenful of something, scaled down. Used for page thumbnails. */
+async function windowShot(
+  browser: PlaywrightBrowser,
+  doc: CanvasDocument,
+  nodeId: NodeId,
+  opts: { width: number; ratio: number; baseUrl?: string },
+  size: { width: number; height: number },
+): Promise<RenderResult> {
+  const scale = Math.min(1, opts.width / Math.max(1, size.width));
+  const clipHeight = Math.ceil(Math.min(size.height, size.width / opts.ratio));
   const context = await browser.newContext({
-    viewport: { width: Math.ceil(width), height: Math.ceil(Math.min(height, width / opts.ratio)) },
+    viewport: { width: Math.ceil(size.width), height: clipHeight },
     deviceScaleFactor: scale,
   });
   const page = await context.newPage();
   try {
-    let html = emitStandalone(doc, nodeId, { mode: 'stylesheet' });
-    if (opts.baseUrl) html = html.replace('<head>', `<head>\n<base href="${opts.baseUrl}" />`);
-    await page.setContent(html, { waitUntil: 'networkidle' });
-    await page.evaluate(() => (document as unknown as { fonts: FontFaceSet }).fonts.ready);
+    await load(page, doc, nodeId, opts.baseUrl);
     const buf = await page.screenshot({
-      type: 'jpeg',
-      quality: 72,
-      clip: { x: 0, y: 0, width: Math.ceil(width), height: Math.ceil(Math.min(height, width / opts.ratio)) },
+      type: 'jpeg', quality: 72,
+      clip: { x: 0, y: 0, width: Math.ceil(size.width), height: clipHeight },
     });
     return { data: Buffer.from(buf), mime: 'image/jpeg' };
   } finally {
     await context.close();
   }
+}
+
+/**
+ * The whole element, whatever shape it is. Used for component previews.
+ *
+ * The element is measured after layout rather than from its styles: a button is
+ * `width: fit-content`, so the authored styles say nothing about how wide it
+ * actually is, and a viewport guessed from them crops it or floats it in a sea
+ * of white.
+ */
+async function fitShot(
+  browser: PlaywrightBrowser,
+  doc: CanvasDocument,
+  nodeId: NodeId,
+  opts: { width: number; ratio: number; baseUrl?: string },
+): Promise<RenderResult> {
+  const context = await browser.newContext({
+    // Wide enough that nothing wraps because of the window, and tall enough not
+    // to provoke a scrollbar; the shot is of the element, not the page.
+    viewport: { width: 1600, height: 1400 },
+    deviceScaleFactor: 2,
+  });
+  const page = await context.newPage();
+  try {
+    await load(page, doc, nodeId, opts.baseUrl, true);
+
+    // Measure, then scale the element in place and shoot it — rather than
+    // reopening the browser at the right size, which is a second page load and
+    // doubles what a panel of five previews costs. A CSS transform scales the
+    // rendering, not a bitmap, so the text stays sharp.
+    const box = (await page.evaluate(`(() => {
+      const el = document.body.firstElementChild;
+      if (!el) return null;
+      const r = el.getBoundingClientRect();
+      const scale = Math.max(0.1, Math.min(3, ${opts.width} / Math.max(1, r.width)));
+      document.body.style.transformOrigin = 'top left';
+      document.body.style.transform = 'scale(' + scale + ')';
+      return { width: Math.ceil(r.width * scale), height: Math.ceil(r.height * scale) };
+    })()` as unknown as () => unknown)) as { width: number; height: number } | null;
+
+    if (!box || box.width === 0 || box.height === 0) {
+      throw new Error(`${nodeId} renders to nothing, so there is no preview to take`);
+    }
+    const buf = await page.screenshot({
+      type: 'jpeg', quality: 80,
+      clip: {
+        x: 0, y: 0,
+        width: Math.min(box.width, 1600),
+        // Only absurdly long things get cut: a component is usually wider than
+        // it is tall, and cropping a card in half is worse than a tall picture.
+        height: Math.min(box.height, Math.ceil(box.width / opts.ratio), 1400),
+      },
+    });
+    return { data: Buffer.from(buf), mime: 'image/jpeg' };
+  } finally {
+    await context.close();
+  }
+}
+
+/**
+ * Typography and sizing a component definition would otherwise not have.
+ *
+ * A definition has no ancestors, so it inherits nothing: the page sets the font
+ * on its root and the button underneath just uses it. Rendered on its own, that
+ * button came out in Times, and a card declaring flex: 1 1 0 stretched to the
+ * full 1600px window. The document's own tokens are already in the emitted
+ * stylesheet, so this only has to point at them.
+ */
+const INHERITED = `<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" />
+<style>
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: var(--font-sans, 'Inter', system-ui, sans-serif);
+    color: var(--color-fg, #171717);
+    background: var(--color-bg, #ffffff);
+    width: max-content;
+    max-width: 760px;
+  }
+</style>`;
+
+/**
+ * Bumped when the preview pipeline itself changes.
+ *
+ * Previews are cached against a hash of what they show, which correctly ignores
+ * everything else — including this file. Adding web fonts to the render changed
+ * every picture and invalidated none of them, and the caches had to be deleted
+ * by hand to see it.
+ */
+export const RENDERER_VERSION = 'r3';
+
+async function load(
+  page: PlaywrightPage, doc: CanvasDocument, nodeId: NodeId, baseUrl?: string, inherit = false,
+) {
+  let html = emitStandalone(doc, nodeId, { mode: 'stylesheet' });
+  if (inherit) html = html.replace('</head>', `${INHERITED}\n</head>`);
+  if (baseUrl) html = html.replace('<head>', `<head>\n<base href="${baseUrl}" />`);
+  await page.setContent(html, { waitUntil: 'networkidle' });
+  // Web fonts arrive after first paint; without this, text rasterizes in the
+  // fallback face.
+  await page.evaluate(() => (document as unknown as { fonts: FontFaceSet }).fonts.ready);
 }
 
 export async function shutdownRenderer(): Promise<void> {

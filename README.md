@@ -330,6 +330,15 @@ content. Detach bakes everything in and drops the link.
 control from browser zoom, because browser zoom scales the canvas too — and the canvas has to stay at
 its true size while you design.
 
+**Component previews.** Each component in the panel is a tile with a picture of itself — two to a row
+in the docked rail, three in the wider drawer — and hovering one opens a large rendering beside the
+panel, portalled onto the body so the rail cannot clip it and placed clear of the whole rail rather
+than of the tile. Previews are cached against a hash of the component's own subtree plus the token
+set: editing one component re-renders one picture, and editing anything else in the document
+re-renders nothing. A definition has no ancestors, so the render supplies the font and a
+shrink-to-content width it would otherwise inherit from the page — without that a button comes out in
+Times and a card stretches to the window.
+
 **The library.** Every band — header, kit strip, sidebar, toolbar, cards — sits on one twelve-column
 grid, using CSS subgrid so a card's left edge is the same line as the kit above it rather than
 approximately the same line. Cards carry a **thumbnail**: the busiest artboard of the first page,
@@ -568,6 +577,9 @@ that export emits the import rather than the markup.
   surface the way an agent does, including the error paths
 - `packages/server/src/fidelity.test.ts` — the export-fidelity gate: render an artboard, export it,
   re-import the export into a fresh document, render that, and pixel-diff the two
+- `scripts/component-preview-check.mjs` — previews are real images, the large one is larger, editing a
+  component invalidates its own picture and no others, and the overlay lands clear of the rail and
+  inside the window
 - `scripts/dashboard-check.mjs` — thumbnails (really an image, cached, 304 on revalidate) and the
   column grid: it computes where the twelve lines are and asserts every band starts on one, at three
   widths

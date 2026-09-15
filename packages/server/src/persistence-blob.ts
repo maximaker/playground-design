@@ -164,23 +164,25 @@ export class BlobPersistence implements Persistence {
 
   async saveThumbnail(t: StoredThumbnail): Promise<void> {
     const { put } = await this.blob();
-    await put(`thumbnails/${t.docId}`, t.bytes, {
+    const path = `thumbnails/${t.docId}/${encodeURIComponent(t.key)}`;
+    await put(path, t.bytes, {
       access: 'private', token: this.token, contentType: t.mime,
       addRandomSuffix: false, allowOverwrite: true, cacheControlMaxAge: 0,
     });
-    // The revision lives beside the bytes: Blob has no metadata to hang it on.
-    await this.putJson(`thumbnails/${t.docId}.json`, { rev: t.rev, mime: t.mime, createdAt: t.createdAt });
+    // The stamp lives beside the bytes: Blob has no metadata to hang it on.
+    await this.putJson(`${path}.json`, { stamp: t.stamp, mime: t.mime, createdAt: t.createdAt });
   }
 
-  async loadThumbnail(docId: string): Promise<StoredThumbnail | null> {
-    const meta = await this.getJson<{ rev: number; mime: string; createdAt: number }>(`thumbnails/${docId}.json`);
+  async loadThumbnail(docId: string, key: string): Promise<StoredThumbnail | null> {
+    const path = `thumbnails/${docId}/${encodeURIComponent(key)}`;
+    const meta = await this.getJson<{ stamp: string; mime: string; createdAt: number }>(`${path}.json`);
     if (!meta) return null;
     const { get } = await this.blob();
     try {
-      const result = await get(`thumbnails/${docId}`, { access: 'private', token: this.token, useCache: false });
+      const result = await get(path, { access: 'private', token: this.token, useCache: false });
       if (!result) return null;
       const bytes = Buffer.from(await new Response(result.stream).arrayBuffer());
-      return { docId, rev: meta.rev, mime: meta.mime, bytes, createdAt: meta.createdAt };
+      return { docId, key, stamp: meta.stamp, mime: meta.mime, bytes, createdAt: meta.createdAt };
     } catch {
       return null;
     }

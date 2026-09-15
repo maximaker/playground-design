@@ -24,6 +24,14 @@ export class SqlitePersistence implements Persistence {
   constructor(path = DB_PATH) {
     mkdirSync(dirname(path), { recursive: true });
     this.db = new DatabaseSync(path);
+    // The thumbnail cache changed shape when component previews arrived. It is
+    // a cache: dropping it costs one re-render per picture, and migrating it
+    // costs code that would exist forever for no benefit.
+    try {
+      const cols = this.db.prepare("PRAGMA table_info('thumbnails')").all() as { name: string }[];
+      if (cols.length && !cols.some((c) => c.name === 'key')) this.db.exec('DROP TABLE thumbnails');
+    } catch { /* no such table yet */ }
+
     this.db.exec(`
       PRAGMA journal_mode = WAL;
       PRAGMA foreign_keys = ON;
@@ -104,8 +112,10 @@ export class SqlitePersistence implements Persistence {
       CREATE INDEX IF NOT EXISTS memberships_user ON memberships(user_id);
 
       CREATE TABLE IF NOT EXISTS thumbnails (
-        doc_id TEXT PRIMARY KEY REFERENCES documents(id) ON DELETE CASCADE,
-        rev INTEGER NOT NULL, mime TEXT NOT NULL, bytes BLOB NOT NULL, created_at INTEGER NOT NULL
+        doc_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+        key TEXT NOT NULL,
+        stamp TEXT NOT NULL, mime TEXT NOT NULL, bytes BLOB NOT NULL, created_at INTEGER NOT NULL,
+        PRIMARY KEY (doc_id, key)
       );
     `);
   }
@@ -301,17 +311,18 @@ export class SqlitePersistence implements Persistence {
 
   async saveThumbnail(t: StoredThumbnail): Promise<void> {
     this.db.prepare(`
-      INSERT INTO thumbnails (doc_id, rev, mime, bytes, created_at) VALUES (?, ?, ?, ?, ?)
-      ON CONFLICT(doc_id) DO UPDATE SET rev = excluded.rev, mime = excluded.mime,
+      INSERT INTO thumbnails (doc_id, key, stamp, mime, bytes, created_at) VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT(doc_id, key) DO UPDATE SET stamp = excluded.stamp, mime = excluded.mime,
         bytes = excluded.bytes, created_at = excluded.created_at
-    `).run(t.docId, t.rev, t.mime, t.bytes, t.createdAt);
+    `).run(t.docId, t.key, t.stamp, t.mime, t.bytes, t.createdAt);
   }
 
-  async loadThumbnail(docId: string): Promise<StoredThumbnail | null> {
-    const r = this.db.prepare('SELECT * FROM thumbnails WHERE doc_id = ?').get(docId) as
-      { doc_id: string; rev: number; mime: string; bytes: Uint8Array; created_at: number } | undefined;
+  async loadThumbnail(docId: string, key: string): Promise<StoredThumbnail | null> {
+    const r = this.db.prepare('SELECT * FROM thumbnails WHERE doc_id = ? AND key = ?').get(docId, key) as
+      { doc_id: string; key: string; stamp: string; mime: string; bytes: Uint8Array; created_at: number } | undefined;
     return r ? {
-      docId: r.doc_id, rev: r.rev, mime: r.mime, bytes: Buffer.from(r.bytes), createdAt: r.created_at,
+      docId: r.doc_id, key: r.key, stamp: r.stamp, mime: r.mime,
+      bytes: Buffer.from(r.bytes), createdAt: r.created_at,
     } : null;
   }
 

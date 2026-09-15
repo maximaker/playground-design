@@ -107,7 +107,17 @@ export interface StoredMembership {
  */
 export interface StoredThumbnail {
   docId: string;
-  rev: number;
+  /**
+   * What inside the document this is a picture of: `doc` for the library card,
+   * `cmp:<id>:<size>` for a component. One cache, several kinds of picture.
+   */
+  key: string;
+  /**
+   * The revision this was taken at for a document, or a hash of the subtree for
+   * a component. A component's picture must change when the component changes
+   * and not when something else in the document does.
+   */
+  stamp: string;
   mime: string;
   bytes: Buffer;
   createdAt: number;
@@ -164,7 +174,7 @@ export interface Persistence {
   deleteMembership(docId: string, userId: string): Promise<void>;
 
   saveThumbnail(thumb: StoredThumbnail): Promise<void>;
-  loadThumbnail(docId: string): Promise<StoredThumbnail | null>;
+  loadThumbnail(docId: string, key: string): Promise<StoredThumbnail | null>;
 
   saveSnapshot(snapshot: StoredSnapshot): Promise<void>;
   loadSnapshots(docId: string): Promise<Omit<StoredSnapshot, 'data'>[]>;
