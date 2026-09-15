@@ -1,0 +1,395 @@
+<style>
+  /*
+   * The deck is the landing page's design system at presentation scale: same
+   * tokens, same ink cards, same mono eyebrows. Type is roughly 1.6× the page's
+   * because a slide is read from across a room rather than at arm's length.
+   */
+  .slide { width: 100%; height: 100%; box-sizing: border-box;
+           font-family: var(--font-sans); color: var(--color-fg); background: var(--color-bg);
+           display: flex; flex-direction: column; justify-content: space-between;
+           padding: 88px 112px; gap: 56px; }
+  .slide-ink { background: var(--color-surface-ink); color: var(--color-on-ink); }
+
+  .eyebrow { font-family: var(--font-mono); font-size: 18px; letter-spacing: 0.14em;
+             text-transform: uppercase; color: var(--color-fg-muted); }
+  .eyebrow-ink { color: var(--color-on-ink-muted); }
+  .quiet { color: var(--color-fg-faint); }
+
+  .head { display: flex; flex-direction: row; align-items: center; justify-content: space-between; gap: 40px; }
+  .brand { display: flex; flex-direction: row; align-items: center; gap: 16px;
+           font-size: 22px; font-weight: 600; letter-spacing: -0.01em; color: var(--color-fg); }
+  .brand-ink { color: var(--color-on-ink); }
+  .brand-mark { display: flex; flex-direction: row; align-items: center; justify-content: center;
+                width: 30px; height: 30px; border-radius: 10px; background: var(--color-surface-ink); }
+  .brand-mark-ink { background: var(--color-surface-ink-2); }
+  .brand-dot { width: 10px; height: 10px; border-radius: 999px; background: var(--color-attention); }
+
+  .body { display: flex; flex-direction: column; gap: 40px; flex: 1 1 auto; justify-content: center; }
+  .body-top { justify-content: flex-start; }
+
+  .title { margin: 0; font-size: 104px; line-height: 1.02; letter-spacing: -0.04em;
+           font-weight: 600; max-width: 1400px; }
+  .h2 { margin: 0; font-size: 64px; line-height: 1.08; letter-spacing: -0.03em;
+        font-weight: 600; max-width: 1200px; }
+  .lead { margin: 0; font-size: 26px; line-height: 1.55; color: var(--color-fg-muted); max-width: 820px; }
+  .lead-ink { color: var(--color-on-ink-muted); }
+  .on-ink { color: var(--color-on-ink); }
+
+  .foot { display: flex; flex-direction: row; align-items: center; justify-content: space-between; gap: 40px;
+          padding-top: 28px; border-top: 1px solid var(--color-border-strong); }
+  .foot-ink { border-top-color: var(--color-border-ink); }
+  .foot-note { font-size: 18px; color: var(--color-fg-muted); }
+  .foot-note-ink { color: var(--color-on-ink-muted); }
+  /* fg-faint is 3.1:1 on the light ground — fine for a 12px caption on the
+     landing page, not for an 18px slide number read across a room. */
+  .page-num { font-family: var(--font-mono); font-size: 18px; color: var(--color-fg-muted); }
+  .page-num-ink { color: var(--color-on-ink-muted); }
+
+  .row { display: flex; flex-direction: row; gap: 24px; }
+  .row-wrap { flex-wrap: wrap; }
+  .col { display: flex; flex-direction: column; gap: 24px; }
+
+  .tag { display: inline-flex; flex-direction: row; align-items: center; width: fit-content;
+         padding: 10px 22px; border-radius: var(--radius-pill); background: var(--color-surface-sunken);
+         border: 1px solid var(--color-border); color: var(--color-fg-muted); font-size: 18px; line-height: 1.2; }
+  .tag-good { background: var(--color-success-bg); border-color: transparent; color: var(--color-success); }
+  .led { width: 12px; height: 12px; border-radius: 999px; background: var(--color-success); margin-right: 12px; }
+
+  .card { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 24px; padding: 48px;
+          background: var(--color-surface); border: 1px solid var(--color-border);
+          border-radius: var(--radius-lg); }
+  .card-ink { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 24px; padding: 48px;
+              background: var(--color-surface-ink); border-radius: var(--radius-lg); }
+  .card-split { justify-content: space-between; }
+  .num { font-family: var(--font-mono); font-size: 18px; color: var(--color-fg-muted); }
+  .num-ink { color: var(--color-on-ink-muted); }
+  .card-title { margin: 0; font-size: 30px; line-height: 1.3; letter-spacing: -0.015em; font-weight: 600; }
+  .card-body { margin: 0; font-size: 20px; line-height: 1.6; color: var(--color-fg-muted); }
+  .card-body-ink { color: var(--color-on-ink-muted); }
+
+  .stat { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 12px; padding: 48px;
+          background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-lg); }
+  .stat-n { font-size: 82px; line-height: 1.05; letter-spacing: -0.04em; font-weight: 600; color: var(--color-fg); }
+  /* .on-ink is declared earlier, so on a class that sets its own colour the
+     later rule wins — the "after" figure came out ink-on-ink. */
+  .stat-n-ink { color: var(--color-on-ink); }
+  .stat-label { font-size: 19px; line-height: 1.5; color: var(--color-fg-muted); }
+
+  .step { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 20px; padding: 40px;
+          background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-lg); }
+  .step-n { display: flex; flex-direction: row; align-items: center; justify-content: center;
+            width: 44px; height: 44px; border-radius: 999px; background: var(--color-surface-sunken);
+            border: 1px solid var(--color-border); font-family: var(--font-mono); font-size: 18px;
+            color: var(--color-fg-muted); }
+  .step-title { margin: 0; font-size: 24px; line-height: 1.3; font-weight: 600; letter-spacing: -0.01em; }
+  .step-body { margin: 0; font-size: 18px; line-height: 1.6; color: var(--color-fg-muted); }
+
+  .list { display: flex; flex-direction: column; gap: 20px; }
+  .list-item { display: flex; flex-direction: row; align-items: flex-start; gap: 20px;
+               font-size: 24px; line-height: 1.5; color: var(--color-fg); }
+  .bullet { width: 10px; height: 10px; border-radius: 999px; background: var(--color-attention);
+            margin-top: 14px; flex: 0 0 auto; }
+  .strike { color: var(--color-fg-faint); text-decoration: line-through; }
+
+  .quote-text { margin: 0; font-size: 52px; line-height: 1.28; letter-spacing: -0.025em;
+                font-weight: 500; max-width: 1400px; color: var(--color-on-ink); }
+  .avatar { display: flex; flex-direction: row; align-items: center; justify-content: center;
+            width: 64px; height: 64px; border-radius: 999px; background: var(--color-surface-ink-2);
+            font-size: 20px; font-weight: 600; color: var(--color-on-ink); }
+  .by { display: flex; flex-direction: row; align-items: center; gap: 22px; }
+  .by-name { font-size: 20px; color: var(--color-on-ink); }
+  .by-role { font-size: 18px; color: var(--color-on-ink-muted); }
+
+  .price { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 20px; padding: 48px;
+           background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-lg); }
+  .price-hi { background: var(--color-surface-ink); border-color: transparent; }
+  .price-n { font-size: 52px; line-height: 1.1; letter-spacing: -0.03em; font-weight: 600; }
+  .divider { height: 1px; background: var(--color-border); }
+  .divider-ink { background: var(--color-border-ink); }
+
+  .btn { display: inline-flex; flex-direction: row; align-items: center; justify-content: center;
+         gap: 12px; padding: 20px 36px; border-radius: var(--radius-pill); font-size: 20px;
+         font-weight: 500; line-height: 1.2; border: 1px solid transparent; width: fit-content;
+         text-decoration: none; }
+  .btn-solid { background: var(--color-surface-ink); color: var(--color-on-ink); }
+  .btn-on-ink { background: var(--color-on-ink); color: var(--color-fg); }
+  .btn-ghost-ink { background: var(--color-surface-ink-2); color: var(--color-on-ink);
+                   border-color: var(--color-border-ink); }
+</style>
+<!--slide: Cover-->
+<div class="slide slide-ink">
+  <div class="head">
+    <div class="brand brand-ink"><span class="brand-mark brand-mark-ink"><span class="brand-dot"></span></span>Northsignal</div>
+    <span class="eyebrow eyebrow-ink">Capabilities deck · 2026</span>
+  </div>
+  <div class="body">
+    <span class="eyebrow eyebrow-ink">AI web consulting</span>
+    <h1 class="title on-ink">Most AI projects stall at the demo.</h1>
+    <p class="lead lead-ink">We audit what you have, build the part that actually works, and stay on until it survives real traffic. Fixed scope. Six weeks.</p>
+  </div>
+  <div class="foot foot-ink">
+    <span class="foot-note foot-note-ink">northsignal.co · hello@northsignal.co</span>
+    <span class="page-num page-num-ink">01 / 10</span>
+  </div>
+</div>
+
+<!--slide: The problem-->
+<div class="slide">
+  <div class="head">
+    <span class="eyebrow">The problem</span>
+    <span class="tag"><span class="led"></span>What we keep walking into</span>
+  </div>
+  <div class="body">
+    <h2 class="h2"><span class="quiet">Eight months of pilots,</span> nothing in front of a customer.</h2>
+    <div class="list">
+      <div class="list-item"><span class="bullet"></span>A prototype that impressed the board and was never wired to real data.</div>
+      <div class="list-item"><span class="bullet"></span>Model spend that nobody can attribute to a single shipped feature.</div>
+      <div class="list-item"><span class="bullet"></span>Latency and failure modes discovered by customers rather than by tests.</div>
+      <div class="list-item"><span class="bullet"></span>An agency that left at launch and took the context with them.</div>
+    </div>
+  </div>
+  <div class="foot">
+    <span class="foot-note">Northsignal · AI web consulting</span>
+    <span class="page-num">02 / 10</span>
+  </div>
+</div>
+
+<!--slide: What changes-->
+<div class="slide">
+  <div class="head">
+    <span class="eyebrow">What changes</span>
+    <span class="tag tag-good">Production, not pilots</span>
+  </div>
+  <div class="body">
+    <h2 class="h2">One team, from audit to the traffic that follows.</h2>
+    <div class="row">
+      <div class="card card-split">
+        <div class="col">
+          <span class="num">01</span>
+          <h3 class="card-title">We start with what exists</h3>
+          <p class="card-body">Your stack, your data, your constraints. The audit is week one, not a discovery phase that bills for a month.</p>
+        </div>
+        <span class="tag">6-week engagements</span>
+      </div>
+      <div class="card-ink card-split">
+        <div class="col">
+          <span class="num num-ink">02</span>
+          <h3 class="card-title on-ink">We ship the narrow thing</h3>
+          <p class="card-body card-body-ink">One workflow, end to end, in production and measured — rather than four half-built capabilities behind a feature flag.</p>
+        </div>
+        <span class="tag tag-good">Live in week six</span>
+      </div>
+    </div>
+  </div>
+  <div class="foot">
+    <span class="foot-note">Northsignal · AI web consulting</span>
+    <span class="page-num">03 / 10</span>
+  </div>
+</div>
+
+<!--slide: Services-->
+<div class="slide">
+  <div class="head">
+    <span class="eyebrow">Services</span>
+    <span class="foot-note">Four ways in</span>
+  </div>
+  <div class="body">
+    <h2 class="h2">What we are hired to do.</h2>
+    <div class="row row-wrap">
+      <div class="card">
+        <span class="num">01</span>
+        <h3 class="card-title">AI readiness audit</h3>
+        <p class="card-body">Two weeks. What your data can support, what it cannot, and the three things worth building first.</p>
+      </div>
+      <div class="card">
+        <span class="num">02</span>
+        <h3 class="card-title">Build the first workflow</h3>
+        <p class="card-body">Retrieval, evaluation, guardrails and the interface around them — shipped behind your own auth.</p>
+      </div>
+      <div class="card">
+        <span class="num">03</span>
+        <h3 class="card-title">Interface and design system</h3>
+        <p class="card-body">The part users touch, built as real components your team can keep extending.</p>
+      </div>
+      <div class="card">
+        <span class="num">04</span>
+        <h3 class="card-title">Stay-on support</h3>
+        <p class="card-body">Ninety days after launch: on call for the failures that only real traffic produces.</p>
+      </div>
+    </div>
+  </div>
+  <div class="foot">
+    <span class="foot-note">Northsignal · AI web consulting</span>
+    <span class="page-num">04 / 10</span>
+  </div>
+</div>
+
+<!--slide: Process-->
+<div class="slide">
+  <div class="head">
+    <span class="eyebrow">Process</span>
+    <span class="tag">Six weeks, fixed</span>
+  </div>
+  <div class="body">
+    <h2 class="h2">No pilots that go nowhere.</h2>
+    <div class="row">
+      <div class="step">
+        <span class="step-n">1</span>
+        <h3 class="step-title">Audit</h3>
+        <p class="step-body">Week 1. Stack, data, and the honest list of what will not work.</p>
+      </div>
+      <div class="step">
+        <span class="step-n">2</span>
+        <h3 class="step-title">Narrow</h3>
+        <p class="step-body">Week 2. One workflow chosen, with the measure it has to beat.</p>
+      </div>
+      <div class="step">
+        <span class="step-n">3</span>
+        <h3 class="step-title">Build</h3>
+        <p class="step-body">Weeks 3–5. Shipped to staging on Friday of each week.</p>
+      </div>
+      <div class="step">
+        <span class="step-n">4</span>
+        <h3 class="step-title">Hand over</h3>
+        <p class="step-body">Week 6. Production, runbook, and your team driving it.</p>
+      </div>
+    </div>
+  </div>
+  <div class="foot">
+    <span class="foot-note">Northsignal · AI web consulting</span>
+    <span class="page-num">05 / 10</span>
+  </div>
+</div>
+
+<!--slide: Proof-->
+<div class="slide">
+  <div class="head">
+    <span class="eyebrow">Proof</span>
+    <span class="tag tag-good">Across 24 engagements</span>
+  </div>
+  <div class="body">
+    <h2 class="h2">The numbers we are judged on.</h2>
+    <div class="row">
+      <div class="stat"><span class="stat-n">6 wks</span><span class="stat-label">From kickoff to production, fixed scope and fixed price.</span></div>
+      <div class="stat"><span class="stat-n">92%</span><span class="stat-label">Of engagements still running the workflow a year later.</span></div>
+      <div class="stat"><span class="stat-n">3.4×</span><span class="stat-label">Median throughput on the process we were hired to fix.</span></div>
+      <div class="stat"><span class="stat-n">24</span><span class="stat-label">Teams shipped since 2023, from Series A to FTSE 250.</span></div>
+    </div>
+  </div>
+  <div class="foot">
+    <span class="foot-note">Northsignal · AI web consulting</span>
+    <span class="page-num">06 / 10</span>
+  </div>
+</div>
+
+<!--slide: Case study-->
+<div class="slide">
+  <div class="head">
+    <span class="eyebrow">Case study · Meridian Freight</span>
+    <span class="tag">Logistics · 400 staff</span>
+  </div>
+  <div class="body">
+    <h2 class="h2">Claims triage, from nine minutes to forty seconds.</h2>
+    <div class="row">
+      <div class="card">
+        <span class="num">Before</span>
+        <p class="card-body">Every claim read by hand, routed by a spreadsheet of rules nobody owned. A backlog that grew every Monday.</p>
+        <div class="divider"></div>
+        <span class="stat-n">9m 12s</span>
+        <span class="stat-label">Median time to route a claim</span>
+      </div>
+      <div class="card-ink card-split">
+        <div class="col">
+          <span class="num num-ink">After</span>
+          <p class="card-body card-body-ink">Retrieval over six years of settled claims, a confidence threshold, and a human queue for everything under it.</p>
+        </div>
+        <div class="col">
+          <span class="stat-n stat-n-ink">41s</span>
+          <span class="card-body card-body-ink">Median time to route · 11% escalated to a person</span>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="foot">
+    <span class="foot-note">Northsignal · AI web consulting</span>
+    <span class="page-num">07 / 10</span>
+  </div>
+</div>
+
+<!--slide: Testimonial-->
+<div class="slide slide-ink">
+  <div class="head">
+    <span class="eyebrow eyebrow-ink">In their words</span>
+    <div class="brand brand-ink"><span class="brand-mark brand-mark-ink"><span class="brand-dot"></span></span>Northsignal</div>
+  </div>
+  <div class="body">
+    <p class="quote-text">They killed two of our three ideas in the first week. The one they kept is the only AI thing we have that people actually use.</p>
+    <div class="by">
+      <span class="avatar">DK</span>
+      <div class="col">
+        <span class="by-name">Dana Kwon</span>
+        <span class="by-role">VP Engineering, Meridian Freight</span>
+      </div>
+    </div>
+  </div>
+  <div class="foot foot-ink">
+    <span class="foot-note foot-note-ink">Northsignal · AI web consulting</span>
+    <span class="page-num page-num-ink">08 / 10</span>
+  </div>
+</div>
+
+<!--slide: Engagements-->
+<div class="slide">
+  <div class="head">
+    <span class="eyebrow">Engagements</span>
+    <span class="foot-note">Fixed price. No hourly drift.</span>
+  </div>
+  <div class="body">
+    <h2 class="h2">Three ways to start.</h2>
+    <div class="row">
+      <div class="price">
+        <span class="num">Audit</span>
+        <span class="price-n">£12k</span>
+        <div class="divider"></div>
+        <p class="card-body">Two weeks. A written verdict on what to build, and what to stop paying for.</p>
+      </div>
+      <div class="price price-hi">
+        <span class="num num-ink">Build</span>
+        <span class="price-n on-ink">£68k</span>
+        <div class="divider divider-ink"></div>
+        <p class="card-body card-body-ink">Six weeks, one workflow in production, your team trained on it. Audit credited.</p>
+        <span class="tag tag-good">Most engagements</span>
+      </div>
+      <div class="price">
+        <span class="num">Stay on</span>
+        <span class="price-n">£9k / mo</span>
+        <div class="divider"></div>
+        <p class="card-body">Ninety days minimum. On call, with an agreed response time.</p>
+      </div>
+    </div>
+  </div>
+  <div class="foot">
+    <span class="foot-note">Northsignal · AI web consulting</span>
+    <span class="page-num">09 / 10</span>
+  </div>
+</div>
+
+<!--slide: Close-->
+<div class="slide slide-ink">
+  <div class="head">
+    <div class="brand brand-ink"><span class="brand-mark brand-mark-ink"><span class="brand-dot"></span></span>Northsignal</div>
+    <span class="eyebrow eyebrow-ink">Next step</span>
+  </div>
+  <div class="body">
+    <h2 class="h2 on-ink">Book the review. Ninety minutes, no deck.</h2>
+    <p class="lead lead-ink">Bring the thing that has stalled. We will tell you whether it is worth finishing before you pay us anything.</p>
+    <div class="row">
+      <a class="btn btn-on-ink" href="#book">Book a review</a>
+      <a class="btn btn-ghost-ink" href="#work">See the work</a>
+    </div>
+  </div>
+  <div class="foot foot-ink">
+    <span class="foot-note foot-note-ink">hello@northsignal.co · +44 20 7946 0112</span>
+    <span class="page-num page-num-ink">10 / 10</span>
+  </div>
+</div>
