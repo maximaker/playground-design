@@ -180,6 +180,33 @@ await fresh.waitForURL(/\/d\/doc_/, { timeout: 20000 }).catch(() => {});
 await fresh.waitForTimeout(1500);
 check('accepting opens the document', fresh.url().includes(`/d/${doc.id}`), fresh.url());
 
+/*
+ * What a document that is not yours looks like.
+ *
+ * It looked like nothing at all: the server said "You do not have access to
+ * this document", the client only stopped retrying on "not found", and the
+ * editor sat on "Opening document…" for ever. Someone sending a link before
+ * adding you is the most likely way to meet this screen, and it read as the
+ * application being broken.
+ */
+const outsider = person();
+await signUp(outsider, `outsider-${stamp}@example.com`);
+const outsiderPage = await signedOutPage(browser, { viewport: { width: 1100, height: 760 } });
+await outsiderPage.context().addCookies([{
+  name: outsider.cookie.split('=')[0],
+  value: outsider.cookie.split('=').slice(1).join('='),
+  url: BASE,
+}]);
+await outsiderPage.goto(`${BASE}/d/${doc.id}`, { waitUntil: 'networkidle' });
+await outsiderPage.waitForTimeout(3000);
+const refusal = await outsiderPage.locator('.boot-error').innerText().catch(() => '');
+check('a document that is not yours says so instead of spinning',
+  /access/i.test(refusal), refusal || (await outsiderPage.locator('.boot-inner').innerText().catch(() => 'nothing')));
+check('and says what to do about it',
+  (await outsiderPage.locator('.boot-hint').count()) === 1);
+await outsiderPage.screenshot({ path: '/tmp/no-access.png' });
+await outsiderPage.close();
+
 await page.screenshot({ path: '/tmp/people-panel.png' });
 check('no runtime errors', errors.length === 0, errors[0] ?? '');
 

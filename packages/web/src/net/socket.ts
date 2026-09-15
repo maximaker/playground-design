@@ -115,10 +115,16 @@ export function connectDocument(source: Source): Connection {
             body: JSON.stringify({ ops: envelopes }),
           });
         });
-      } else if (res.status === 404) {
+      } else if (res.status === 404 || res.status === 403 || res.status === 401) {
+        // The same rule on the fallback transport: the server answers a
+        // document that is not yours with a 404 carrying the reason, and
+        // retrying it every two seconds only delays telling the person.
+        const body = await res.json().catch(() => ({})) as { error?: string };
         store.getState().setFatalError(readOnly
           ? 'This link has been revoked or never existed.'
-          : `document ${(source as { id: string }).id} not found`);
+          : body.error ?? (res.status === 401
+            ? 'Sign in to open this document.'
+            : `document ${(source as { id: string }).id} not found`));
         closed = true;
         return;
       }
@@ -223,14 +229,26 @@ export function connectDocument(source: Source): Connection {
       }
       case 'error': {
         const message = String(msg.message ?? 'Server error');
-        store.getState().toast(message, 'error');
-        // A missing document will never appear by retrying; stop the loop and
-        // let the UI say so rather than spinning on "Reconnecting…".
-        if (/not found/i.test(message)) {
-          store.getState().setFatalError(message);
+        const code = String(msg.code ?? '');
+        /*
+         * A refusal will not become an acceptance by asking again.
+         *
+         * Only "not found" used to stop the loop, so a document that exists but
+         * is not yours left the editor on "Opening document…" for ever: the
+         * server had already said why, and the client went on retrying. A
+         * permission problem is the most likely reason a link does not open —
+         * someone sends you one before adding you — and it is exactly the case
+         * that read as the application being broken.
+         */
+        if (/not found/i.test(message) || code === 'forbidden' || code === 'unauthenticated') {
+          store.getState().setFatalError(code === 'unauthenticated'
+            ? 'Sign in to open this document.'
+            : message);
           closed = true;
           store.getState().setConnection('closed');
           ws?.close();
+        } else {
+          store.getState().toast(message, 'error');
         }
         break;
       }

@@ -326,7 +326,19 @@ function Editor({ source, onHome, appearance, onAppearance, session }: {
           {fatalError ? (
             <>
               <p className="boot-error">{fatalError}</p>
-              {onHome && <button className="button primary" onClick={onHome}>Back to all documents</button>}
+              {/^sign in/i.test(fatalError) ? (
+                <a className="button primary" href="/">Sign in</a>
+              ) : (
+                <>
+                  {/access/i.test(fatalError) && (
+                    <p className="boot-hint dim">
+                      It exists, but you are not on it. Ask whoever sent the link to add you —
+                      they can do that from People in the right rail.
+                    </p>
+                  )}
+                  {onHome && <button className="button primary" onClick={onHome}>Back to all documents</button>}
+                </>
+              )}
             </>
           ) : (
             <p>Opening document…</p>
