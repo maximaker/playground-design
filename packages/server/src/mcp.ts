@@ -22,9 +22,9 @@ import {
   type CodeComponent, type CodeProp, codeComponentsOf, codeComponentOf, resolvedCodeProps,
   codeElementJsx, explicitCodeProps, MOUNT_CONTRACT,
   type Comment, commentsOf, newId as newIdOf,
-  NOTE_KINDS, NOTE_KIND_HINTS, specFor,
+  NOTE_KINDS, NOTE_KIND_HINTS, specFor, changesWithin, diffDocuments,
 } from '@playground/shared';
-import { applyOps, getDocument, StoreError, createSnapshot } from './store.ts';
+import { applyOps, getDocument, getSnapshot, listSnapshots, StoreError, createSnapshot } from './store.ts';
 import { persistence } from './persistence.ts';
 import { pageArtboard, slugify } from './publish.ts';
 import { callTab, notifyTabs, selectionOf, hasLiveTab, NoTabError } from './realtime.ts';
@@ -2468,6 +2468,66 @@ function registerCommentTools(server: McpServer, ctx: McpContext): void {
       ...(measure && !boxes
         ? { note: 'No renderer on this server, so sizes are the authored values only.' }
         : {}),
+    });
+  }));
+
+  server.registerTool('mark_checkpoint', {
+    title: 'Mark a checkpoint to compare against',
+    description:
+      'Saves a named version of the document. The point of it is changes_since: whoever builds from ' +
+      'the design now can be told exactly what moved afterwards.',
+    inputSchema: { label: z.string().min(1).max(80) },
+    annotations: { destructiveHint: false },
+  }, async ({ label }) => guard(async () => {
+    const doc = requireDoc(ctx);
+    const snap = await createSnapshot(doc.id, label);
+    return json({
+      checkpoint: snap.id, label, rev: snap.rev,
+      next: 'changes_since with this id reports everything that moved after it.',
+    });
+  }));
+
+  server.registerTool('changes_since', {
+    title: 'What changed since a checkpoint',
+    description:
+      'Every node that was added, removed or altered since a checkpoint, with the old and new value ' +
+      'of each property — plus token, component and page changes. This is the handover question: ' +
+      'not what the design is, but what moved under the person building it.',
+    inputSchema: {
+      checkpoint: z.string().optional()
+        .describe('A snapshot id. Defaults to the most recent checkpoint.'),
+      within: z.string().optional().describe('Only changes inside this node.'),
+      limit: z.number().int().min(1).max(200).optional().default(40),
+    },
+    annotations: { readOnlyHint: true },
+  }, async ({ checkpoint, within, limit }) => guard(async () => {
+    const doc = requireDoc(ctx);
+    const snapshots = await listSnapshots(doc.id);
+    if (!snapshots.length) {
+      return fail('This document has no checkpoints yet. mark_checkpoint makes one.');
+    }
+    const chosen = checkpoint
+      ? snapshots.find((s) => s.id === checkpoint)
+      // Most recent first from the store, so the newest checkpoint is [0].
+      : snapshots[0];
+    if (!chosen) {
+      return fail(`No checkpoint "${checkpoint}". Available: ${snapshots.slice(0, 5).map((s) => `${s.id} (${s.label ?? 'unlabelled'})`).join(', ')}`);
+    }
+    const snapshot = await getSnapshot(doc.id, chosen.id);
+    if (!snapshot) return fail(`Checkpoint ${chosen.id} could not be read.`);
+
+    const diff = diffDocuments(snapshot.data, doc);
+    const nodes = within ? changesWithin(diff, doc, within) : diff.nodes;
+    return json({
+      since: { id: chosen.id, label: chosen.label, at: new Date(chosen.ts).toISOString() },
+      same: diff.same && nodes.length === 0,
+      counts: diff.counts,
+      byArtboard: diff.byArtboard,
+      tokens: diff.tokens,
+      components: diff.components,
+      pages: diff.pages,
+      nodes: nodes.slice(0, limit),
+      ...(nodes.length > limit ? { more: nodes.length - limit } : {}),
     });
   }));
 

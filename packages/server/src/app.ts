@@ -18,8 +18,8 @@ import {
   DEFAULT_ARTBOARD_STYLES, type CanvasDocument, getNode,
 } from '@playground/shared';
 import {
-  applyOps, createDocument, deleteDocument, ensureLoaded, getDocument, history, listDocuments,
-  createSnapshot, listSnapshots, opsSince, restoreSnapshot, touchDocument, StoreError,
+  applyOps, createDocument, deleteDocument, ensureLoaded, getDocument, getSnapshot, history,
+  listDocuments, createSnapshot, listSnapshots, opsSince, restoreSnapshot, touchDocument, StoreError,
 } from './store.ts';
 import { peersOf, hasLiveTab } from './realtime.ts';
 import { createConnection, listConnections, resolveConnection, revokeConnection } from './connections.ts';
@@ -33,7 +33,7 @@ import {
 } from './projects.ts';
 import {
   type BundleAsset, type DocumentBundle,
-  BUNDLE_FORMAT, newId, referencedAssets, remapAssets, stripLocalState, validateBundle,
+  BUNDLE_FORMAT, diffDocuments, newId, referencedAssets, remapAssets, stripLocalState, validateBundle,
 } from '@playground/shared';
 import { importUrl, ImportError } from './import.ts';
 import { freeSlug, pageArtboard, publishedHtml, slugify } from './publish.ts';
@@ -532,6 +532,30 @@ api.post('/documents/:id/snapshots/:snapshotId/restore', async (c) => {
 // ---------------------------------------------------------------------------
 // Export
 // ---------------------------------------------------------------------------
+
+/**
+ * What has changed since a checkpoint.
+ *
+ * `since` is a snapshot id. The comparison is document-to-document rather than
+ * a replay of the op log: a value nudged four times and put back is four log
+ * entries and no change worth anyone's attention, and a developer wants the
+ * difference from what they built against, not the history of how it got here.
+ */
+api.get('/documents/:id/changes', async (c) => {
+  const doc = await requireDocument(c.req.param('id'));
+  const since = c.req.query('since');
+  if (!since) return c.json({ error: 'Pass ?since=<snapshotId>. /snapshots lists them.' }, 400);
+
+  const snapshot = await getSnapshot(doc.id, since);
+  if (!snapshot) return c.json({ error: `No snapshot ${since} on this document.` }, 404);
+
+  const diff = diffDocuments(snapshot.data, doc);
+  return c.json({
+    since: { id: snapshot.id, label: snapshot.label, rev: snapshot.rev, ts: snapshot.ts },
+    now: { rev: doc.rev },
+    ...diff,
+  });
+});
 
 api.get('/documents/:id/export/:nodeId', async (c) => {
   const doc = await requireDocument(c.req.param('id'));

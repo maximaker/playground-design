@@ -820,6 +820,12 @@ code { font-family: var(--mono); font-size: 0.92em; }
 .history-row > div, .history-entry > div {
   flex: 1; display: flex; flex-direction: column; gap: 0.05rem; min-width: 0;
 }
+/* A long version name truncates rather than wrapping the row's buttons onto
+   three lines, which is what "Handover v1" plus Compare plus Restore did. */
+.history-row > div > strong {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.88rem;
+}
+.history-row .button { flex: 0 0 auto; padding: 0.15rem var(--s2); font-size: 0.78rem; }
 .history-entry .dim, .history-row .dim { font-size: 0.78rem; }
 .history-origin { flex: none; color: var(--fg-faint); display: grid; place-items: center; }
 .history-entry.origin-agent .history-origin { color: var(--accent); }
@@ -2351,3 +2357,36 @@ code { font-family: var(--mono); font-size: 0.92em; }
   max-height: 22rem; overflow: auto; white-space: pre-wrap; word-break: break-word;
 }
 .spec-assets { list-style: none; margin: 0; padding: 0; font-size: 0.78rem; }
+
+/* --- Changed since ----------------------------------------------------------- */
+.changes-head { display: flex; align-items: center; justify-content: space-between; gap: var(--s3); }
+.changes-counts, .changes-boards { margin: 0; font-size: 0.78rem; line-height: 1.5; }
+.change-row {
+  display: flex; gap: var(--s3); align-items: flex-start; width: 100%; text-align: left;
+  padding: var(--s2) var(--s2); border: 0; background: none; color: var(--fg);
+  border-radius: var(--radius-sm); font: inherit;
+}
+.change-row.is-clickable { cursor: pointer; }
+.change-row.is-clickable:hover { background: var(--bg-hover); }
+.change-row > div { display: flex; flex-direction: column; gap: 0.1rem; min-width: 0; }
+.change-row strong { font-size: 0.85rem; }
+.change-row .dim { font-size: 0.75rem; }
+.change-kind {
+  flex: 0 0 auto; margin-top: 0.15rem;
+  font-size: 0.62rem; letter-spacing: 0.06em; text-transform: uppercase;
+  padding: 0.1rem 0.3rem; border-radius: 0.25rem;
+  background: var(--bg-input); border: 1px solid var(--border); color: var(--fg-muted);
+}
+.change-changed { color: #b4690e; border-color: color-mix(in srgb, #b4690e 40%, transparent); }
+.change-added { color: #0d8a72; border-color: color-mix(in srgb, #0d8a72 40%, transparent); }
+.change-removed { color: #b3261e; border-color: color-mix(in srgb, #b3261e 40%, transparent); }
+.change-token { color: #6d5cf5; border-color: color-mix(in srgb, #6d5cf5 40%, transparent); }
+.change-field {
+  font-size: 0.72rem; color: var(--fg-muted);
+  display: flex; gap: 0.3rem; align-items: baseline; flex-wrap: wrap;
+}
+.change-field code {
+  font-family: var(--font-mono, ui-monospace, monospace); font-size: 0.7rem;
+  background: var(--bg-input); padding: 0 0.2rem; border-radius: 0.2rem;
+  max-width: 9rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}

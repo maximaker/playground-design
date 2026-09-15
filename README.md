@@ -162,6 +162,7 @@ need a real layout engine reach into a connected tab, and they say so plainly wh
 | `get_guide` | Workflow briefs: `layout`, `styling`, `responsive`, `components`, `export`, `figma-import` |
 | `list_templates` | Built-in starter design systems |
 | `list_pages` | Pages, their artboard counts, and which one this session is on |
+| `changes_since` | Everything that moved since a checkpoint, with old and new values |
 | `get_spec` | Build spec for a layer: measured size, tokens by name, variants in words, notes, HTML and JSX |
 | `find_repeated_shapes` | Subtrees built more than once — "should be a component" before anyone named it |
 
@@ -173,6 +174,7 @@ need a real layout engine reach into a connected tab, and they say so plainly wh
 | `create_artboard` | New screen, placed clear of existing work, on the current page |
 | `create_page` / `set_current_page` / `rename_page` / `delete_page` | Pages. Each connection has its own current page |
 | `publish_page` / `unpublish_page` / `get_publication` | Put an artboard on the public web, or take it down |
+| `mark_checkpoint` | Save a named version to compare against later |
 | `annotate` | A typed note on a layer — behaviour, data, constraint, accessibility, to-do |
 | `componentise` | Registers a shape and swaps every identical copy for an instance, text and links carried as overrides. Refuses if any artboard would render differently |
 | `update_styles` | Batch CSS, with `:hover` / `@media` variants via `selector` |
@@ -370,6 +372,18 @@ The only part worth *storing* is what CSS genuinely cannot say, so notes are typ
 constraint, accessibility, to-do — attached to a layer, gathered into the spec of anything containing
 it, and written or read by agents through `annotate` and `get_spec`. A developer opens all of it
 through an ordinary view-only link, with no account and no way to change anything.
+
+**What changed since you started building.** A saved version doubles as a handover checkpoint, and
+*Compare* answers the question a developer actually has: not what the design is, but what moved under
+them. Every node added, removed or altered, with the old and new value of each property, grouped by
+artboard, plus token, component and page changes — `changes_since` over MCP, and clickable in the
+History panel.
+
+Deliberately a document-to-document comparison rather than a replay of the op log: a value nudged four
+times and put back is four log entries and no change worth anyone's attention. Three things it stays
+quiet about for the same reason — a value returned to where it was, an artboard dragged across the
+canvas, and the parent of a layer that was deleted, whose child count "changed" only because the
+deletion is already reported.
 
 **Publishing.** Any artboard can go on the public web at `/p/<slug>`: no editor, no account, no share
 token. Because the documents here are already HTML and CSS, this is not an export — the page is
@@ -623,6 +637,8 @@ that export emits the import rather than the markup.
 - `scripts/dashboard-check.mjs` — thumbnails (really an image, cached, 304 on revalidate) and the
   column grid: it computes where the twelve lines are and asserts every band starts on one, at three
   widths
+- `scripts/changes-check.mjs` — what a comparison reports and, more importantly, what it stays quiet
+  about; plus the panel keeping up as the document moves
 - `scripts/spec-check.mjs` — the claim that a spec cannot go stale, checked by editing the design and
   watching it change, plus typed notes surviving a round trip between the panel and MCP, and a
   view-only visitor reading the whole thing

@@ -371,6 +371,11 @@ export async function listSnapshots(docId: string) {
   return store.loadSnapshots(docId);
 }
 
+/** One snapshot with its document, for comparing against. */
+export async function getSnapshot(docId: string, snapshotId: string) {
+  return (await persistence()).loadSnapshot(docId, snapshotId);
+}
+
 /**
  * Restores a snapshot as a *new* revision rather than rewinding, so the op log
  * stays append-only and the restore itself is undoable.
