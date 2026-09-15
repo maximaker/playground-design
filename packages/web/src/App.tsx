@@ -196,6 +196,21 @@ function Editor({ source, onHome, appearance, onAppearance, session }: {
   const dispatch = useCanvas((s) => s.dispatch);
 
   const [leftTab, setLeftTab] = useState<LeftTab>('layers');
+
+  // A command can ask for a panel — "go to component" selects a node that lives
+  // in no page, and doing that without showing where would look like nothing
+  // happened.
+  const panelRequest = useCanvas((s) => s.panelRequest);
+  useEffect(() => {
+    if (!panelRequest) return;
+    if (LEFT_TABS.some((t) => t.id === panelRequest)) {
+      setLeftTab(panelRequest as LeftTab);
+      setOpenPanel('left');
+    } else if (RIGHT_TABS.some((t) => t.id === panelRequest)) {
+      setRightTab(panelRequest as RightTab);
+    }
+    useCanvas.getState().requestPanel(null);
+  }, [panelRequest]);
   // Someone holding a view-only link is there to read the design, not to look at
   // controls they cannot use: the inspector opens on the spec for them.
   const [rightTab, setRightTab] = useState<RightTab>(source.kind === 'share' ? 'spec' : 'properties');

@@ -220,6 +220,42 @@ export function instancesOf(doc: CanvasDocument, componentId: string): NodeId[] 
 }
 
 /**
+ * Where a component is used: on the pages, and inside other components.
+ *
+ * A component definition can hold an instance of another one — a card with a
+ * tag in it — and the renderer expands those, with a cycle guard. Nothing said
+ * so: the count beside a component only knew about instances on a page, so a
+ * tag used in three cards and nowhere else read as "0 instances" and looked
+ * like dead weight.
+ */
+export function usageOf(
+  doc: CanvasDocument, componentId: string,
+): { onPages: NodeId[]; inComponents: { id: string; name: string; count: number }[] } {
+  const inDefinition = new Map<string, { id: string; name: string; count: number }>();
+  const onPages: NodeId[] = [];
+
+  const owners = Object.values(doc.components ?? {});
+  const ownerOf = (id: NodeId): { id: string; name: string } | null => {
+    let node: CanvasNode | undefined = doc.nodes[id];
+    while (node) {
+      const owner = owners.find((c) => c.root === node!.id);
+      if (owner) return { id: owner.id, name: owner.name };
+      node = node.parent ? doc.nodes[node.parent] : undefined;
+    }
+    return null;
+  };
+
+  for (const id of instancesOf(doc, componentId)) {
+    const owner = ownerOf(id);
+    if (!owner) { onPages.push(id); continue; }
+    const entry = inDefinition.get(owner.id) ?? { ...owner, count: 0 };
+    entry.count++;
+    inDefinition.set(owner.id, entry);
+  }
+  return { onPages, inComponents: [...inDefinition.values()] };
+}
+
+/**
  * Turns an expanded instance back into ordinary nodes.
  *
  * Detaching is the escape hatch that keeps components from being a trap: if a

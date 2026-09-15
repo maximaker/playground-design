@@ -7,7 +7,9 @@ import {
 import { applyOp } from './ops.ts';
 import {
   expandNode, expandInstance, detachedNodes, instancesOf, collectSlots, parseInstanceKey, findVariant,
+  usageOf,
 } from './components.ts';
+import { DEFINITIONS_PAGE } from './ops.ts';
 import { emitHtml } from './html.ts';
 import { emitJsx } from './jsx.ts';
 
@@ -358,4 +360,31 @@ test('detaching bakes in the variant, not just instance overrides', () => {
   const root = nodes.find((x) => x.tag === 'button')!;
   assert.equal(root.styles.padding, '20px 32px');
   assert.equal(root.styles['background-color'], '#dc2626');
+});
+
+test('a component used inside another component is reported as used', () => {
+  // Nesting renders correctly and said nothing about itself: a tag used in
+  // three cards and nowhere else counted as zero instances.
+  const doc = createEmptyDocument('Nesting');
+  const artboard = doc.pages[0]!.artboards[0]!;
+  const tagDef = makeNode({ type: 'text', name: 'Tag', tag: 'span', text: 'new' });
+  const cardDef = makeNode({ type: 'frame', name: 'Card', tag: 'div' });
+  const nested = makeNode({ type: 'instance', name: 'Tag', componentRef: 'cmp_tag' });
+  applyOp(doc, { t: 'insert', nodes: [tagDef], parent: null, index: 0, page: DEFINITIONS_PAGE });
+  applyOp(doc, { t: 'insert', nodes: [cardDef], parent: null, index: 0, page: DEFINITIONS_PAGE });
+  applyOp(doc, { t: 'insert', nodes: [nested], parent: cardDef.id, index: 0 });
+  doc.components = {
+    cmp_tag: { id: 'cmp_tag', name: 'Tag', root: tagDef.id, createdAt: Date.now() },
+    cmp_card: { id: 'cmp_card', name: 'Card', root: cardDef.id, createdAt: Date.now() },
+  };
+  const onPage = makeNode({ type: 'instance', name: 'Card', componentRef: 'cmp_card' });
+  applyOp(doc, { t: 'insert', nodes: [onPage], parent: artboard, index: 0 });
+
+  const tagUsage = usageOf(doc, 'cmp_tag');
+  assert.equal(tagUsage.onPages.length, 0);
+  assert.deepEqual(tagUsage.inComponents, [{ id: 'cmp_card', name: 'Card', count: 1 }]);
+
+  const cardUsage = usageOf(doc, 'cmp_card');
+  assert.equal(cardUsage.onPages.length, 1);
+  assert.equal(cardUsage.inComponents.length, 0);
 });

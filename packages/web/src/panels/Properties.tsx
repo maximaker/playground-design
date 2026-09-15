@@ -15,6 +15,7 @@ import {
 import { useCanvas, getDoc } from '../state/store.ts';
 import { attrOps, resolveKey, resetOverrideOps } from '../state/keys.ts';
 import { Field, NumberInput, Row, Section, SegmentedControl, Select, TextInput, ColorInput } from '../ui/controls.tsx';
+import { openComponentOf } from '../hooks/commands.ts';
 import { ArrangeBar } from '../ui/ArrangeBar.tsx';
 import { GradientEditor } from '../ui/GradientEditor.tsx';
 import { Icon } from '../ui/Icon.tsx';
@@ -46,6 +47,10 @@ export function Properties() {
   );
   const nodes = resolved.map((r) => r.node).filter((n): n is CanvasNode => !!n);
   const insideInstance = resolved.some((r) => r.defId !== null);
+  // Selecting the instance itself is the common case — a click on the canvas
+  // lands there — and it is not "inside" one, so the banner never showed and
+  // there was no way back to the component from the thing it made.
+  const isInstance = nodes.length === 1 && nodes[0]?.type === 'instance';
   const readOnly = useCanvas((s) => s.readOnly);
 
   // A single selected instance gets its variant switcher.
@@ -134,18 +139,35 @@ export function Properties() {
         </div>
       </div>
 
-      {insideInstance && (
+      {(insideInstance || isInstance) && (
         <div className="instance-banner">
           <span>
-            Inside a component. Changes here apply to <strong>this instance only</strong>.
+            {isInstance
+              ? <>An instance. Editing it overrides <strong>this one</strong>; edit the component to change them all.</>
+              : <>Inside a component. Changes here apply to <strong>this instance only</strong>.</>}
           </span>
-          <button
-            className="button subtle"
-            onClick={() => {
-              const ops = resetOverrideOps(doc, selection);
-              if (ops.length) dispatch(ops);
-            }}
-          >Reset to component</button>
+          <div className="instance-banner-actions">
+            {/*
+              * The way back to the original. Without it, the component that
+              * governs what you are looking at is reachable only by finding it
+              * by name in another panel — and the panel is the only place it
+              * exists, since a definition is on no page.
+              */}
+            <button
+              className="button subtle"
+              title="Select the component this came from"
+              onClick={() => openComponentOf(selection[0])}
+            >Go to component</button>
+            {insideInstance && (
+              <button
+                className="button subtle"
+                onClick={() => {
+                  const ops = resetOverrideOps(doc, selection);
+                  if (ops.length) dispatch(ops);
+                }}
+              >Reset to component</button>
+            )}
+          </div>
         </div>
       )}
 

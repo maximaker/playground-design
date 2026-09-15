@@ -7,10 +7,11 @@
 
 import {
   type NodeId, type Op, type StyleMap,
-  cloneSubtree, makeNode, defaultStylesFor, detachedNodes, getArtboardPosition, newId,
+  artboardOf, cloneSubtree, makeNode, defaultStylesFor, detachedNodes,
+  getArtboardPosition, getArtboardSize, newId,
 } from '@playground/shared';
 import { useCanvas, getDoc, currentPage, topLevelSelection } from '../state/store.ts';
-import { nodeRect } from '../canvas/registry.ts';
+import { nodeInnerRect, nodeRect } from '../canvas/registry.ts';
 import { parsePx } from '../canvas/styles.ts';
 
 export function duplicateSelection(): void {
@@ -138,6 +139,33 @@ export function zoomToFit(): void {
   fitBox(minX, minY, maxX - minX, maxY - minY);
 }
 
+/**
+ * From an instance to the component it came from.
+ *
+ * Selects the definition's root, which puts it in the inspector and makes the
+ * Components panel show its layers and variants — the only place a definition
+ * can be seen, since it belongs to no page. The panel is switched to for the
+ * same reason: selecting something invisible and saying nothing would look like
+ * nothing happened.
+ */
+export function openComponentOf(key: string | undefined): void {
+  const doc = getDoc();
+  if (!doc || !key) return;
+
+  // The key may address a layer inside the instance; walk out to the instance
+  // itself, then to whatever component it refers to.
+  let node = doc.nodes[key.split('::')[0]!];
+  while (node && node.type !== 'instance') node = node.parent ? doc.nodes[node.parent] : undefined;
+  const def = node?.componentRef ? doc.components?.[node.componentRef] : undefined;
+  if (!def) {
+    useCanvas.getState().toast('That is not part of a component', 'error');
+    return;
+  }
+  useCanvas.getState().select([def.root]);
+  useCanvas.getState().requestPanel('components');
+  useCanvas.getState().toast(`Editing ${def.name} — every instance follows this`, 'info');
+}
+
 export function zoomToSelection(): void {
   const { selection, selectedNote } = useCanvas.getState();
 
@@ -163,6 +191,66 @@ export function zoomToSelection(): void {
   }
   if (!Number.isFinite(minX)) return;
   fitBox(minX, minY, maxX - minX, maxY - minY);
+}
+
+/**
+ * Bring the selection into view without changing the zoom.
+ *
+ * Different from zooming to it: after inserting a component you want to see
+ * where the thing landed, at the size you were working at. Zooming would answer
+ * a question nobody asked and lose your place on the canvas.
+ *
+ * Measured through the artboard rather than from the screen, because the thing
+ * being revealed is usually *not* on screen — and an artboard that is off the
+ * viewport is not rendered at all, so there is no element to measure. That is
+ * exactly the case this exists for.
+ */
+export function revealSelection(): void {
+  const { selection } = useCanvas.getState();
+  const id = selection[0]?.split('::')[0];
+  const doc = getDoc();
+  if (!id || !doc) return;
+
+  const artboardId = artboardOf(doc, id);
+  const artboard = artboardId ? doc.nodes[artboardId] : null;
+  if (!artboard) return;
+
+  const place = () => {
+    const stage = document.querySelector('.stage')?.getBoundingClientRect();
+    if (!stage) return;
+    const { viewport, setViewport } = useCanvas.getState();
+
+    // The node's own box when its artboard is rendered; the artboard's
+    // otherwise, which is the best that can be known and always enough to put
+    // the work on screen.
+    const pos = getArtboardPosition(artboard);
+    const size = getArtboardSize(artboard);
+    const inner = nodeInnerRect(id);
+    const box = inner
+      ? { x: pos.x + inner.left, y: pos.y + inner.top, width: inner.width, height: inner.height }
+      : { x: pos.x, y: pos.y, width: size.width, height: size.height };
+
+    const screenLeft = stage.left + viewport.x + box.x * viewport.zoom;
+    const screenTop = stage.top + viewport.y + box.y * viewport.zoom;
+    const screenRight = screenLeft + box.width * viewport.zoom;
+    const screenBottom = screenTop + box.height * viewport.zoom;
+
+    const margin = 60;
+    const inside = screenLeft >= stage.left + margin && screenRight <= stage.right - margin
+      && screenTop >= stage.top + margin && screenBottom <= stage.bottom - margin;
+    if (inside) return false;
+
+    setViewport({
+      x: viewport.x + (stage.left + stage.width / 2 - (screenLeft + screenRight) / 2),
+      y: viewport.y + (stage.top + stage.height / 2 - (screenTop + screenBottom) / 2),
+    });
+    return true;
+  };
+
+  // Once on the artboard, then again once it has rendered and the node itself
+  // can be measured — which centres the layer rather than the screen it is on.
+  const moved = place();
+  if (moved) setTimeout(place, 220);
 }
 
 function fitBox(x: number, y: number, width: number, height: number): void {

@@ -192,6 +192,16 @@ interface CanvasState {
   deepHover: NodeId | null;
 
   /**
+   * A panel some command wants opened.
+   *
+   * Which tab is showing is the shell's business, but a command sometimes has
+   * to say "look over here" — going to a component selects a node that exists
+   * nowhere else, and doing that silently looks like nothing happened. The
+   * shell picks this up and clears it.
+   */
+  panelRequest: string | null;
+
+  /**
    * What this person is called, as the server knows them: their account name,
    * or the guest name a share-link viewer gets. Comments are signed with it.
    */
@@ -263,6 +273,7 @@ interface CanvasActions {
   setHighlight(highlight: { ids: NodeId[]; kind: 'review' | 'comments' | 'changes' } | null): void;
   setCommentLens(on: boolean): void;
   setDeepHover(id: NodeId | null): void;
+  requestPanel(name: string | null): void;
   setTool(t: Tool): void;
   setSpacePanning(v: boolean): void;
   setPage(id: string): void;
@@ -379,6 +390,7 @@ export const useCanvas = create<CanvasState & CanvasActions>((set, get) => ({
   highlight: null,
   commentLens: false,
   deepHover: null,
+  panelRequest: null,
   canvasPrefs: loadCanvasPrefs(),
   tool: 'move',
   spacePanning: false,
@@ -648,6 +660,7 @@ export const useCanvas = create<CanvasState & CanvasActions>((set, get) => ({
 
   setViewport(v) { set({ viewport: { ...get().viewport, ...v } }); },
   setIdentity(identity) { set({ identity }); },
+  requestPanel(panelRequest) { set({ panelRequest }); },
   setDeepHover(deepHover) {
     if (get().deepHover !== deepHover) set({ deepHover });
   },

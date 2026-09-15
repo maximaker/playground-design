@@ -339,6 +339,19 @@ content. Detach bakes everything in and drops the link.
 control from browser zoom, because browser zoom scales the canvas too — and the canvas has to stay at
 its true size while you design.
 
+**Working with a component.** A definition belongs to no page, so it is never on the canvas or in the
+layer tree — which left "how do I change the component itself?" with no answer but editing an
+instance, the one thing that does not change it. So: an instance offers **Go to component**, which
+selects the definition and opens the panel showing its layers; selecting one of those layers puts it
+in the inspector and every instance updates as you edit. Inserting a component selects the new
+instance and brings it into view, computed through the artboard rather than the screen — the point of
+revealing something is that it is off screen, and an off-screen artboard is not rendered at all.
+
+A component can contain an instance of another one, and always could: the renderer expands nested
+instances with a cycle guard. Nothing said so, and the count beside a component only knew about
+instances on a page, so a tag used in three cards read as "0 instances" and looked like dead weight.
+It now reads `0 instances · in Card`.
+
 **Component previews.** Each component in the panel is a tile with a picture of itself — two to a row
 in the docked rail, three in the wider drawer — and hovering one opens a large rendering beside the
 panel, portalled onto the body so the rail cannot clip it and placed clear of the whole rail rather

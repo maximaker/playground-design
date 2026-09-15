@@ -20,6 +20,7 @@ import {
 } from '@playground/shared';
 import { getDoc, useCanvas } from '../state/store.ts';
 import { nodeInnerRect } from '../canvas/registry.ts';
+import { openComponentOf } from '../hooks/commands.ts';
 import { Icon } from '../ui/Icon.tsx';
 
 export function Spec() {
@@ -110,11 +111,22 @@ export function Spec() {
           </span>
         </div>
         {spec.component && (
-          <span className="spec-chip">
-            <Icon name="component" size={11} />
-            {spec.component.role === 'instance' ? 'Instance of ' : 'Definition of '}
-            {spec.component.name}
-          </span>
+          spec.component.role === 'instance' ? (
+            <button
+              className="spec-chip is-button"
+              title="Select the component this came from"
+              onClick={() => openComponentOf(id)}
+            >
+              <Icon name="component" size={11} />
+              Instance of {spec.component.name}
+              <Icon name="chevronRight" size={10} />
+            </button>
+          ) : (
+            <span className="spec-chip">
+              <Icon name="component" size={11} />
+              Definition of {spec.component.name}
+            </span>
+          )
         )}
       </div>
 

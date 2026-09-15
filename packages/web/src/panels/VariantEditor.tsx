@@ -64,10 +64,17 @@ export function VariantEditor({ def }: { def: ComponentDef }) {
       </div>
 
       {props.length === 0 && !adding && (
-        <p className="panel-empty dim">
-          No properties. Add one — <code>size</code>, <code>tone</code> — to give this component
-          variants.
-        </p>
+        <div className="variant-empty">
+          <p className="dim">
+            A variant is one component that comes in several forms. Add a property —{' '}
+            <code>tone</code> with <code>solid</code> and <code>ghost</code>, say — then pick a
+            combination below and restyle it. Every instance can then be switched between them,
+            and they all still follow the component.
+          </p>
+          <button className="button subtle full" onClick={() => setAdding(true)}>
+            + Add a property
+          </button>
+        </div>
       )}
 
       {props.map((prop) => (

@@ -7,9 +7,11 @@
  */
 
 import { useMemo } from 'react';
-import { codeComponentsOf, componentsOf, collectSlots, instancesOf, makeNode } from '@playground/shared';
+import {
+  codeComponentsOf, componentsOf, collectSlots, instancesOf, makeNode, usageOf,
+} from '@playground/shared';
 import { useCanvas, getDoc, currentPage } from '../state/store.ts';
-import { createComponentFromSelection, detachSelection } from '../hooks/commands.ts';
+import { createComponentFromSelection, detachSelection, revealSelection } from '../hooks/commands.ts';
 import { Icon } from '../ui/Icon.tsx';
 import { VariantEditor, selectedDefinition } from './VariantEditor.tsx';
 import { ComponentPreview } from './ComponentPreview.tsx';
@@ -46,6 +48,11 @@ export function Components() {
     const instance = makeNode({ type: 'instance', name: def?.name ?? 'Instance', componentRef: componentId });
     dispatch([{ t: 'insert', nodes: [instance], parent: parentId, index: doc.nodes[parentId]!.children.length }]);
     select([instance.id]);
+    // Put it in front of the person who asked for it. An instance dropped into
+    // the last container you touched can land off screen, and then inserting
+    // appears to have done nothing at all.
+    revealSelection();
+    toast(`${def?.name ?? 'Instance'} inserted`, 'info');
   };
 
   const remove = (componentId: string, name: string) => {
@@ -131,7 +138,8 @@ export function Components() {
         {components.map((c) => {
           const root = doc?.nodes[c.root];
           const slots = root && doc ? collectSlots(doc, root) : [];
-          const count = doc ? instancesOf(doc, c.id).length : 0;
+          const usage = doc ? usageOf(doc, c.id) : { onPages: [], inComponents: [] };
+          const count = usage.onPages.length;
           return (
             <div key={c.id} className="component-tile">
               <button className="component-main" onClick={() => insert(c.id)} title="Insert an instance">
@@ -142,6 +150,14 @@ export function Components() {
                   {slots.length ? ` · ${slots.length} slot${slots.length === 1 ? '' : 's'}` : ''}
                   {c.props?.length ? ` · ${c.props.length} prop${c.props.length === 1 ? '' : 's'}` : ''}
                 </span>
+                {/* Used inside another component counts as used: a tag that
+                    only appears in three cards read as "0 instances" and looked
+                    like something to delete. */}
+                {usage.inComponents.length > 0 && (
+                  <span className="dim component-nested">
+                    in {usage.inComponents.map((u) => `${u.name}${u.count > 1 ? ` ×${u.count}` : ''}`).join(', ')}
+                  </span>
+                )}
               </button>
               <div className="component-tile-actions">
                 <button
@@ -189,19 +205,82 @@ export function Components() {
         })}
       </div>
 
-      {definition && (
+      {definition && doc && (
         <div className="component-detail">
           <h4 className="component-detail-title">{definition.name}</h4>
+
+          {/*
+            * The definition's own layers.
+            *
+            * A definition is not on any page, so it never appears on the canvas
+            * or in the layer tree — which left "how do I change the component
+            * itself" with no answer but editing an instance, which is the one
+            * thing that does not change it. Selecting a row here puts that
+            * layer in the inspector, and every instance updates as you edit.
+            */}
+          <DefinitionTree rootId={definition.root} />
+
           <VariantEditor def={definition} />
         </div>
       )}
 
       {components.length > 0 && (
         <p className="panel-hint">
-          Click a component to insert an instance. Mark a layer inside a definition with a
+          Click a component to insert an instance; it is selected and brought into view. Select an
+          instance and use <strong>Go to component</strong> to edit the original — changes there
+          reach every instance, while editing an instance overrides just that one.
+          {' '}A component can contain an instance of another one: insert into a definition's layers
+          above and the outer component follows the inner one from then on. Mark a layer with a
           <code> data-slot</code> attribute to let instances put their own content there.
         </p>
       )}
+    </div>
+  );
+}
+
+/**
+ * The layers inside a component definition, as a list you can select from.
+ *
+ * Flat with indents rather than a collapsible tree: a definition is a handful
+ * of layers, and a second tree with its own expand state beside the real one is
+ * more machinery than the thing it shows.
+ *
+ * It exists because a definition is on no page, so it never appears on the
+ * canvas or in the layer tree — which left "how do I change the component
+ * itself" with no answer but editing an instance, which is the one thing that
+ * does not change it.
+ */
+function DefinitionTree({ rootId }: { rootId: string }) {
+  const select = useCanvas((s) => s.select);
+  const selection = useCanvas((s) => s.selection);
+  const version = useCanvas((s) => s.version);
+  const doc = getDoc();
+  void version;
+  if (!doc) return null;
+
+  const rows: { id: string; depth: number; name: string; type: string }[] = [];
+  const walk = (id: string, depth: number) => {
+    const node = doc.nodes[id];
+    if (!node) return;
+    rows.push({ id, depth, name: node.name, type: node.type });
+    for (const child of node.children) walk(child, depth + 1);
+  };
+  walk(rootId, 0);
+
+  return (
+    <div className="definition-tree">
+      {rows.map((row) => (
+        <button
+          key={row.id}
+          className={`definition-row${selection.includes(row.id) ? ' is-selected' : ''}`}
+          style={{ paddingLeft: `calc(${row.depth} * 0.8rem + 0.3rem)` }}
+          onClick={() => select([row.id])}
+          title="Edit this layer of the component"
+        >
+          <Icon name={row.type === 'instance' ? 'instance' : row.type === 'text' ? 'text' : 'frame'} size={11} />
+          <span>{row.name}</span>
+        </button>
+      ))}
     </div>
   );
 }
