@@ -120,6 +120,37 @@ export function nudge(key: string, amount: number): void {
   if (ops.length) dispatch(ops);
 }
 
+/**
+ * Zoom about a point, keeping what is under it where it is.
+ *
+ * Setting the zoom alone scales about the canvas origin, so the thing you were
+ * looking at slides off while you press the key — which is why every zoom that
+ * is not a wheel gesture now goes through here. With no point given it holds
+ * the centre of the stage, because that is where your attention is when you
+ * are not pointing at anything.
+ */
+export function zoomBy(factor: number, at?: { x: number; y: number }): void {
+  const { viewport, setViewport } = useCanvas.getState();
+  const stage = document.querySelector('.stage')?.getBoundingClientRect();
+  const point = at ?? (stage
+    ? { x: stage.left + stage.width / 2, y: stage.top + stage.height / 2 }
+    : { x: window.innerWidth / 2, y: window.innerHeight / 2 });
+
+  const zoom = Math.min(8, Math.max(0.02, viewport.zoom * factor));
+  const k = zoom / viewport.zoom;
+  setViewport({
+    zoom,
+    x: point.x - (point.x - viewport.x) * k,
+    y: point.y - (point.y - viewport.y) * k,
+  });
+}
+
+/** Back to 1:1, holding the centre of the stage. */
+export function zoomTo(zoom: number): void {
+  const { viewport } = useCanvas.getState();
+  zoomBy(zoom / viewport.zoom);
+}
+
 export function zoomToFit(): void {
   const page = currentPage();
   const doc = getDoc();

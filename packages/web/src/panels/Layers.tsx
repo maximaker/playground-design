@@ -75,8 +75,58 @@ export function Layers() {
 
   if (!page) return null;
 
+  /*
+   * Arrow-key navigation, the way a tree works everywhere else.
+   *
+   * Down and up walk the rows that are actually visible — a row inside a
+   * collapsed group is not somewhere you can arrow to. Right opens a closed
+   * group and then steps into it; left closes an open one and then steps out
+   * to its parent, which is the pair that lets you cross a deep tree without
+   * ever reaching for the mouse.
+   */
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    const doc = getDoc();
+    if (!doc) return;
+    const keys = ['ArrowDown', 'ArrowUp', 'ArrowRight', 'ArrowLeft', 'Home', 'End', 'Enter'];
+    if (!keys.includes(e.key) || e.metaKey || e.ctrlKey || e.altKey) return;
+
+    const rows = visibleRows();
+    const current = useCanvas.getState().selection[0]?.split('::')[0] ?? rows[0];
+    if (!current) return;
+    const index = rows.indexOf(current);
+    const node = doc.nodes[current];
+    const isArtboard = node?.type === 'artboard';
+    const open = isArtboard ? !expanded.has(current) : expanded.has(current);
+
+    const go = (id: NodeId | undefined) => {
+      if (!id) return;
+      useCanvas.getState().select([id]);
+      // Focus follows selection so the next arrow arrives here and not on the
+      // canvas, where it would nudge the layer instead of moving past it.
+      window.setTimeout(() => {
+        document.querySelector<HTMLElement>(`.layer-row[data-layer-id="${CSS.escape(id)}"]`)?.focus();
+      }, 0);
+    };
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    if (e.key === 'ArrowDown') go(rows[index + 1] ?? rows[index]);
+    else if (e.key === 'ArrowUp') go(rows[index - 1] ?? rows[0]);
+    else if (e.key === 'Home') go(rows[0]);
+    else if (e.key === 'End') go(rows[rows.length - 1]);
+    else if (e.key === 'Enter') useCanvas.getState().setRenaming(current);
+    else if (e.key === 'ArrowRight') {
+      if (node?.children.length && !open) toggle(current);
+      else go(node?.children[0]);
+    } else if (e.key === 'ArrowLeft') {
+      if (node?.children.length && open) toggle(current);
+      else if (node?.parent) go(node.parent);
+    }
+  };
+
   return (
-    <div className="layers" key={page.id}>
+    <div className="layers" key={page.id} role="tree" aria-label="Layers" onKeyDown={onKeyDown}>
       {page.artboards.map((id) => (
         <LayerRow
           key={id} id={id} depth={0} defaultOpen
@@ -105,6 +155,13 @@ interface RowProps {
   structureVersion: number;
 }
 
+/** The rows a person can actually see, in the order they see them. */
+function visibleRows(): NodeId[] {
+  return [...document.querySelectorAll<HTMLElement>('.layer-row[data-layer-id]')]
+    .map((el) => el.dataset.layerId!)
+    .filter(Boolean);
+}
+
 /**
  * Select every row between the current selection and this one.
  *
@@ -114,9 +171,7 @@ interface RowProps {
  */
 function selectRangeTo(id: NodeId): void {
   const { selection, select } = useCanvas.getState();
-  const rows = [...document.querySelectorAll<HTMLElement>('[data-layer-id]')]
-    .map((el) => el.dataset.layerId!)
-    .filter(Boolean);
+  const rows = visibleRows();
   const anchorId = selection[selection.length - 1]?.split('::')[0];
   const from = anchorId ? rows.indexOf(anchorId) : -1;
   const to = rows.indexOf(id);
@@ -195,6 +250,12 @@ const LayerRow = memo(function LayerRow({
         ].filter(Boolean).join(' ')}
         // Addressable, so selecting on the canvas can scroll this row into view.
         data-layer-id={id}
+        role="treeitem"
+        aria-selected={isSelected}
+        aria-expanded={hasChildren ? open : undefined}
+        // One tab stop for the whole tree, on the selected row: tabbing through
+        // a hundred layers to reach the panel after it is not navigation.
+        tabIndex={isSelected ? 0 : -1}
         style={{ paddingLeft: `calc(${depth} * 0.85rem + 0.4rem)` }}
         draggable={!renaming}
         onDragStart={(e) => {

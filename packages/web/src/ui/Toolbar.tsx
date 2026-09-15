@@ -2,6 +2,7 @@
 
 import { useCanvas, type Tool } from '../state/store.ts';
 import { Icon, type IconName } from './Icon.tsx';
+import { zoomBy, zoomTo } from '../hooks/commands.ts';
 
 const TOOLS: { tool: Tool; icon: IconName; key: string; title: string }[] = [
   { tool: 'move', icon: 'cursor', key: 'V', title: 'Move' },
@@ -20,7 +21,6 @@ export function Toolbar({ compact }: { compact?: boolean }) {
   const readOnly = useCanvas((s) => s.readOnly);
   const setTool = useCanvas((s) => s.setTool);
   const zoom = useCanvas((s) => s.viewport.zoom);
-  const setViewport = useCanvas((s) => s.setViewport);
   const undo = useCanvas((s) => s.undo);
   const redo = useCanvas((s) => s.redo);
   const canUndo = useCanvas((s) => s.undoStack.length > 0);
@@ -74,17 +74,17 @@ export function Toolbar({ compact }: { compact?: boolean }) {
       ))}
       {!compact && <span className="toolbar-divider" />}
       {!compact && (
-      <button className="tip is-top" data-tip="Zoom out" aria-label="Zoom out" onClick={() => setViewport({ zoom: Math.max(0.02, zoom / 1.25) })}>
+      <button className="tip is-top" data-tip="Zoom out" aria-label="Zoom out" onClick={() => zoomBy(1 / 1.25)}>
         <Icon name="minus" size={16} />
       </button>
       )}
       {!compact && (
-        <button className="zoom-readout tip is-top" data-tip="Reset zoom  ⌘0" onClick={() => setViewport({ zoom: 1 })}>
+        <button className="zoom-readout tip is-top" data-tip="Reset zoom  ⌘0" onClick={() => zoomTo(1)}>
           {Math.round(zoom * 100)}%
         </button>
       )}
       {!compact && (
-      <button className="tip is-top" data-tip="Zoom in" aria-label="Zoom in" onClick={() => setViewport({ zoom: Math.min(8, zoom * 1.25) })}>
+      <button className="tip is-top" data-tip="Zoom in" aria-label="Zoom in" onClick={() => zoomBy(1.25)}>
         <Icon name="plus" size={16} />
       </button>
       )}
@@ -95,7 +95,7 @@ export function Toolbar({ compact }: { compact?: boolean }) {
         className="zoom-pill"
         title="Reset zoom to 100%"
         aria-label={`Zoom ${Math.round(zoom * 100)} percent. Tap to reset.`}
-        onClick={() => setViewport({ zoom: 1 })}
+        onClick={() => zoomTo(1)}
       >{Math.round(zoom * 100)}%</button>
     )}
     </>

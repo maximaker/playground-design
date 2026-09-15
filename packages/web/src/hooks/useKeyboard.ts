@@ -12,7 +12,7 @@ import { reorder } from '../canvas/arrange.ts';
 import {
   copyProperties, duplicateSelection, moveInParent, nudge, pasteProperties, selectChildren,
   selectParent, selectSibling, toggleLock, toggleVisibility, wrapInFrame,
-  zoomToFit, zoomToSelection,
+  zoomBy, zoomTo, zoomToFit, zoomToSelection,
 } from './commands.ts';
 import type { Tool } from '../state/store.ts';
 
@@ -134,7 +134,19 @@ export function useKeyboard(actions: KeyboardActions = {}): void {
         return;
       }
 
-      // --- Zoom and pan ----------------------------------------------------
+      /*
+       * --- Zoom and pan ----------------------------------------------------
+       *
+       * Unmodified `+` and `-`, which is what Figma binds and for the same
+       * reason: a browser does not let a page have ⌘+ and ⌘−. Chrome zooms the
+       * whole window before the page ever sees the key, so the handler below
+       * that tries to claim them is best-effort on the browsers where it works
+       * — these are the ones that always reach the canvas.
+       */
+      if (!mod && (e.key === '+' || e.key === '=')) { e.preventDefault(); zoomBy(1.25); return; }
+      if (!mod && (e.key === '-' || e.key === '_')) { e.preventDefault(); zoomBy(1 / 1.25); return; }
+      if (!mod && e.shiftKey && e.code === 'Digit0') { e.preventDefault(); zoomTo(1); return; }
+
       // Both spellings: the bare digits this tool started with, and Figma's
       // shifted ones, which is what a hand arriving from Figma will press.
       if (!mod && (e.key === '1' || e.key === '!')) { e.preventDefault(); zoomToFit(); return; }
@@ -186,12 +198,14 @@ export function useKeyboard(actions: KeyboardActions = {}): void {
         return;
       }
       if (e.key.startsWith('Arrow') && selection.length) {
-        e.preventDefault();
         // With the modifier, move the layer along inside its parent instead of
         // nudging it: in flex flow there is no position to nudge, and its place
-        // in the flow is what "move it up" means there.
-        if (mod) moveInParent(e.key);
-        else nudge(e.key, e.shiftKey ? 10 : 1);
+        // in the flow is what "move it up" means there. That one works wherever
+        // you are, because it is about the document rather than the canvas.
+        if (mod) { e.preventDefault(); moveInParent(e.key); return; }
+        // Plain arrows nudge only on the canvas. In the layer tree they walk
+        // the tree, and a panel that has the focus should get its own keys.
+        if (onCanvas(e.target)) { e.preventDefault(); nudge(e.key, e.shiftKey ? 10 : 1); }
         return;
       }
 
@@ -231,11 +245,12 @@ export function useKeyboard(actions: KeyboardActions = {}): void {
      * so this cannot be intercepted by a component again.
      */
     const onZoom = (e: KeyboardEvent) => {
+      // No isTyping guard on purpose: this runs in the capture phase precisely
+      // so a focused field cannot swallow it and leave the browser to zoom.
       if (!(e.metaKey || e.ctrlKey) || e.altKey) return;
-      const { setViewport, viewport } = useCanvas.getState();
-      if (e.key === '0') { e.preventDefault(); setViewport({ zoom: 1 }); }
-      else if (e.key === '=' || e.key === '+') { e.preventDefault(); setViewport({ zoom: Math.min(8, viewport.zoom * 1.25) }); }
-      else if (e.key === '-') { e.preventDefault(); setViewport({ zoom: Math.max(0.02, viewport.zoom / 1.25) }); }
+      if (e.key === '0') { e.preventDefault(); zoomTo(1); }
+      else if (e.key === '=' || e.key === '+') { e.preventDefault(); zoomBy(1.25); }
+      else if (e.key === '-') { e.preventDefault(); zoomBy(1 / 1.25); }
       else return;
       // Handled here; the bubble listener must not act on it a second time.
       e.stopPropagation();

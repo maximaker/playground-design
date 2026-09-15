@@ -69,6 +69,22 @@ cards over grey, with the project rail as a floating card of pill rows; the
 landing speaks in the campaign voice — orange field, heavy display type, a
 black pill for the one action.
 
+**12. ⌘+ and ⌘− zoomed the whole window, not the canvas.** The page tried to
+claim them in the capture phase, which works in some browsers and not in
+Chrome, where keyboard zoom never reaches the page at all. Canvas zoom is now
+on unmodified `+` and `−` with `⇧0` for 100% — which is what Figma binds, for
+this exact reason. The ⌘ handler stays as best-effort where it works.
+
+**13. Keyboard zoom scaled about the canvas origin,** so whatever you were
+looking at slid off while you held the key. Every zoom that is not a wheel
+gesture now holds the centre of the stage.
+
+**14. The layer tree could not be navigated by keyboard.** It is a real tree
+widget now: `role="tree"` with a single roving tab stop, arrows to walk the
+visible rows, right to open a group and step in, left to close one and step
+out, Home/End, Enter to rename. Plain arrows nudge only on the canvas; ⌘-arrow
+still reorders wherever you are, because that is about the document.
+
 ---
 
 ## Known and not fixed

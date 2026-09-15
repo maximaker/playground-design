@@ -145,6 +145,34 @@ await view.waitForTimeout(300);
 check('Tab still walks the siblings when the canvas has a selection',
   await view.evaluate((id) => window.__playground.store.getState().selection[0] !== id, kids[0].id));
 
+// The tree navigates by arrow, the way a tree does everywhere else.
+await view.click(`.layer-row[data-layer-id="${kids[0].id}"]`);
+await view.waitForTimeout(200);
+await view.keyboard.press('ArrowDown');
+await view.waitForTimeout(250);
+const down = await view.evaluate(() => window.__playground.store.getState().selection[0]);
+check('arrow down moves to the next row in the tree', down === kids[1].id, `${down}`);
+await view.keyboard.press('ArrowUp');
+await view.waitForTimeout(250);
+check('and arrow up moves back',
+  (await view.evaluate(() => window.__playground.store.getState().selection[0])) === kids[0].id);
+
+// Left steps out to the parent; right opens it again and steps back in.
+await view.keyboard.press('ArrowLeft');
+await view.waitForTimeout(250);
+check('arrow left steps out to the parent',
+  (await view.evaluate(() => window.__playground.store.getState().selection[0])) === row);
+await view.keyboard.press('ArrowRight');
+await view.waitForTimeout(250);
+check('and arrow right steps back in',
+  (await view.evaluate(() => window.__playground.store.getState().selection[0])) === kids[0].id);
+
+// The nudge that plain arrows do on the canvas must not also happen.
+const nudged = await view.evaluate((id) =>
+  Object.keys(window.__playground.store.getState().doc.nodes[id].styles).some((k) => k.startsWith('margin')),
+kids[0].id);
+check('walking the tree does not nudge the layer', !nudged);
+
 await view.click(`.layer-row[data-layer-id="${kids[1].id}"]`, { button: 'right' });
 await view.waitForTimeout(300);
 check('right-clicking a layer row opens the same menu as the canvas',
@@ -225,6 +253,47 @@ const tipContent = await view.evaluate(() => {
 });
 check('the tooltip is drawn by the system, not by the platform',
   (tipContent ?? '').length > 2, tipContent);
+
+// Zoom belongs to the canvas, and the browser owns ⌘+ on most platforms — so
+// the bare keys are the ones that have to work.
+await view.mouse.click(750, 500);
+await view.evaluate(() => window.__playground.store.getState().setViewport({ zoom: 0.5, x: 100, y: 100 }));
+const centreBefore = await view.evaluate(() => {
+  const st = window.__playground.store.getState();
+  const stage = document.querySelector('.stage').getBoundingClientRect();
+  const vp = st.viewport;
+  return {
+    x: (stage.left + stage.width / 2 - vp.x) / vp.zoom,
+    y: (stage.top + stage.height / 2 - vp.y) / vp.zoom,
+  };
+});
+await view.keyboard.press('+');
+await view.waitForTimeout(300);
+const zoomedIn = await view.evaluate(() => window.__playground.store.getState().viewport.zoom);
+check('plain + zooms the canvas', Math.abs(zoomedIn - 0.625) < 0.001, `${zoomedIn}`);
+const centreAfter = await view.evaluate(() => {
+  const st = window.__playground.store.getState();
+  const stage = document.querySelector('.stage').getBoundingClientRect();
+  const vp = st.viewport;
+  return {
+    x: (stage.left + stage.width / 2 - vp.x) / vp.zoom,
+    y: (stage.top + stage.height / 2 - vp.y) / vp.zoom,
+  };
+});
+check('and holds what is in the middle of the stage',
+  Math.abs(centreAfter.x - centreBefore.x) < 1 && Math.abs(centreAfter.y - centreBefore.y) < 1,
+  `${JSON.stringify(centreBefore)} → ${JSON.stringify(centreAfter)}`);
+await view.keyboard.press('-');
+await view.waitForTimeout(300);
+check('and plain − zooms back out',
+  Math.abs((await view.evaluate(() => window.__playground.store.getState().viewport.zoom)) - 0.5) < 0.001);
+await view.keyboard.press('Shift+0');
+await view.waitForTimeout(300);
+check('⇧0 returns to 100%',
+  Math.abs((await view.evaluate(() => window.__playground.store.getState().viewport.zoom)) - 1) < 0.001);
+
+// A width typed into a field must still be a width, not a zoom.
+await view.evaluate(() => window.__playground.store.getState().select([]));
 
 // --- The other two surfaces ------------------------------------------------------
 
