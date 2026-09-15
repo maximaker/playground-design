@@ -207,3 +207,18 @@ test('every rule is documented', () => {
   for (const f of lintDocument(doc)) assert.ok(documented.has(f.rule), `${f.rule} has no entry in RULES`);
   for (const r of RULES) assert.ok(r.why.length > 20, `${r.id} needs a real explanation`);
 });
+
+test('a control that is not rendered is not a tap target', () => {
+  // Nav links hidden by a media variant measure 0×0. Flagging them buries the
+  // controls that are genuinely too small under findings nobody can act on.
+  const doc = createEmptyDocument('Tap');
+  const artboard = doc.nodes[doc.pages[0]!.artboards[0]!]!;
+  const link = makeNode({ type: 'text', tag: 'a', name: 'Work', text: 'Work', parent: artboard.id });
+  applyOp(doc, { t: 'insert', nodes: [link], parent: artboard.id, index: 0 });
+
+  const hidden = lintDocument(doc, { rules: ['tap-target'], measured: { [link.id]: { width: 0, height: 0 } } });
+  assert.equal(hidden.length, 0, 'a zero-area control is not reported');
+
+  const small = lintDocument(doc, { rules: ['tap-target'], measured: { [link.id]: { width: 40, height: 18 } } });
+  assert.equal(small.length, 1, 'a small but visible one still is');
+});

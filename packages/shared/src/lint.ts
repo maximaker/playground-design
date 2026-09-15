@@ -164,6 +164,10 @@ function checkTapTarget(
   const box = measured?.[node.id] ?? authoredBox(node);
   // Without a measurement and without authored sizes there is nothing to judge.
   if (!box) return [];
+  // A box with no area is not rendered — `display: none` at this breakpoint,
+  // most often. There is nothing to tap and no padding that would help, so
+  // reporting it is noise that buries the targets that are genuinely too small.
+  if (box.width === 0 || box.height === 0) return [];
   if (box.width >= TAP_TARGET_MIN && box.height >= TAP_TARGET_MIN) return [];
 
   const smallest = Math.min(box.width, box.height);

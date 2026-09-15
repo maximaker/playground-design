@@ -10,9 +10,9 @@
   .count { color: var(--color-fg); }
 
   .btn { display: inline-flex; flex-direction: row; align-items: center; justify-content: center;
-         gap: 8px; padding: 12px 24px; border-radius: var(--radius-pill); font-size: 14px;
-         font-weight: 500; line-height: 1.2; border: 1px solid transparent; width: fit-content;
-         text-decoration: none; }
+         gap: 8px; padding: 12px 24px; min-height: 44px; border-radius: var(--radius-pill);
+         font-size: 14px; font-weight: 500; line-height: 1.2; border: 1px solid transparent;
+         width: fit-content; text-decoration: none; }
   .btn-solid { background: var(--color-surface-ink); color: var(--color-on-ink); }
   .btn-ghost { background: var(--color-surface); color: var(--color-fg); border-color: var(--color-border-strong); }
   .btn-ink { background: var(--color-surface-ink-2); color: var(--color-on-ink); border-color: var(--color-border-ink); }
@@ -26,8 +26,10 @@
 
   .nav { flex-direction: row; align-items: center; justify-content: space-between; gap: 24px;
          padding-top: 24px; padding-bottom: 24px; }
-  .nav-links { display: flex; flex-direction: row; align-items: center; gap: 28px; }
-  .nav-link { font-size: 14px; color: var(--color-fg-muted); text-decoration: none; }
+  .nav-links { display: flex; flex-direction: row; align-items: center; gap: 12px; }
+  .nav-link { display: inline-flex; flex-direction: row; align-items: center; min-height: 44px;
+              padding-left: 8px; padding-right: 8px; font-size: 14px;
+              color: var(--color-fg-muted); text-decoration: none; }
   .brand { display: flex; flex-direction: row; align-items: center; gap: 12px; font-size: 16px;
            font-weight: 600; letter-spacing: -0.01em; color: var(--color-fg); }
   .brand-mark { display: flex; flex-direction: row; align-items: center; justify-content: center;
@@ -70,7 +72,8 @@
   .on-ink { color: var(--color-on-ink); }
   .on-ink-muted { color: var(--color-on-ink-muted); }
   .card-foot { display: flex; flex-direction: row; align-items: center; justify-content: space-between; gap: 16px; }
-  .link { font-size: 13px; color: var(--color-fg); text-decoration: underline; }
+  .link { display: inline-flex; flex-direction: row; align-items: center; min-height: 44px;
+          font-size: 13px; color: var(--color-fg); text-decoration: underline; }
 
   .section { padding-top: 96px; gap: 32px; }
   .section-head { display: flex; flex-direction: row; align-items: flex-end; justify-content: space-between; gap: 40px; }
@@ -121,6 +124,13 @@
             border-top: 1px solid var(--color-border-strong); }
   .footer-col { display: flex; flex-direction: column; gap: 10px; }
   .footer-link { font-size: 13px; color: var(--color-fg-muted); text-decoration: none; }
+  /*
+   * Only the anchors get a tap target. `.footer-link` is also the style for
+   * plain captions — the testimonial's job title, the strapline — and giving
+   * those a 44px box would pad out text nobody can click.
+   */
+  .footer-nav { display: flex; flex-direction: column; gap: 0; }
+  .footer-nav .footer-link { display: flex; flex-direction: row; align-items: center; min-height: 44px; }
   .footer-head { font-size: 13px; color: var(--color-fg); }
 
   @media (max-width: 1200px) {
@@ -322,9 +332,9 @@
         <div class="brand"><span class="brand-mark"><span class="brand-dot"></span></span>Northsignal</div>
         <span class="footer-link" style="max-width:280px;line-height:1.6">AI web consulting. Audits, builds, and the boring part afterwards.</span>
       </div>
-      <div class="footer-col"><span class="footer-head">Services</span><a class="footer-link" href="#services">Audit</a><a class="footer-link" href="#services">Build</a><a class="footer-link" href="#services">Operate</a></div>
-      <div class="footer-col"><span class="footer-head">Company</span><a class="footer-link" href="#about">About</a><a class="footer-link" href="#work">Work</a><a class="footer-link" href="#book">Contact</a></div>
-      <div class="footer-col"><span class="footer-head">Elsewhere</span><a class="footer-link" href="#">hello@northsignal.co</a><a class="footer-link" href="#">LinkedIn</a><a class="footer-link" href="#">GitHub</a></div>
+      <div class="footer-col footer-nav"><span class="footer-head">Services</span><a class="footer-link" href="#services">Audit</a><a class="footer-link" href="#services">Build</a><a class="footer-link" href="#services">Operate</a></div>
+      <div class="footer-col footer-nav"><span class="footer-head">Company</span><a class="footer-link" href="#about">About</a><a class="footer-link" href="#work">Work</a><a class="footer-link" href="#book">Contact</a></div>
+      <div class="footer-col footer-nav"><span class="footer-head">Elsewhere</span><a class="footer-link" href="#">hello@northsignal.co</a><a class="footer-link" href="#">LinkedIn</a><a class="footer-link" href="#">GitHub</a></div>
     </div>
   </div>
 
