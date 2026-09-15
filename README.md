@@ -330,6 +330,14 @@ content. Detach bakes everything in and drops the link.
 control from browser zoom, because browser zoom scales the canvas too — and the canvas has to stay at
 its true size while you design.
 
+**Canvas preferences.** The dot grid, pixel rulers along the top and left edges, and snapping are each
+switchable in Appearance (and from the command palette). Ruler ticks are canvas pixels, not screen
+pixels — the number beside a tick is the coordinate a layer would have there, whatever the zoom — and
+the selection is banded on both rulers. Snapping keeps its per-drag escape hatch (hold ⌘); the
+preference is that same switch held down for a whole session, for the times you are placing things
+freehand and every drag catching on a neighbour is the wrong default. All three are per-person and
+local, like the theme: two people in the same document can disagree.
+
 **Responsive.** Three columns rarely fit. Above 1024px the panels are docked; below it they become
 overlay drawers so the canvas keeps the full width; below 700px the chrome condenses to icons and
 secondary actions move into a menu. On touch, tap targets get a 40px floor in pixels rather than rem —
@@ -522,6 +530,9 @@ that export emits the import rather than the markup.
   surface the way an agent does, including the error paths
 - `packages/server/src/fidelity.test.ts` — the export-fidelity gate: render an artboard, export it,
   re-import the export into a fresh document, render that, and pixel-diff the two
+- `scripts/canvas-prefs-check.mjs` — grid, rulers and snapping each toggle, stick across a reload, and
+  change what the canvas does: snapping is checked by dragging an artboard and reading back where it
+  landed, not by reading the switch
 - `scripts/artboard-remount-check.mjs` — an artboard that scrolls out of view and comes back must
   render again, not come back blank
 - `scripts/agent/deck.mjs` + `deck.html` — the Northsignal capabilities deck, ten 1920×1080 slides on

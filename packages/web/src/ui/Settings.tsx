@@ -8,7 +8,15 @@
 
 import { useEffect, useRef } from 'react';
 import { type Appearance, type Theme, SCALE_RANGE } from '../state/appearance.ts';
+import type { CanvasPrefs } from '../state/canvasPrefs.ts';
+import { useCanvas } from '../state/store.ts';
 import { Icon, type IconName } from './Icon.tsx';
+
+const CANVAS_TOGGLES: { key: keyof CanvasPrefs; label: string; hint: string }[] = [
+  { key: 'grid', label: 'Dot grid', hint: 'The dotted background under the artboards.' },
+  { key: 'rulers', label: 'Rulers', hint: 'Pixel rulers along the top and left edges.' },
+  { key: 'snap', label: 'Snapping', hint: 'Dragging catches on edges and centres. Hold ⌘ to suspend it for one drag.' },
+];
 
 const THEMES: { value: Theme; icon: IconName; label: string }[] = [
   { value: 'light', icon: 'sun', label: 'Light' },
@@ -40,6 +48,11 @@ export function Settings({ appearance, onChange, onClose }: {
   onClose: () => void;
 }) {
   const ref = useRef<HTMLDivElement | null>(null);
+  // Canvas preferences live in the canvas store rather than in `appearance`:
+  // the canvas and its drag handlers read them, and neither has the appearance
+  // prop threaded through it.
+  const canvasPrefs = useCanvas((s) => s.canvasPrefs);
+  const setCanvasPrefs = useCanvas((s) => s.setCanvasPrefs);
 
   useEffect(() => {
     const onPointer = (e: PointerEvent) => {
@@ -114,6 +127,26 @@ export function Settings({ appearance, onChange, onClose }: {
           Scales the panels and toolbar only — the canvas keeps its true size, so what you are
           designing stays accurate.
         </p>
+      </div>
+
+      <div className="settings-group">
+        <span>Canvas</span>
+        <div className="settings-toggles">
+          {CANVAS_TOGGLES.map((t) => (
+            <button
+              key={t.key}
+              className="settings-toggle"
+              aria-pressed={canvasPrefs[t.key]}
+              onClick={() => setCanvasPrefs({ [t.key]: !canvasPrefs[t.key] })}
+            >
+              <span>
+                {t.label}
+                <span className="toggle-hint">{t.hint}</span>
+              </span>
+              <span className="switch" />
+            </button>
+          ))}
+        </div>
       </div>
 
       <div className="settings-group">

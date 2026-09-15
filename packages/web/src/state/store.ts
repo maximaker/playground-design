@@ -13,6 +13,7 @@ import {
   applyOp, artboardOf, batchId, descendants, touchedNodes,
 } from '@playground/shared';
 import { styleOps, textOps, treeNodeId } from './keys.ts';
+import { type CanvasPrefs, loadCanvasPrefs, saveCanvasPrefs } from './canvasPrefs.ts';
 
 export type Tool = 'move' | 'frame' | 'text' | 'rect' | 'ellipse' | 'image' | 'hand' | 'note' | 'comment';
 
@@ -161,6 +162,8 @@ interface CanvasState {
   editingVariant: { componentId: string; match: Record<string, string> } | null;
 
   viewport: Viewport;
+  /** Dot grid, edge rulers and snapping — a per-person preference, stored locally. */
+  canvasPrefs: CanvasPrefs;
   tool: Tool;
   spacePanning: boolean;
 
@@ -221,6 +224,7 @@ interface CanvasActions {
   ): void;
 
   setViewport(v: Partial<Viewport>): void;
+  setCanvasPrefs(v: Partial<CanvasPrefs>): void;
   setTool(t: Tool): void;
   setSpacePanning(v: boolean): void;
   setPage(id: string): void;
@@ -333,6 +337,7 @@ export const useCanvas = create<CanvasState & CanvasActions>((set, get) => ({
   activeVariant: null,
   editingVariant: null,
   viewport: { x: 80, y: 80, zoom: 0.55 },
+  canvasPrefs: loadCanvasPrefs(),
   tool: 'move',
   spacePanning: false,
   undoStack: [],
@@ -600,6 +605,11 @@ export const useCanvas = create<CanvasState & CanvasActions>((set, get) => ({
   },
 
   setViewport(v) { set({ viewport: { ...get().viewport, ...v } }); },
+  setCanvasPrefs(v) {
+    const next = { ...get().canvasPrefs, ...v };
+    set({ canvasPrefs: next });
+    saveCanvasPrefs(next);
+  },
   setTool(tool) { set({ tool }); },
   setSpacePanning(spacePanning) { set({ spacePanning }); },
   setPage(pageId) { set({ pageId, selection: [] }); },

@@ -1802,3 +1802,56 @@ code { font-family: var(--mono); font-size: 0.92em; }
 }
 .export-whole h3 { margin: 0; font-size: 0.9rem; }
 .export-actions { display: flex; align-items: center; gap: var(--s3); margin-top: var(--s2); }
+
+/* --- Rulers ---------------------------------------------------------------
+ *
+ * Overlaid on the canvas edges rather than inset into the layout: insetting
+ * would move every artboard by 20px the moment the rulers are switched on,
+ * which is disorienting for a control people flick on and off.
+ */
+.rulers {
+  position: absolute; inset: 0; pointer-events: none; z-index: 3;
+  --ruler-size: 20px;
+  --ruler-fg: var(--fg-muted);
+  --ruler-line: var(--border-strong);
+  --ruler-accent: var(--accent);
+}
+.ruler {
+  position: absolute;
+  background: color-mix(in srgb, var(--bg-raised) 88%, transparent);
+  backdrop-filter: blur(6px);
+}
+.ruler-top { top: 0; left: 0; border-bottom: 1px solid var(--border); }
+.ruler-left { top: 0; left: 0; border-right: 1px solid var(--border); }
+.ruler-corner {
+  position: absolute; top: 0; left: 0;
+  width: var(--ruler-size); height: var(--ruler-size);
+  background: var(--bg-raised);
+  border-right: 1px solid var(--border); border-bottom: 1px solid var(--border);
+}
+
+/* --- Canvas settings toggles ---------------------------------------------- */
+.settings-toggles { display: flex; flex-direction: column; gap: var(--s2); }
+.settings-toggle {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--s4);
+  width: 100%; padding: var(--s2) var(--s3); border-radius: var(--radius-sm);
+  background: transparent; border: 1px solid transparent; color: var(--fg);
+  font-size: 0.92rem; text-align: left; cursor: pointer;
+}
+.settings-toggle:hover { background: var(--bg-hover); }
+.settings-toggle .switch {
+  flex: 0 0 auto; width: 1.9rem; height: 1.1rem; border-radius: 999px;
+  background: var(--bg-input); border: 1px solid var(--border-strong);
+  position: relative; transition: background 120ms ease, border-color 120ms ease;
+}
+.settings-toggle .switch::after {
+  content: ''; position: absolute; top: 50%; left: 0.12rem;
+  width: 0.78rem; height: 0.78rem; border-radius: 999px;
+  background: var(--fg-muted); transform: translateY(-50%);
+  transition: transform 120ms ease, background 120ms ease;
+}
+.settings-toggle[aria-pressed='true'] .switch { background: var(--accent); border-color: var(--accent); }
+.settings-toggle[aria-pressed='true'] .switch::after {
+  background: #fff; transform: translate(0.78rem, -50%);
+}
+.settings-toggle .toggle-hint { display: block; font-size: 0.82rem; color: var(--fg-muted); }

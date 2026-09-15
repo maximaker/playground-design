@@ -18,6 +18,14 @@ import { PeerCursors } from './PeerCursors.tsx';
 import { imageSize, insertImages } from '../hooks/useClipboard.ts';
 import { CommentPin, CommentComposer, authorName } from './CommentPin.tsx';
 import { hitTest, nodeRect } from './registry.ts';
+import { Rulers } from './Rulers.tsx';
+
+/**
+ * Read at the moment of the drag rather than captured in a closure: the
+ * preference can be toggled mid-drag, and the pointer handlers are installed
+ * once.
+ */
+const snapOn = () => useCanvas.getState().canvasPrefs.snap;
 import {
   type DropTarget, type Handle, type ResizeStart,
   artboardBoxes, beginResize, buildMoveOps, computeDropTarget, nextArtboardPosition,
@@ -45,6 +53,7 @@ interface CanvasProps {
 
 export function Canvas({ onContextMenu }: CanvasProps) {
   const structureVersion = useCanvas((s) => s.structureVersion);
+  const styleEpoch = useCanvas((s) => s.styleEpoch);
   const viewport = useCanvas((s) => s.viewport);
   const setViewport = useCanvas((s) => s.setViewport);
   const tool = useCanvas((s) => s.tool);
@@ -64,6 +73,42 @@ export function Canvas({ onContextMenu }: CanvasProps) {
   // the stage. Subtract the stage origin when applying the transform, or the
   // offset gets counted twice.
   const [origin, setOrigin] = useState({ x: 0, y: 0 });
+  const prefs = useCanvas((s) => s.canvasPrefs);
+  /**
+   * The pointer in canvas space, for the ruler's position marker. Held here
+   * rather than read from the peer-cursor state because that one is rounded and
+   * throttled for the network; a marker that lags the cursor reads as broken.
+   */
+  const [rulerPointer, setRulerPointer] = useState<{ x: number; y: number } | null>(null);
+
+  /**
+   * The selection's box in canvas space, banded on both rulers so you can read
+   * where a layer starts and ends without measuring it.
+   *
+   * Measured from the live DOM, which is why it is keyed to everything that can
+   * move it — a memo on selection alone would band the old position after a drag.
+   */
+  const rulerHighlight = useMemo(() => {
+    if (!prefs.rulers || selection.length === 0) return null;
+    let left = Infinity, top = Infinity, right = -Infinity, bottom = -Infinity;
+    for (const id of selection) {
+      const rect = nodeRect(id);
+      if (!rect) continue;
+      left = Math.min(left, rect.left); top = Math.min(top, rect.top);
+      right = Math.max(right, rect.right); bottom = Math.max(bottom, rect.bottom);
+    }
+    if (left === Infinity) return null;
+    const vp = viewport;
+    return {
+      x: (left - vp.x) / vp.zoom,
+      y: (top - vp.y) / vp.zoom,
+      width: (right - left) / vp.zoom,
+      height: (bottom - top) / vp.zoom,
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // rulerPointer changes on every move, which is also exactly when a drag is
+    // moving the thing being banded — so it doubles as the drag-time refresh.
+  }, [prefs.rulers, selection, viewport, structureVersion, styleEpoch, rulerPointer]);
   const drag = useRef<Drag>({ kind: 'none' });
   const [marquee, setMarquee] = useState<{ left: number; top: number; width: number; height: number } | null>(null);
   const [dropTarget, setDropTarget] = useState<DropTarget | null>(null);
@@ -385,10 +430,11 @@ export function Canvas({ onContextMenu }: CanvasProps) {
     // sees the cursor over the same part of the design rather than the same
     // part of their screen. Rounded because sub-pixel precision is invisible
     // and would make every frame a change worth sending.
-    setPointer({
-      x: Math.round((e.clientX - vp.x) / vp.zoom),
-      y: Math.round((e.clientY - vp.y) / vp.zoom),
-    });
+    const atX = (e.clientX - vp.x) / vp.zoom;
+    const atY = (e.clientY - vp.y) / vp.zoom;
+    setPointer({ x: Math.round(atX), y: Math.round(atY) });
+    // Only while the rulers are on: this is a state update per pointer move.
+    if (useCanvas.getState().canvasPrefs.rulers) setRulerPointer({ x: atX, y: atY });
 
     if (d.kind === 'none') {
       const { clientX, clientY, altKey } = e;
@@ -509,8 +555,9 @@ export function Canvas({ onContextMenu }: CanvasProps) {
           d.size.width, d.size.height,
         );
         // Holding ⌘ suspends snapping, the standard escape hatch for placing
-        // something a few pixels off a guide on purpose.
-        const snap = e.metaKey || e.ctrlKey
+        // something a few pixels off a guide on purpose. The preference is the
+        // same switch held down for a whole session.
+        const snap = e.metaKey || e.ctrlKey || !snapOn()
           ? { dx: 0, dy: 0, guides: [] }
           : snapMove(proposed, d.candidates, vp.zoom);
         setGuides(snap.guides.length ? { guides: snap.guides, space: 'canvas' } : null);
@@ -535,7 +582,7 @@ export function Canvas({ onContextMenu }: CanvasProps) {
           d.origins[lead]!.left + dx, d.origins[lead]!.top + dy,
           d.size.width, d.size.height,
         );
-        const snap = e.metaKey || e.ctrlKey
+        const snap = e.metaKey || e.ctrlKey || !snapOn()
           ? { dx: 0, dy: 0, guides: [] }
           : snapMove(proposed, d.candidates, vp.zoom, d.container);
         const parentId = doc.nodes[lead]?.parent;
@@ -565,11 +612,13 @@ export function Canvas({ onContextMenu }: CanvasProps) {
         const resizingArtboard = doc.nodes[d.start.id]?.type === 'artboard';
         if (resizingArtboard && !e.metaKey && !e.ctrlKey) {
           const target = d.start.width + dx;
-          const snapped = breakpointsOf(doc).find((bp) => Math.abs(bp.maxWidth - target) < 16 / vp.zoom);
+          const snapped = snapOn()
+            ? breakpointsOf(doc).find((bp) => Math.abs(bp.maxWidth - target) < 16 / vp.zoom)
+            : undefined;
           if (snapped) dx = snapped.maxWidth - d.start.width;
         }
         const proposed = resizeBox(d.start, dx, dy);
-        const snap = e.metaKey || e.ctrlKey || e.shiftKey
+        const snap = e.metaKey || e.ctrlKey || e.shiftKey || !snapOn()
           ? { dx: 0, dy: 0, guides: [] }
           : snapResizeEdges(proposed, d.candidates, d.start.handle, vp.zoom, d.container);
         const parentId = doc.nodes[d.start.id]?.parent;
@@ -792,7 +841,7 @@ export function Canvas({ onContextMenu }: CanvasProps) {
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
-      onPointerLeave={() => { setHovered(null); setMeasureTo(null); setPointer(null); }}
+      onPointerLeave={() => { setHovered(null); setMeasureTo(null); setPointer(null); setRulerPointer(null); }}
       onContextMenu={(e) => {
         e.preventDefault();
         const hit = hitTest(e.clientX, e.clientY);
@@ -818,13 +867,15 @@ export function Canvas({ onContextMenu }: CanvasProps) {
       }}
       onDrop={onDrop}
     >
-      <div
-        className="canvas-grid"
-        style={{
-          backgroundSize: `${24 * viewport.zoom}px ${24 * viewport.zoom}px`,
-          backgroundPosition: `${viewport.x - origin.x}px ${viewport.y - origin.y}px`,
-        }}
-      />
+      {prefs.grid && (
+        <div
+          className="canvas-grid"
+          style={{
+            backgroundSize: `${24 * viewport.zoom}px ${24 * viewport.zoom}px`,
+            backgroundPosition: `${viewport.x - origin.x}px ${viewport.y - origin.y}px`,
+          }}
+        />
+      )}
       <div
         className="canvas-world"
         style={{ transform: `translate(${viewport.x - origin.x}px, ${viewport.y - origin.y}px)` }}
@@ -838,6 +889,10 @@ export function Canvas({ onContextMenu }: CanvasProps) {
       </div>
 
       <Overlay version={structureVersion} dropTarget={dropTarget} guides={guides} live={dragging} />
+
+      {prefs.rulers && (
+        <Rulers origin={origin} pointer={rulerPointer} highlight={rulerHighlight} />
+      )}
 
       <div className="peer-cursors"><PeerCursors /></div>
 

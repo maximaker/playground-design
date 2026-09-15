@@ -195,6 +195,19 @@ function buildEntries({
     }, '⌫', needs);
   }
 
+  // The canvas preferences are in the Appearance popover, which is two clicks
+  // behind an overflow menu on a narrow window. A command each is how people
+  // who flick these on and off actually reach them.
+  {
+    const prefs = useCanvas.getState().canvasPrefs;
+    const toggle = (key: 'grid' | 'rulers' | 'snap') =>
+      useCanvas.getState().setCanvasPrefs({ [key]: !useCanvas.getState().canvasPrefs[key] });
+    action('grid', `${prefs.grid ? 'Hide' : 'Show'} the dot grid`, 'frame', () => toggle('grid'));
+    action('rulers', `${prefs.rulers ? 'Hide' : 'Show'} rulers`, 'ruler', () => toggle('rulers'));
+    action('snap', prefs.snap ? 'Turn snapping off' : 'Turn snapping on', 'magnet',
+      () => toggle('snap'), undefined, 'Hold ⌘ to suspend it for one drag');
+  }
+
   action('zoom-fit', 'Zoom to fit', 'search', zoomToFit, '1');
   action('tokens', 'Design tokens', 'palette', () => actions.openPanel('tokens'));
   action('history', 'Version history', 'history', () => actions.openPanel('history'));
