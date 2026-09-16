@@ -99,15 +99,24 @@ export function extractPage(): PageShot {
       if (p === 'border' && /0px none/.test(v)) continue;
       if (p === 'width' && v.endsWith('px') && parent && Math.abs(parseFloat(v) - parent.clientWidth) < 2) continue;
       /*
-       * A box with anything inside it sizes itself. The computed width is what
-       * this window happened to give it, and writing it down pins a chip or a
-       * button row to a measurement that is a fraction of a pixel out — every
-       * badge on the site wrapped onto a second line, and the row of call to
-       * action links wrapped because its two children now added up to one pixel
-       * more than the width recorded for the row. Only empty boxes, which have
-       * nothing to size to, keep a width.
+       * Is this width the author's, or the layout's?
+       *
+       * Recording a width the layout worked out pins a chip or a button row to
+       * a measurement taken at one window size — a fraction of a pixel out, and
+       * the text inside wraps onto a second line. Dropping every width instead
+       * loses the ones that are the design: the hero's copy column is 640px
+       * inside a 1180px cell, and without that it filled the whole hero.
+       *
+       * So ask. The element is set to `width:auto` for one measurement and put
+       * straight back; if nothing moved, the width was never the author's.
        */
-      if (p === 'width' && el.childNodes.length) continue;
+      if (p === 'width' && v.endsWith('px') && el instanceof HTMLElement) {
+        const before = el.style.width;
+        el.style.setProperty('width', 'auto', 'important');
+        const auto = el.getBoundingClientRect().width;
+        if (before) el.style.width = before; else el.style.removeProperty('width');
+        if (Math.abs(auto - parseFloat(v)) < 1) continue;
+      }
       if (p === 'position' && v === 'relative' && cs.top === 'auto' && cs.left === 'auto') continue;
       if (p === 'grid-template-columns' && /px/.test(v)) {
         /*

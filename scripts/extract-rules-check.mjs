@@ -25,6 +25,7 @@ const FIXTURE = `<!doctype html><meta charset="utf-8">
   .wide{grid-column:span 2;grid-row:span 2}
   .card{position:relative;padding:24px}
   .card::before{content:"“";position:absolute;top:8px;left:8px;font-size:32px;color:#999}
+  .narrow{width:200px}
   .mark{display:block;width:18px;height:18px;background:#000;border-radius:50%}
 </style>
 <main>
@@ -36,6 +37,7 @@ const FIXTURE = `<!doctype html><meta charset="utf-8">
     <details><summary>Closed</summary><p>Hidden.</p></details>
     <div class="grid"><div class="wide">wide</div><div>a</div><div>b</div></div>
     <div class="card">Quoted</div>
+    <div><div class="narrow">A column the author sized</div></div>
     <h2>One<br>Two</h2>
     <a href="#"><svg width="16" height="16"><rect width="16" height="16"/></svg>Label</a>
   </section>
@@ -68,6 +70,7 @@ check('a decorative marker stays out of the flow', /position:absolute[^"]*top:8p
 check('an empty decorative box keeps its size', /width:18px;height:18px/.test(html));
 check('a box with content is not pinned to a measured width',
   !/<span style="[^"]*width:\d+px[^"]*">Boli/.test(html));
+check('a width the author set is kept', /width:200px/.test(html));
 check('boxes round but type keeps its fractions',
   /padding:7px 15px/.test(html) && !/line-height:26px[;"]/.test(`${html}${shot.wrapper}`));
 check('nothing is written for a property at its initial value', !/order:0|align-self:auto/.test(html));
