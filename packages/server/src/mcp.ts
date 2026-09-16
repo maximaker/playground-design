@@ -45,6 +45,39 @@ function text(s: string) {
   return { content: [{ type: 'text' as const, text: s }] };
 }
 
+/**
+ * The tools, in groups.
+ *
+ * Seventy-seven of them is a lot of context to spend on every session, and a
+ * long list of near-neighbours is also how a model ends up calling get_html
+ * when it wanted get_tree_summary. A client can ask for a smaller surface with
+ * `?tools=core,components` on the connection URL, and any agent can widen it
+ * mid-session with use_toolset — the tools are all registered either way, so
+ * this costs a disabled flag rather than a second code path.
+ *
+ * Everything not named here is in core, deliberately: a new tool that nobody
+ * remembered to file should be visible and slightly untidy rather than
+ * invisible and impossible to find.
+ */
+const TOOLSETS: Record<string, readonly string[]> = {
+  pages: ['list_pages', 'create_page', 'set_current_page', 'rename_page', 'delete_page',
+    'list_templates', 'apply_template', 'import_url', 'preview_at_width',
+    'get_breakpoints', 'set_breakpoints'],
+  components: ['list_components', 'create_component', 'find_repeated_shapes', 'auto_componentise',
+    'name_layers', 'componentise', 'insert_instance', 'set_override', 'get_instance',
+    'set_component_props', 'set_variant', 'set_instance_props', 'detach_instance'],
+  code: ['get_jsx', 'sync_tokens_from_code', 'export_tokens', 'check_token_drift',
+    'get_code_component_guide', 'register_code_component', 'list_code_components',
+    'add_code_instance', 'set_code_props', 'remove_code_component', 'get_code_usage'],
+  handover: ['export', 'get_spec', 'mark_checkpoint', 'changes_since', 'annotate',
+    'publish_page', 'unpublish_page', 'get_publication'],
+  collab: ['list_notes', 'claim_note', 'respond_to_note', 'create_note', 'list_comments',
+    'reply_to_comment', 'resolve_comment', 'start_working_on_nodes', 'finish_working_on_nodes'],
+};
+
+const setOf = (tool: string): string =>
+  Object.entries(TOOLSETS).find(([, names]) => names.includes(tool))?.[0] ?? 'core';
+
 function json(value: unknown) {
   return text(JSON.stringify(value, null, 2));
 }
@@ -244,6 +277,8 @@ function componentisePlan(
 export interface McpContext {
   connection: Connection;
   baseUrl: string;
+  /** Tool groups this session asked for, or undefined for all of them. */
+  toolsets?: string[];
 }
 
 /**
@@ -327,6 +362,22 @@ export function buildMcpServer(ctx: McpContext): McpServer {
     },
   );
 
+  /*
+   * Every tool is registered; the ones outside the active sets are then
+   * disabled. Registering conditionally would mean a second code path and a
+   * server whose tool list depends on how you got here — and the SDK's own
+   * enable() is what emits `tools/list_changed`, so widening mid-session is a
+   * flag rather than a reconnection.
+   */
+  type Handle = { enable(): void; disable(): void; enabled: boolean };
+  const handles = new Map<string, Handle>();
+  const register = server.registerTool.bind(server);
+  (server as { registerTool: typeof server.registerTool }).registerTool = ((name: string, ...rest: unknown[]) => {
+    const handle = (register as (...args: unknown[]) => Handle)(name, ...rest);
+    handles.set(name, handle);
+    return handle;
+  }) as typeof server.registerTool;
+
   registerReadTools(server, ctx);
   registerWriteTools(server, ctx);
   registerNoteTools(server, ctx);
@@ -334,6 +385,67 @@ export function buildMcpServer(ctx: McpContext): McpServer {
   registerCodeComponentTools(server, ctx);
   registerCommentTools(server, ctx);
   registerSessionTools(server, ctx);
+
+  const active = new Set(ctx.toolsets ?? ['all']);
+  /*
+   * Only tools whose state actually changes are touched. Each enable() emits
+   * `tools/list_changed`, so re-enabling everything sent seventy-seven
+   * notifications for one group being switched on.
+   */
+  const apply = () => {
+    for (const [name, handle] of handles) {
+      const wanted = active.has('all') || active.has(setOf(name));
+      if (wanted === handle.enabled) continue;
+      if (wanted) handle.enable();
+      else handle.disable();
+    }
+  };
+
+  server.registerTool('list_toolsets', {
+    title: 'List the tool groups',
+    description:
+      'Which groups of tools exist, which are switched on for this session, and what is in each. '
+      + 'A smaller surface is cheaper context; use_toolset switches one on when you need it.',
+    inputSchema: {},
+    annotations: { readOnlyHint: true },
+  }, async () => guard(() => json({
+    active: active.has('all') ? 'all' : [...active],
+    sets: {
+      core: { on: true, note: 'Always available: reading, writing, screenshots, linting.' },
+      ...Object.fromEntries(Object.entries(TOOLSETS).map(([name, tools]) => [name, {
+        on: active.has('all') || active.has(name),
+        tools: tools.length,
+        examples: tools.slice(0, 3),
+      }])),
+    },
+  })));
+
+  server.registerTool('use_toolset', {
+    title: 'Switch on a group of tools',
+    description:
+      'Enables a group for the rest of this session — "components", "code", "handover", "collab", '
+      + '"pages", or "all". The tool list changes as soon as this returns.',
+    inputSchema: {
+      name: z.string().describe('A group from list_toolsets, or "all".'),
+    },
+  }, async ({ name }) => guard(() => {
+    if (name !== 'all' && !TOOLSETS[name]) {
+      return fail(`No toolset "${name}". Call list_toolsets to see them.`);
+    }
+    active.add(name);
+    apply();
+    return json({
+      active: active.has('all') ? 'all' : [...active],
+      added: name === 'all' ? Object.values(TOOLSETS).flat().length : TOOLSETS[name]!.length,
+    });
+  }));
+
+  // Core is not in the table, so these two are already in it — and they must
+  // survive the pass that turns everything else off.
+  handles.delete('list_toolsets');
+  handles.delete('use_toolset');
+  apply();
+
   return server;
 }
 
@@ -3043,6 +3155,11 @@ export async function handleMcpRequest(req: Request, connection: Connection, bas
   void touchConnection(connection.code);
   sweepSessions();
 
+  // `?tools=core,components` on the connection URL. Absent means all of them,
+  // because a client that has not heard of toolsets must not lose tools.
+  const asked = new URL(req.url).searchParams.get('tools');
+  const toolsets = asked ? asked.split(',').map((t) => t.trim()).filter(Boolean) : undefined;
+
   const sessionId = req.headers.get('mcp-session-id') ?? undefined;
   const held = sessionId ? sessions.get(sessionId) : undefined;
   if (held && held.code === connection.code) {
@@ -3052,7 +3169,7 @@ export async function handleMcpRequest(req: Request, connection: Connection, bas
   }
 
   if (await isInitialize(req)) {
-    const server = buildMcpServer({ connection, baseUrl });
+    const server = buildMcpServer({ connection, baseUrl, toolsets });
     const transport = new WebStandardStreamableHTTPServerTransport({
       sessionIdGenerator: () => randomUUID(),
       // Not enableJsonResponse: the stream is the point. A single JSON body
@@ -3074,7 +3191,7 @@ export async function handleMcpRequest(req: Request, connection: Connection, bas
    * request on a host that runs each one in a different process all land here
    * and work — minus the things that need the server to speak first.
    */
-  const server = buildMcpServer({ connection, baseUrl });
+  const server = buildMcpServer({ connection, baseUrl, toolsets });
   const transport = new WebStandardStreamableHTTPServerTransport({
     sessionIdGenerator: undefined,
     enableJsonResponse: true,
