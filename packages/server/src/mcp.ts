@@ -7,9 +7,10 @@
  * reach into a connected tab, and they say so clearly when none is there.
  */
 
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { McpServer, ResourceTemplate } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
 import { z } from 'zod';
+import { SubscribeRequestSchema, UnsubscribeRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { randomUUID } from 'node:crypto';
 import {
   type CanvasDocument, type CanvasNode, type NodeId, type Op, type OpEnvelope, type Page, type StyleMap,
@@ -23,9 +24,12 @@ import {
   type CodeComponent, type CodeProp, codeComponentsOf, codeComponentOf, resolvedCodeProps,
   codeElementJsx, explicitCodeProps, MOUNT_CONTRACT,
   type Comment, commentsOf, newId as newIdOf,
-  NOTE_KINDS, NOTE_KIND_HINTS, specFor, changesWithin, diffDocuments,
+  NOTE_KINDS, NOTE_KIND_HINTS, specFor, changesWithin, diffDocuments, describeComponent,
 } from '@playground/shared';
-import { applyOps, getDocument, getSnapshot, listSnapshots, StoreError, createSnapshot } from './store.ts';
+import {
+  applyOps, getDocument, getSnapshot, listSnapshots, StoreError, createSnapshot,
+  subscribe as subscribeToDocument,
+} from './store.ts';
 import { persistence } from './persistence.ts';
 import { pageArtboard, slugify } from './publish.ts';
 import { callTab, notifyTabs, selectionOf, hasLiveTab, NoTabError } from './realtime.ts';
@@ -385,6 +389,7 @@ export function buildMcpServer(ctx: McpContext): McpServer {
   registerCodeComponentTools(server, ctx);
   registerCommentTools(server, ctx);
   registerSessionTools(server, ctx);
+  registerResources(server, ctx);
 
   const active = new Set(ctx.toolsets ?? ['all']);
   /*
@@ -3204,4 +3209,149 @@ export async function handleMcpRequest(req: Request, connection: Connection, bas
     // Close on the next tick so the response stream finishes flushing first.
     setTimeout(() => { void server.close().catch(() => {}); }, 0);
   }
+}
+
+// ---------------------------------------------------------------------------
+// Resources
+// ---------------------------------------------------------------------------
+
+/**
+ * The document, as things a client can read and point at.
+ *
+ * Tools are verbs, and this server had only verbs. A page, a component, a
+ * spec, a guide are all nouns: things a person wants to @-mention into a
+ * conversation, and things an agent should be able to read without spending a
+ * tool call and a round of its own reasoning deciding which tool returns them.
+ *
+ * Subscriptions matter more here than in most servers, because a Playground
+ * document is edited by two parties at once. A client that subscribes to a page
+ * is told when the human moves something, instead of finding out by writing
+ * over it.
+ */
+function registerResources(server: McpServer, ctx: McpContext): void {
+  const docId = ctx.connection.docId;
+
+  const resource = (uri: string, contents: unknown, mimeType = 'application/json') => ({
+    contents: [{
+      uri,
+      mimeType,
+      text: typeof contents === 'string' ? contents : JSON.stringify(contents, null, 2),
+    }],
+  });
+
+  server.registerResource('document', 'playground://document', {
+    title: 'This document',
+    description: 'Name, pages, artboards, components and tokens — the same thing get_basic_info returns.',
+    mimeType: 'application/json',
+  }, async () => resource('playground://document', basicInfo(requireDoc(ctx))));
+
+  server.registerResource('page', new ResourceTemplate('playground://page/{name}', {
+    list: async () => ({
+      resources: requireDoc(ctx).pages.map((page) => ({
+        uri: `playground://page/${encodeURIComponent(page.name)}`,
+        name: page.name,
+        description: `${page.artboards.length} artboard(s)`,
+        mimeType: 'text/html',
+      })),
+    }),
+  }), {
+    title: 'A page',
+    description: 'Every artboard on the page, as the HTML it really is.',
+    mimeType: 'text/html',
+  }, async (uri, { name }) => {
+    const doc = requireDoc(ctx);
+    const wanted = decodeURIComponent(String(name));
+    const page = doc.pages.find((p) => p.name === wanted || p.id === wanted);
+    if (!page) throw new Error(`No page "${wanted}".`);
+    const html = page.artboards
+      .map((id) => `<!-- ${doc.nodes[id]?.name ?? id} -->\n${emitHtml(doc, id, { mode: 'inline' }).html}`)
+      .join('\n\n');
+    return resource(uri.href, html, 'text/html');
+  });
+
+  server.registerResource('component', new ResourceTemplate('playground://component/{name}', {
+    list: async () => ({
+      resources: Object.values(requireDoc(ctx).components ?? {}).map((c) => ({
+        uri: `playground://component/${encodeURIComponent(c.name)}`,
+        name: c.name,
+        description: describeComponent(requireDoc(ctx), c),
+        mimeType: 'text/html',
+      })),
+    }),
+  }), {
+    title: 'A component',
+    description: 'What the component is made of, and what an instance can override.',
+    mimeType: 'text/html',
+  }, async (uri, { name }) => {
+    const doc = requireDoc(ctx);
+    const wanted = decodeURIComponent(String(name));
+    const component = Object.values(doc.components ?? {}).find((c) => c.name === wanted || c.id === wanted);
+    if (!component) throw new Error(`No component "${wanted}".`);
+    return resource(uri.href, emitHtml(doc, component.root, { mode: 'inline' }).html, 'text/html');
+  });
+
+  server.registerResource('spec', new ResourceTemplate('playground://spec/{nodeId}', { list: undefined }), {
+    title: 'The spec for a layer',
+    description: 'Measured values, the tokens behind them, the states and widths that change them.',
+    mimeType: 'application/json',
+  }, async (uri, { nodeId }) => {
+    const doc = requireDoc(ctx);
+    const id = String(nodeId);
+    if (!doc.nodes[id]) throw new Error(`No node "${id}".`);
+    return resource(uri.href, specFor(doc, id));
+  });
+
+  server.registerResource('guide', new ResourceTemplate('playground://guide/{name}', {
+    list: async () => ({
+      resources: Object.keys(GUIDES).map((name) => ({
+        uri: `playground://guide/${name}`,
+        name,
+        description: `How to ${name} in a way a designer will keep.`,
+        mimeType: 'text/markdown',
+      })),
+    }),
+  }), {
+    title: 'A guide',
+    description: 'What makes output worth keeping — layout, typography, colour.',
+    mimeType: 'text/markdown',
+  }, async (uri, { name }) => {
+    const guide = GUIDES[String(name)];
+    if (!guide) throw new Error(`No guide "${String(name)}". There is: ${guideList()}.`);
+    return resource(uri.href, guide, 'text/markdown');
+  });
+
+  /*
+   * Subscriptions.
+   *
+   * The low-level handlers, because the high-level server does not wire these:
+   * a client asks for a URI, and from then on every change to the document
+   * tells it which of the things it is watching moved. Page and component
+   * resources also change *shape* — a new page is a new resource — so the list
+   * itself is announced as changed.
+   */
+  const watched = new Set<string>();
+  server.server.setRequestHandler(SubscribeRequestSchema, async (request) => {
+    watched.add(request.params.uri);
+    return {};
+  });
+  server.server.setRequestHandler(UnsubscribeRequestSchema, async (request) => {
+    watched.delete(request.params.uri);
+    return {};
+  });
+
+  let structural = 0;
+  const stop = subscribeToDocument(docId, (ops) => {
+    if (!watched.size && !structural) { /* nothing listening yet */ }
+    for (const uri of watched) {
+      void server.server.notification({ method: 'notifications/resources/updated', params: { uri } })
+        .catch(() => {});
+    }
+    // A page added or renamed changes what resources exist, not just their
+    // contents.
+    if (ops.some((o) => o.op.t === 'page' || o.op.t === 'component')) {
+      structural++;
+      void server.server.notification({ method: 'notifications/resources/list_changed' }).catch(() => {});
+    }
+  });
+  server.server.onclose = () => { stop(); };
 }
