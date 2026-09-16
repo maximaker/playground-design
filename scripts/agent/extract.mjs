@@ -107,25 +107,11 @@ function extractor() {
       const display = cs.display === 'inline' ? 'display:inline-block;' : asBlock;
       return `<${boxTag} style="${display}${styleOf(el)};background-color:#e7ded1;border-radius:${cs.borderRadius};${size}"></${boxTag}>`;
     }
-    /*
-     * A grid or flex container whose children include bare text cannot survive
-     * the trip.
-     *
-     * The browser wraps each run of loose text in an anonymous item; a document
-     * made of nodes has no anonymous boxes, so the text arrives as a real span
-     * and the item count — and with it the whole track assignment — changes. A
-     * list item that was one 24px line came back as seven. Block is what those
-     * elements were doing anyway: flowing their text.
-     */
-    const mixed = [...el.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim())
-      && [...el.children].length > 0;
-    const demote = mixed && /grid|flex/.test(cs.display);
-
     let tag = TAGS.has(el.tagName.toLowerCase()) ? el.tagName.toLowerCase() : 'div';
     if (INLINE_ONLY.has(parentTag) && !INLINE_ONLY.has(tag) && tag !== 'br') tag = 'span';
     // A span standing in for a block keeps the block's layout explicitly.
     const style = (tag === 'span' && cs.display !== 'inline' ? `display:${cs.display};` : '')
-      + (demote ? 'display:block;' : '') + styleOf(el, demote ? ['display', 'grid-template-columns', 'align-items', 'justify-content', 'gap'] : []);
+      + styleOf(el);
     /*
      * Markers drawn with ::before are content here.
      *
