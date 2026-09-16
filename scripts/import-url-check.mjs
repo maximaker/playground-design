@@ -13,6 +13,7 @@
 import './lib/session.mjs';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { LoggingMessageNotificationSchema } from '@modelcontextprotocol/sdk/types.js';
 
 const BASE = process.argv[2] ?? 'http://localhost:4000';
 const SITE = 'https://bine-in-botosei-de-spital.vercel.app';
@@ -32,8 +33,10 @@ const raw = await (await fetch(`${BASE}/api/documents/${doc.id}/connections`, {
 })).text();
 const client = new Client({ name: 'import-check', version: '1' });
 await client.connect(new StreamableHTTPClientTransport(new URL(`${BASE}/mcp/${raw.match(/\/mcp\/([A-Z0-9-]+)/)[1]}`)));
-const call = async (n, a = {}) => {
-  const r = await client.callTool({ name: n, arguments: a });
+const logs = [];
+client.setNotificationHandler(LoggingMessageNotificationSchema, (n) => logs.push(n.params.data));
+const call = async (n, a = {}, opts) => {
+  const r = await client.callTool({ name: n, arguments: a }, undefined, opts);
   const t = r.content.filter((c) => c.type === 'text').map((c) => c.text).join('\n');
   if (r.isError) throw new Error(`${n}: ${t}`);
   return t;
@@ -64,9 +67,20 @@ try {
 if (!reachable) {
   console.log('  — the reference site is unreachable; skipping the multi-page checks');
 } else {
+  /*
+   * Forty seconds of silence is what this used to be. The caller sends a
+   * progress token and gets told which route is being read.
+   */
+  const progress = [];
   const many = JSON.parse(await call('import_url', {
     url: SITE, width: 1440, routes: ['/', '/contact'],
-  }));
+  }, { onprogress: (p) => progress.push(p) }));
+  check('a long import reports its progress', progress.length >= 3, `${progress.length} updates`);
+  check('and says what it is doing, not just how far along it is',
+    progress.some((p) => /contact/.test(p.message ?? '')),
+    (progress.map((p) => p.message).filter(Boolean).slice(-1)[0] ?? '').slice(0, 60));
+  check('with a total that does not move', new Set(progress.map((p) => p.total)).size === 1,
+    [...new Set(progress.map((p) => p.total))].join(','));
   check('several routes come in as several pages', many.imported?.length === 2,
     (many.imported ?? []).map((p) => `${p.route}→${p.page}`).join(' '));
 

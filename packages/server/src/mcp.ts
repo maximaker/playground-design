@@ -82,6 +82,67 @@ const TOOLSETS: Record<string, readonly string[]> = {
 const setOf = (tool: string): string =>
   Object.entries(TOOLSETS).find(([, names]) => names.includes(tool))?.[0] ?? 'core';
 
+/**
+ * Progress and log lines, when the caller is listening for them.
+ *
+ * Importing six routes in a browser takes the better part of a minute and used
+ * to say nothing at all until it finished. MCP carries both of these: a
+ * progress token the caller sends with the call, and a log channel. Both are
+ * silent unless somebody asked, which is why they can be sprinkled into a tool
+ * without a second thought about clients that do not want them.
+ */
+interface ToolExtra {
+  _meta?: { progressToken?: string | number };
+  sendNotification: (notification: { method: string; params?: Record<string, unknown> }) => Promise<void>;
+}
+
+function reporter(extra?: ToolExtra) {
+  const token = extra?._meta?.progressToken;
+  return {
+    async step(progress: number, total: number, message: string): Promise<void> {
+      if (token === undefined || !extra) return;
+      await extra.sendNotification({
+        method: 'notifications/progress',
+        params: { progressToken: token, progress, total, message },
+      }).catch(() => {});
+    },
+    async log(level: 'debug' | 'info' | 'warning', data: string): Promise<void> {
+      if (!extra) return;
+      await extra.sendNotification({
+        method: 'notifications/message',
+        params: { level, logger: 'playground', data },
+      }).catch(() => {});
+    },
+  };
+}
+
+/**
+ * Asking the person, rather than asking the agent about itself.
+ *
+ * `delete_page` used to take `confirm: true` — a model confirming its own
+ * destructive act, which is a formality, not a check. MCP's elicitation puts
+ * the question where it belongs: the client shows it to whoever is sitting
+ * there, and the answer comes back.
+ *
+ * Where a client cannot ask, nothing changes: the old parameter still governs,
+ * because a tool that becomes unusable on half the clients is worse than one
+ * that is occasionally too trusting.
+ */
+function confirmer(server: McpServer) {
+  return async (message: string): Promise<'yes' | 'no' | 'unavailable'> => {
+    if (!server.server.getClientCapabilities()?.elicitation) return 'unavailable';
+    try {
+      const result = await server.server.elicitInput({
+        message,
+        requestedSchema: { type: 'object', properties: {}, required: [] },
+      });
+      return result.action === 'accept' ? 'yes' : 'no';
+    } catch {
+      return 'unavailable';
+    }
+  };
+}
+
 function json(value: unknown) {
   return text(JSON.stringify(value, null, 2));
 }
@@ -345,6 +406,9 @@ export function buildMcpServer(ctx: McpContext): McpServer {
   const server = new McpServer(
     { name: 'playground', version: '0.1.0' },
     {
+      // Declared so a client will accept log lines; everything else is implied
+      // by what gets registered below.
+      capabilities: { logging: {} },
       instructions:
         `You are connected to a Playground design document ("${ctx.connection.docName}"). ` +
         `Playground is a design tool whose documents are real HTML and CSS.\n\n` +
@@ -880,6 +944,7 @@ async function lookupGoogleFont(family: string): Promise<GoogleFontInfo | null> 
 // ---------------------------------------------------------------------------
 
 function registerWriteTools(server: McpServer, ctx: McpContext): void {
+  const askUser = confirmer(server);
   // --- Pages ----------------------------------------------------------------
   //
   // A document can hold several pages — a landing page, a deck, a set of
@@ -969,12 +1034,25 @@ function registerWriteTools(server: McpServer, ctx: McpContext): void {
       pageId: z.string(),
       confirm: z.boolean().describe('Must be true. The artboards on the page go with it.'),
     },
-  }, async ({ pageId, confirm }) => guard(() => {
+  }, async ({ pageId, confirm }) => guard(async () => {
     const doc = requireDoc(ctx);
     const page = doc.pages.find((p) => p.id === pageId);
     if (!page) return fail(`No page "${pageId}". Call list_pages.`);
     if (doc.pages.length === 1) return fail('This is the only page; a document must have one.');
-    if (!confirm) {
+
+    /*
+     * The person decides, where the client can ask them.
+     *
+     * `confirm: true` is a model confirming its own destructive act, which is a
+     * formality. Where elicitation exists the question goes to whoever is
+     * sitting there, and their answer is the one that counts — including when
+     * the agent already passed confirm.
+     */
+    const answer = await askUser(
+      `Delete the page "${page.name}" and the ${page.artboards.length} artboard(s) on it?`,
+    );
+    if (answer === 'no') return fail('The person declined. The page is still there.');
+    if (answer === 'unavailable' && !confirm) {
       return fail(`"${page.name}" holds ${page.artboards.length} artboard(s). Pass confirm: true to delete it and them.`);
     }
     // The artboards first: removing the page alone would leave their nodes in
@@ -1120,15 +1198,22 @@ function registerWriteTools(server: McpServer, ctx: McpContext): void {
         .describe("Register the site's :root custom properties as tokens and reference them in the styles."),
       artboardId: z.string().optional().describe('Import a single page into this artboard instead of creating one.'),
     },
-  }, async ({ url, width, routes, tokens, artboardId }) => guard(async () => {
+  }, async ({ url, width, routes, tokens, artboardId }, extra) => guard(async () => {
     const doc = requireDoc(ctx);
+    const say = reporter(extra as ToolExtra);
+    const wanted = routes?.length ?? 1;
+    await say.step(0, wanted + 1, `Opening ${url} at ${width}px`);
     const live = await importUrlLive(url, { width, routes }).catch((err: unknown) => {
       if (err instanceof ImportError) throw err;
       return null;
     });
 
     // No browser on this host: the old path is worse but it is not nothing.
-    if (!live) return staticImport(ctx, url, artboardId);
+    if (!live) {
+      await say.log('warning', 'No browser on this host — falling back to a static fetch.');
+      return staticImport(ctx, url, artboardId);
+    }
+    await say.step(1, live.pages.length + 1, `Read ${live.pages.length} page(s); building layers`);
 
     const varTokens = tokens ? tokensFromVars(live.vars) : [];
     if (varTokens.length) commit(ctx, [{ t: 'tokens', tokens: [...doc.tokens, ...varTokens] }]);
@@ -1178,6 +1263,8 @@ function registerWriteTools(server: McpServer, ctx: McpContext): void {
         commit(ctx, [{ t: 'insert', nodes: parsed.nodes, parent: root, index: doc.nodes[root]!.children.length }]);
       }
       made.push({ page: target.name, artboard: boardId, route: shot.route, sections: shot.sections.length });
+      await say.step(made.length + 1, live.pages.length + 1,
+        `${shot.route} — ${shot.sections.length} sections, ${shot.height}px`);
     }
 
     return json({
@@ -1441,10 +1528,21 @@ function registerWriteTools(server: McpServer, ctx: McpContext): void {
     description: 'Deletes nodes and everything inside them. This is undoable by the human, but check get_tree_summary first.',
     inputSchema: { ids: z.array(z.string()).min(1).max(200) },
     annotations: { destructiveHint: true },
-  }, async ({ ids }) => guard(() => {
+  }, async ({ ids }) => guard(async () => {
     const doc = requireDoc(ctx);
     let total = 0;
     for (const id of ids) { node(doc, id); total += 1 + descendants(doc, id).length; }
+
+    // Deleting a layer is routine; deleting a hundred of them is a thing to ask
+    // about, and the person is right there.
+    if (total > 20) {
+      const names = ids.slice(0, 3).map((id) => doc.nodes[id]?.name ?? id).join(', ');
+      const answer = await askUser(
+        `Delete ${names}${ids.length > 3 ? ` and ${ids.length - 3} more` : ''} — ${total} layers in all?`,
+      );
+      if (answer === 'no') return fail('The person declined. Nothing was deleted.');
+    }
+
     commit(ctx, [{ t: 'remove', ids }]);
     return json({ deleted: ids.length, totalNodesRemoved: total });
   }));
@@ -2207,8 +2305,9 @@ function registerComponentTools(server: McpServer, ctx: McpContext): void {
         .describe('How many to register. The most-repeated shapes come first.'),
       dryRun: z.boolean().optional().default(false).describe('Report the names it would use.'),
     },
-  }, async ({ minCopies, limit, dryRun }) => guard(async () => {
+  }, async ({ minCopies, limit, dryRun }, extra) => guard(async () => {
     const doc = requireDoc(ctx);
+    const say = reporter(extra as ToolExtra);
     const groups = repeatedShapes(doc, { minCopies, minDepth: 2 }).slice(0, limit);
     if (!groups.length) return json({ made: [], note: 'Nothing repeats often enough to be a component yet.' });
 
@@ -2222,6 +2321,7 @@ function registerComponentTools(server: McpServer, ctx: McpContext): void {
         .slice(0, 6),
     }));
 
+    await say.step(0, groups.length + 1, `Asking for names for ${groups.length} shapes`);
     const answer = await askModel({
       system:
         'You name user-interface components. Answer with JSON only: an array of '
@@ -2259,6 +2359,7 @@ function registerComponentTools(server: McpServer, ctx: McpContext): void {
       try {
         const result = componentiseShape(ctx, fresh.sample, name.trim());
         made.push({ name: name.trim(), instances: result.instances });
+        await say.step(made.length + 1, names.length + 1, `${name.trim()} — ${result.instances} instances`);
       } catch (err) {
         skipped.push({ name, reason: err instanceof Error ? err.message.slice(0, 120) : 'refused' });
       }
