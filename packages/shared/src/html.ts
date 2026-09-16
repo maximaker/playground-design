@@ -259,8 +259,40 @@ export interface ParseOptions {
  * not keep a live cascade, because the document model stores per-node styles.
  * Media-query and pseudo-class rules become node variants instead.
  */
+/**
+ * Nesting the HTML parser will silently undo.
+ *
+ * A `<div>` inside a `<p>` is not a nesting mistake, it is a parse error: the
+ * parser closes the paragraph and the div comes out as its sibling. Nothing
+ * about the result says this happened — the tree simply is not the tree that
+ * was written — and it cost an afternoon once: an avatar left the byline it was
+ * flexed into and rendered as a 1136px square.
+ *
+ * Scanned as tags rather than matched with a nested regular expression, which
+ * on a 40KB page is the difference between linear and quadratic.
+ */
+function relocations(html: string): string[] {
+  const found = new Set<string>();
+  let inParagraph = false;
+  for (const m of html.matchAll(/<(\/?)([a-zA-Z][\w-]*)\b/g)) {
+    const closing = m[1] === '/';
+    const tag = m[2]!.toLowerCase();
+    if (tag === 'p') {
+      if (closing) inParagraph = false;
+      else {
+        if (inParagraph) found.add('p');
+        inParagraph = true;
+      }
+    } else if (inParagraph && tag === 'div') found.add('div');
+  }
+  return [...found].map((tag) =>
+    `A <${tag}> inside a <p>: the HTML parser closes the paragraph first, so it became a sibling `
+    + 'of the paragraph rather than a child of it. Use a <span> with display:block, or move it out.');
+}
+
 export function parseHtml(html: string, opts: ParseOptions = {}): ParseResult {
   const warnings: string[] = [];
+  warnings.push(...relocations(html));
   const root = parseHtmlDom(html, {
     lowerCaseTagName: false,
     comment: opts.keepComments ?? false,
