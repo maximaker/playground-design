@@ -46,6 +46,10 @@ const NAMES = [
   ['imagine provizorie', 'Portrait photo'],
   ['provizorie', 'Photo placeholder'],
   ['Boala nu se întâmplă', 'Quote band'],
+  // Before the closing band: all three open with the brand name, and the first
+  // needle to match takes the shape.
+  ['© 2026', 'Site footer'],
+  ['Acasă', 'Site header'],
   ['Bine în botoșei de spital', 'Closing CTA'],
 ];
 
