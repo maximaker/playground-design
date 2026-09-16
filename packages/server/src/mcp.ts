@@ -10,6 +10,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
 import { z } from 'zod';
+import { randomUUID } from 'node:crypto';
 import {
   type CanvasDocument, type CanvasNode, type NodeId, type Op, type OpEnvelope, type Page, type StyleMap,
   applyOp, artboardOf, basicInfo, cloneSubtree, descendants, emitHtml, emitJsx, getNode,
@@ -140,6 +141,17 @@ function repeatedShapes(
 }
 
 /** The first bit of text in a subtree, so a group is recognisable in a list. */
+/**
+ * Whether a layer is still called after its tag.
+ *
+ * `write_html` names a node from its element, so an imported page arrives as
+ * two hundred layers called Div — which is a layer tree nobody can read.
+ */
+function isTagName(name: string, tag: string): boolean {
+  const n = name.trim().toLowerCase();
+  return n === tag.toLowerCase() || n === 'frame' || n === 'text' || n === 'group' || /^(div|span) \d+$/.test(n);
+}
+
 function previewText(doc: CanvasDocument, id: NodeId): string | undefined {
   for (const nodeId of subtreeIdsOf(doc, id)) {
     const t = doc.nodes[nodeId]?.text?.trim();
@@ -1988,6 +2000,209 @@ function registerComponentTools(server: McpServer, ctx: McpContext): void {
     });
   }));
 
+  /**
+   * Register one shape as a component and swap every copy for an instance.
+   *
+   * Shared by `componentise` and `auto_componentise` so both rehearse the same
+   * way: the plan is applied to a structuredClone and every artboard's HTML
+   * compared before and after. Doing it for real and undoing it would leave a
+   * half-rewritten document if anything threw in between.
+   */
+  function componentiseShape(context: McpContext, id: NodeId, name: string, description?: string) {
+    const doc = requireDoc(context);
+    const sig = shapeSignature(doc, id);
+    const copies = artboardNodes(doc).filter((n) => n !== id && shapeSignature(doc, n) === sig);
+
+    const plan = componentisePlan(doc, id, name, copies, description);
+    const rehearsal = structuredClone(doc);
+    for (const op of plan.ops) applyOp(rehearsal, op);
+
+    const before = renderAll(doc);
+    const after = renderAll(rehearsal);
+    const moved = Object.keys(before).filter((k) => before[k] !== after[k]);
+    if (moved.length) {
+      throw new Error(
+        `Refused: ${moved.join(', ')} would render differently, so these copies are not the same `
+        + 'thing after all. Nothing was changed.',
+      );
+    }
+
+    commit(context, plan.ops);
+    return {
+      componentId: plan.componentId,
+      definitionRoot: plan.definitionRoot,
+      instances: copies.length + 1,
+    };
+  }
+
+  /**
+   * Asking the client's model a question.
+   *
+   * MCP calls this sampling, and it closes the gap this server has had since
+   * the day it could find repeated shapes: it can see that nine subtrees are
+   * identical, and it cannot say that they are called "Reason card". The data
+   * is here; the model is on the other end of the connection.
+   *
+   * Every caller must work without it — sampling is advertised per client, and
+   * plenty do not offer it — so this returns null rather than throwing, and the
+   * tools fall back to reporting what they found for the caller to name.
+   */
+  async function askModel(opts: { system: string; prompt: string; maxTokens?: number }): Promise<string | null> {
+    if (!server.server.getClientCapabilities()?.sampling) return null;
+    try {
+      const result = await server.server.createMessage({
+        messages: [{ role: 'user', content: { type: 'text', text: opts.prompt } }],
+        systemPrompt: opts.system,
+        maxTokens: opts.maxTokens ?? 900,
+      });
+      const content = result.content as { type?: string; text?: string } | undefined;
+      return content?.type === 'text' ? (content.text ?? null) : null;
+    } catch {
+      // A client that advertises sampling can still refuse a particular call —
+      // the user may simply have said no. That is not an error worth failing a
+      // tool over; it is the fallback path.
+      return null;
+    }
+  }
+
+  /** Model answers arrive as JSON, sometimes wearing a code fence. */
+  function parseList<T>(answer: string | null): T[] {
+    if (!answer) return [];
+    const body = answer.replace(/^[\s\S]*?```(?:json)?/, '').replace(/```[\s\S]*$/, '').trim() || answer.trim();
+    try {
+      const parsed = JSON.parse(body) as unknown;
+      return Array.isArray(parsed) ? parsed as T[] : [];
+    } catch {
+      return [];
+    }
+  }
+
+  server.registerTool('auto_componentise', {
+    title: 'Name and register everything that repeats',
+    description:
+      'Finds the repeated shapes in the document, asks your model what each one is called, and '
+      + 'registers them as components. This is the whole post-import chore in one call. Where the '
+      + 'client does not offer sampling it reports the candidates instead, for you to name and pass '
+      + 'to componentise yourself.',
+    inputSchema: {
+      minCopies: z.number().int().min(2).max(50).optional().default(3),
+      limit: z.number().int().min(1).max(20).optional().default(8)
+        .describe('How many to register. The most-repeated shapes come first.'),
+      dryRun: z.boolean().optional().default(false).describe('Report the names it would use.'),
+    },
+  }, async ({ minCopies, limit, dryRun }) => guard(async () => {
+    const doc = requireDoc(ctx);
+    const groups = repeatedShapes(doc, { minCopies, minDepth: 2 }).slice(0, limit);
+    if (!groups.length) return json({ made: [], note: 'Nothing repeats often enough to be a component yet.' });
+
+    const described = groups.map((g) => ({
+      id: g.sample,
+      copies: g.ids.length,
+      tag: doc.nodes[g.sample]?.tag,
+      text: previewText(doc, g.sample) ?? '',
+      children: (doc.nodes[g.sample]?.children ?? [])
+        .map((c) => `${doc.nodes[c]?.type}:${previewText(doc, c) ?? doc.nodes[c]?.tag}`)
+        .slice(0, 6),
+    }));
+
+    const answer = await askModel({
+      system:
+        'You name user-interface components. Answer with JSON only: an array of '
+        + '{"id": string, "name": string}. Names are two or three words, in the language of the '
+        + 'interface the tool is in (English unless told otherwise), describing what the thing is '
+        + 'rather than what it says — "Stat", "FAQ item", "Reason card". Omit a shape you cannot '
+        + 'name confidently rather than guessing.',
+      prompt: `Name these repeated shapes from a design document.\n\n${JSON.stringify(described, null, 1)}`,
+    });
+    const names = parseList<{ id: string; name: string }>(answer);
+
+    if (!names.length) {
+      return json({
+        made: [],
+        candidates: described,
+        note: 'Your client did not answer a sampling request, so nothing was named. '
+          + 'Pick names yourself and call componentise with each id.',
+      });
+    }
+    if (dryRun) return json({ wouldMake: names });
+
+    const made: { name: string; instances: number }[] = [];
+    const skipped: { name: string; reason: string }[] = [];
+    for (const { id, name } of names) {
+      if (typeof id !== 'string' || typeof name !== 'string' || !name.trim()) continue;
+      /*
+       * Looked up again each time, not taken from the list above: registering a
+       * component rewrites every copy of it, so ids from before go stale, and a
+       * shape that was third largest becomes largest once the ones above it are
+       * gone.
+       */
+      const fresh = repeatedShapes(requireDoc(ctx), { minCopies, minDepth: 2 })
+        .find((g) => g.ids.includes(id) || g.sample === id);
+      if (!fresh) { skipped.push({ name, reason: 'no longer repeats — already part of another component' }); continue; }
+      try {
+        const result = componentiseShape(ctx, fresh.sample, name.trim());
+        made.push({ name: name.trim(), instances: result.instances });
+      } catch (err) {
+        skipped.push({ name, reason: err instanceof Error ? err.message.slice(0, 120) : 'refused' });
+      }
+    }
+    return json({ made, skipped, next: 'list_components, then insert_instance where you need them.' });
+  }));
+
+  server.registerTool('name_layers', {
+    title: 'Give the layers real names',
+    description:
+      'Renames layers that are still called after their tag — "Div", "Span", "Section" — using what '
+      + 'they contain. An imported or generated page is full of them, and a layer tree of two hundred '
+      + 'Divs is unusable for the person who inherits it. Needs a client that offers sampling.',
+    inputSchema: {
+      id: z.string().describe('Rename the layers inside this node.'),
+      limit: z.number().int().min(1).max(200).optional().default(60),
+      dryRun: z.boolean().optional().default(false),
+    },
+  }, async ({ id, limit, dryRun }) => guard(async () => {
+    const doc = requireDoc(ctx);
+    node(doc, id);
+
+    const generic = subtreeIdsOf(doc, id)
+      .map((nodeId) => doc.nodes[nodeId]!)
+      .filter((n) => n.type !== 'artboard' && isTagName(n.name, n.tag))
+      .slice(0, limit);
+    if (!generic.length) return json({ renamed: 0, note: 'Every layer in there already has a name.' });
+
+    const described = generic.map((n) => ({
+      id: n.id,
+      tag: n.tag,
+      text: previewText(doc, n.id) ?? '',
+      children: n.children.length,
+    }));
+
+    const answer = await askModel({
+      system:
+        'You name layers in a design file. Answer with JSON only: an array of '
+        + '{"id": string, "name": string}. Two or three words, describing the role of the layer — '
+        + '"Hero", "Price row", "Footer links" — never the tag and never the full sentence it '
+        + 'contains. Omit any you cannot name confidently.',
+      prompt: `Name these layers.\n\n${JSON.stringify(described, null, 1)}`,
+      maxTokens: 1600,
+    });
+    const names = parseList<{ id: string; name: string }>(answer)
+      .filter((n) => typeof n?.id === 'string' && typeof n?.name === 'string' && n.name.trim()
+        && described.some((d) => d.id === n.id));
+
+    if (!names.length) {
+      return json({
+        renamed: 0,
+        candidates: described,
+        note: 'Your client did not answer a sampling request. Rename them with rename_nodes.',
+      });
+    }
+    if (dryRun) return json({ wouldRename: names });
+
+    commit(ctx, [{ t: 'rename', updates: names.map((n) => ({ id: n.id, name: n.name.trim().slice(0, 60) })) }]);
+    return json({ renamed: names.length, names: names.slice(0, 20) });
+  }));
+
   server.registerTool('componentise', {
     title: 'Turn a repeated shape into a component',
     description:
@@ -2008,36 +2223,21 @@ function registerComponentTools(server: McpServer, ctx: McpContext): void {
     if (source.type === 'instance') return fail(`${id} is already an instance.`);
     if (source.type === 'artboard') return fail('Artboards cannot be components.');
 
-    const sig = shapeSignature(doc, id);
-    const copies = artboardNodes(doc).filter((n) => n !== id && shapeSignature(doc, n) === sig);
     if (dryRun) {
+      const sig = shapeSignature(doc, id);
+      const copies = artboardNodes(doc).filter((n) => n !== id && shapeSignature(doc, n) === sig);
       return json({ wouldReplace: copies.length, copies: copies.slice(0, 20), name });
     }
 
-    // Rehearsed on a copy, not on the document: the check is whether the pages
-    // still render the same, and finding that out by doing it and undoing it
-    // would leave a half-rewritten document if anything threw in between.
-    const plan = componentisePlan(doc, id, name, copies, description);
-    const rehearsal = structuredClone(doc);
-    for (const op of plan.ops) applyOp(rehearsal, op);
-
-    const before = renderAll(doc);
-    const after = renderAll(rehearsal);
-    const moved = Object.keys(before).filter((k) => before[k] !== after[k]);
-    if (moved.length) {
-      return fail(
-        `Refused: ${moved.join(', ')} would render differently, so these copies are not the same ` +
-        'thing after all. Nothing was changed.',
-      );
+    try {
+      const made = componentiseShape(ctx, id, name, description);
+      return json({
+        ...made,
+        next: 'set_component_props and set_variant give it variants; get_instance shows what an instance can override.',
+      });
+    } catch (err) {
+      return fail(err instanceof Error ? err.message : String(err));
     }
-
-    commit(ctx, plan.ops);
-    return json({
-      componentId: plan.componentId,
-      definitionRoot: plan.definitionRoot,
-      instances: copies.length + 1,
-      next: 'set_component_props and set_variant give it variants; get_instance shows what an instance can override.',
-    });
   }));
 
   server.registerTool('insert_instance', {
@@ -2781,9 +2981,99 @@ function registerSessionTools(server: McpServer, ctx: McpContext): void {
  * bound to the document the connection code resolves to. Stateless mode means
  * an agent can reconnect freely and the server can restart without breaking it.
  */
+/**
+ * Live MCP sessions, by session id.
+ *
+ * The transport used to be stateless: a server per request, a JSON response,
+ * nothing kept. That is the right shape for a serverless host and it quietly
+ * rules out half of MCP — a server can only *answer* over it. Asking the
+ * client's model to name a component, asking the person whether to replace
+ * fourteen of them, reporting progress through a forty-second import, pushing
+ * a notification when a human edits the document: every one of those is a
+ * message the server starts, and a stateless request has no channel to start
+ * it on.
+ *
+ * So a client that initializes gets a session, and with it a stream the server
+ * can speak on. Anything arriving without one still works exactly as before,
+ * which is what keeps a serverless deployment — where this map cannot be
+ * shared between instances — a supported way to run this.
+ */
+interface McpSession {
+  server: ReturnType<typeof buildMcpServer>;
+  transport: WebStandardStreamableHTTPServerTransport;
+  /** Sessions belong to one connection code; a code is a document credential. */
+  code: string;
+  lastSeen: number;
+}
+
+const sessions = new Map<string, McpSession>();
+const SESSION_IDLE_MS = 30 * 60_000;
+const MAX_SESSIONS = 200;
+
+function sweepSessions(): void {
+  const cutoff = Date.now() - SESSION_IDLE_MS;
+  for (const [id, session] of sessions) {
+    if (session.lastSeen > cutoff) continue;
+    sessions.delete(id);
+    setTimeout(() => { void session.server.close().catch(() => {}); }, 0);
+  }
+  // A cap as well as a clock: a client that initializes in a loop and never
+  // closes should cost memory in proportion to nothing in particular.
+  while (sessions.size > MAX_SESSIONS) {
+    const oldest = [...sessions.entries()].sort((a, b) => a[1].lastSeen - b[1].lastSeen)[0];
+    if (!oldest) break;
+    sessions.delete(oldest[0]);
+    setTimeout(() => { void oldest[1].server.close().catch(() => {}); }, 0);
+  }
+}
+
+/** Peeked from a clone, so the body is still there for the transport to read. */
+async function isInitialize(req: Request): Promise<boolean> {
+  if (req.method !== 'POST') return false;
+  try {
+    const body = await req.clone().json() as unknown;
+    const messages = Array.isArray(body) ? body : [body];
+    return messages.some((m) => (m as { method?: string })?.method === 'initialize');
+  } catch {
+    return false;
+  }
+}
+
 export async function handleMcpRequest(req: Request, connection: Connection, baseUrl: string): Promise<Response> {
   void touchConnection(connection.code);
+  sweepSessions();
 
+  const sessionId = req.headers.get('mcp-session-id') ?? undefined;
+  const held = sessionId ? sessions.get(sessionId) : undefined;
+  if (held && held.code === connection.code) {
+    held.lastSeen = Date.now();
+    if (req.method === 'DELETE') sessions.delete(sessionId!);
+    return held.transport.handleRequest(req);
+  }
+
+  if (await isInitialize(req)) {
+    const server = buildMcpServer({ connection, baseUrl });
+    const transport = new WebStandardStreamableHTTPServerTransport({
+      sessionIdGenerator: () => randomUUID(),
+      // Not enableJsonResponse: the stream is the point. A single JSON body
+      // can carry the answer to a call and nothing else, and the server needs
+      // to be able to ask something in the middle of one.
+      onsessioninitialized: (id: string) => {
+        sessions.set(id, { server, transport, code: connection.code, lastSeen: Date.now() });
+      },
+      onsessionclosed: (id: string) => { sessions.delete(id); },
+    });
+    await server.connect(transport);
+    return transport.handleRequest(req);
+  }
+
+  /*
+   * No session, and not asking for one: the original stateless path.
+   *
+   * A client that never initializes, one whose session has expired, and every
+   * request on a host that runs each one in a different process all land here
+   * and work — minus the things that need the server to speak first.
+   */
   const server = buildMcpServer({ connection, baseUrl });
   const transport = new WebStandardStreamableHTTPServerTransport({
     sessionIdGenerator: undefined,
