@@ -32,8 +32,10 @@ const NAMES = [
   ['Am fost și de partea', 'Reason card'],
   ['ani de practică', 'Stat'],
   ['15+', 'Stat'],
-  ['Trebuie ca diagnosticul', 'FAQ item'],
+  // The seven collapsed ones before the pair the page opens by default: the
+  // first match wins the name, and the name should belong to the majority.
   ['Putem participa doar noi', 'FAQ item'],
+  ['Trebuie ca diagnosticul', 'FAQ item, open'],
   ['O oră care limpezește', 'Step card'],
   ['Sesiunea 1', 'Session card'],
   ['Workshop 01', 'Workshop card'],

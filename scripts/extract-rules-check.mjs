@@ -26,6 +26,7 @@ const FIXTURE = `<!doctype html><meta charset="utf-8">
   .card{position:relative;padding:24px}
   .card::before{content:"“";position:absolute;top:8px;left:8px;font-size:32px;color:#999}
   .narrow{width:200px}
+  h2{text-wrap:balance}
   .mark{display:block;width:18px;height:18px;background:#000;border-radius:50%}
 </style>
 <main>
@@ -70,6 +71,7 @@ check('a decorative marker stays out of the flow', /position:absolute[^"]*top:8p
 check('an empty decorative box keeps its size', /width:18px;height:18px/.test(html));
 check('a box with content is not pinned to a measured width',
   !/<span style="[^"]*width:\d+px[^"]*">Boli/.test(html));
+check('a heading that balances its lines keeps doing so', /text-wrap:balance/.test(html));
 check('a width the author set is kept', /width:200px/.test(html));
 check('boxes round but type keeps its fractions',
   /padding:7px 15px/.test(html) && !/line-height:26px[;"]/.test(`${html}${shot.wrapper}`));

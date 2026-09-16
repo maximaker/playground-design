@@ -27,7 +27,7 @@ export function extractPage(): PageShot {
   const KEEP = ['display', 'flex-direction', 'flex-wrap', 'align-items', 'justify-content', 'gap',
     'grid-template-columns', 'padding', 'margin', 'max-width', 'min-height', 'background-color',
     'background-image', 'color', 'font-family', 'font-size', 'font-weight', 'line-height',
-    'letter-spacing', 'text-transform', 'text-align', 'white-space', 'border-radius', 'border', 'box-shadow',
+    'letter-spacing', 'text-transform', 'text-align', 'white-space', 'text-wrap', 'border-radius', 'border', 'box-shadow',
     'position', 'top', 'left', 'right', 'bottom', 'overflow', 'aspect-ratio', 'flex', 'width',
     'grid-column', 'grid-row', 'align-self', 'justify-self', 'order'];
   const DEF: Record<string, string> = {
@@ -36,7 +36,7 @@ export function extractPage(): PageShot {
     'background-color': 'rgba(0, 0, 0, 0)', 'background-image': 'none', 'border-radius': '0px',
     'box-shadow': 'none', position: 'static', overflow: 'visible', 'text-transform': 'none',
     'letter-spacing': 'normal', 'text-align': 'start', 'aspect-ratio': 'auto', 'max-width': 'none',
-    'min-height': '0px', flex: '0 1 auto', 'grid-template-columns': 'none', 'white-space': 'normal',
+    'min-height': '0px', flex: '0 1 auto', 'grid-template-columns': 'none', 'white-space': 'normal', 'text-wrap': 'wrap',
     top: 'auto', left: 'auto', right: 'auto', bottom: 'auto', width: 'auto',
     // A feature tile that spans two columns and two rows is not a tile the size
     // of the others. Its width used to be recorded, which faked the span; once
