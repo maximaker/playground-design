@@ -16,7 +16,14 @@ const ROUTES = (process.argv[3] ?? '/').split(',');
 
 const bands = (sel) => (page) => page.evaluate((sel) => {
   const main = document.querySelector(sel) || document.body;
-  return [...main.children].map((el) => ({
+  // The same composition the extractor uses: the page's own header and footer
+  // around main's bands, so the two lists line up.
+  const outer = sel === 'main'
+    ? [...document.body.children].filter((el) => el !== main && !main.contains(el) && /^(header|footer|nav)$/i.test(el.tagName))
+    : [];
+  const before = outer.filter((el) => el.compareDocumentPosition(main) & Node.DOCUMENT_POSITION_FOLLOWING);
+  const kids = [...before, ...main.children, ...outer.filter((el) => !before.includes(el))];
+  return kids.map((el) => ({
     height: Math.round(el.getBoundingClientRect().height),
     text: (el.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 44),
   })).filter((b) => b.height > 4);

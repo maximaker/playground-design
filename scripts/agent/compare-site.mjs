@@ -35,7 +35,13 @@ const settle = async (page) => {
 
 const bands = (root) => (page) => page.evaluate((sel) => {
   const main = document.querySelector(sel) || document.body;
-  return [...main.children].map((el) => {
+  // The document holds the page's header and footer around main's bands, so
+  // the site's list is composed the same way or the two are off by one.
+  const outer = sel === 'main'
+    ? [...document.body.children].filter((el) => el !== main && !main.contains(el) && /^(header|footer|nav)$/i.test(el.tagName))
+    : [];
+  const before = outer.filter((el) => el.compareDocumentPosition(main) & Node.DOCUMENT_POSITION_FOLLOWING);
+  return [...before, ...main.children, ...outer.filter((el) => !before.includes(el))].map((el) => {
     const r = el.getBoundingClientRect();
     return {
       tag: el.tagName.toLowerCase(),

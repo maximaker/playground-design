@@ -10,7 +10,12 @@ const { document: doc } = await (await fetch(`${BASE}/api/documents/${DOC}`)).js
 const board = doc.pages.find((p) => p.name === PAGE).artboards[0];
 
 const dump = (sel, idx) => (page) => page.evaluate(([sel, idx]) => {
-  const root = [...(document.querySelector(sel) || document.body).children][+idx];
+  const main = document.querySelector(sel) || document.body;
+  const outer = sel === 'main'
+    ? [...document.body.children].filter((el) => el !== main && !main.contains(el) && /^(header|footer|nav)$/i.test(el.tagName))
+    : [];
+  const before = outer.filter((el) => el.compareDocumentPosition(main) & Node.DOCUMENT_POSITION_FOLLOWING);
+  const root = [...before, ...main.children, ...outer.filter((el) => !before.includes(el))][+idx];
   const walk = (el, d) => {
     const c = getComputedStyle(el);
     const r = el.getBoundingClientRect();

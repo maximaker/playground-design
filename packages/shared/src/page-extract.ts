@@ -57,6 +57,19 @@ export function extractPage(): PageShot {
    * every page's first band came from (a <figure>, quietly 1em away from its
    * neighbours). For these, a zero is a fact and gets written down.
    */
+  /*
+   * What the browser would display each tag as, when the page says nothing.
+   *
+   * `display:block` on an <a> looked like the initial value and was dropped, so
+   * every footer link went back to being inline and the footer lost 47px on
+   * every page.
+   */
+  const UA_DISPLAY: Record<string, string> = {
+    a: 'inline', span: 'inline', em: 'inline', strong: 'inline', b: 'inline', i: 'inline',
+    label: 'inline', abbr: 'inline', small: 'inline', code: 'inline', br: 'inline',
+    button: 'inline-block', input: 'inline-block', select: 'inline-block', textarea: 'inline-block',
+    li: 'list-item', summary: 'list-item',
+  };
   const UA_BOX: Record<string, string[]> = {
     p: ['margin'], h1: ['margin'], h2: ['margin'], h3: ['margin'], h4: ['margin'],
     h5: ['margin'], h6: ['margin'], figure: ['margin'], figcaption: [], blockquote: ['margin'],
@@ -92,7 +105,8 @@ export function extractPage(): PageShot {
     for (const p of KEEP) {
       const v = cs.getPropertyValue(p).trim();
       if (!v || skip.includes(p)) continue;
-      if (DEF[p] === v && !ua.includes(p)) continue;
+      if (p === 'display') { if (v === (UA_DISPLAY[el.tagName.toLowerCase()] ?? 'block')) continue; }
+      else if (DEF[p] === v && !ua.includes(p)) continue;
       // The root carries the typography everything under it inherits; there is
       // no page above it to inherit from once it is in a document.
       if (!root && INHERIT.includes(p) && ps && ps.getPropertyValue(p).trim() === v) continue;
@@ -283,9 +297,27 @@ export function extractPage(): PageShot {
   }
 
   const main = document.querySelector('main') || document.body;
-  const sections = [...main.children]
-    .map((el) => walk(el, 1, 'div'))
-    .filter((html) => html.trim().length > 0);
+  /*
+   * The page is not only its <main>.
+   *
+   * Reading main's children alone produced documents with no navigation and no
+   * footer — every page of the imported site began at its hero and ended at its
+   * last band, which is not what anyone looking at the site sees. The header
+   * and footer are siblings of main, so they are picked up around it, and a
+   * sticky bar is put back in the flow: in a design it is a band at the top of
+   * the page, not something floating over the first one.
+   */
+  const unstick = (html: string) => html.replace(/position:(sticky|fixed)/g, 'position:relative');
+  const outer = [...document.body.children].filter(
+    (el) => el !== main && !main.contains(el) && /^(header|footer|nav)$/i.test(el.tagName),
+  );
+  const before = outer.filter((el) => el.compareDocumentPosition(main) & Node.DOCUMENT_POSITION_FOLLOWING);
+  const after = outer.filter((el) => !before.includes(el));
+  const sections = [
+    ...before.map((el) => unstick(walk(el, 1, 'div'))),
+    ...[...main.children].map((el) => walk(el, 1, 'div')),
+    ...after.map((el) => unstick(walk(el, 1, 'div'))),
+  ].filter((html) => html.trim().length > 0);
   return {
     title: document.title,
     height: Math.ceil(document.body.scrollHeight),

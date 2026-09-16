@@ -29,6 +29,7 @@ const FIXTURE = `<!doctype html><meta charset="utf-8">
   h2{text-wrap:balance}
   .mark{display:block;width:18px;height:18px;background:#000;border-radius:50%}
 </style>
+<header style="position:sticky;top:0"><a href="#" style="display:block">Home</a></header>
 <main>
   <section>
     <figure><span>caption</span></figure>
@@ -42,7 +43,8 @@ const FIXTURE = `<!doctype html><meta charset="utf-8">
     <h2>One<br>Two</h2>
     <a href="#"><svg width="16" height="16"><rect width="16" height="16"/></svg>Label</a>
   </section>
-</main>`;
+</main>
+<footer><a href="#" style="display:block">Contact</a></footer>`;
 
 const results = [];
 const check = (name, ok, detail = '') => {
@@ -71,6 +73,9 @@ check('a decorative marker stays out of the flow', /position:absolute[^"]*top:8p
 check('an empty decorative box keeps its size', /width:18px;height:18px/.test(html));
 check('a box with content is not pinned to a measured width',
   !/<span style="[^"]*width:\d+px[^"]*">Boli/.test(html));
+check('the page keeps its header and footer', /<header/.test(html) && /<footer/.test(html));
+check('a sticky bar becomes a band at the top', !/position:sticky/.test(html) && /position:relative/.test(html));
+check('a link the page made a block stays one', (html.match(/<a style="display:block/g) ?? []).length === 2);
 check('a heading that balances its lines keeps doing so', /text-wrap:balance/.test(html));
 check('a width the author set is kept', /width:200px/.test(html));
 check('boxes round but type keeps its fractions',
