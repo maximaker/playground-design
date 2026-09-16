@@ -311,9 +311,10 @@ async function fitShot(
  * full 1600px window. The document's own tokens are already in the emitted
  * stylesheet, so this only has to point at them.
  */
-const INHERITED = `<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" />
-<style>
+// The fonts come from the document, through emitStandalone: this block used to
+// hardcode Inter and IBM Plex Mono, so a component preview of a design set in
+// Fraunces was rendered in Inter and cached that way.
+const INHERITED = `<style>
   html, body { margin: 0; padding: 0; }
   body {
     font-family: var(--font-sans, 'Inter', system-ui, sans-serif);
@@ -332,7 +333,7 @@ const INHERITED = `<link rel="preconnect" href="https://fonts.gstatic.com" cross
  * every picture and invalidated none of them, and the caches had to be deleted
  * by hand to see it.
  */
-export const RENDERER_VERSION = 'r3';
+export const RENDERER_VERSION = 'r4';
 
 async function load(
   page: PlaywrightPage, doc: CanvasDocument, nodeId: NodeId, baseUrl?: string, inherit = false,

@@ -49,7 +49,7 @@ await call('write_html', {
     .row { display: flex; flex-direction: row; gap: 24px; }
     @media (max-width: 700px) { .row { flex-direction: column; } .title { font-size: 32px; } }
   </style>
-  <div style="padding:64px;display:flex;flex-direction:column;gap:32px;background:#fff">
+  <div style="padding:64px;display:flex;flex-direction:column;gap:32px;background:#fff;font-family:'Fraunces',Georgia,serif">
     <h1 class="title" style="margin:0;font-size:64px">A published page</h1>
     <div class="row" data-check="row">
       <div style="flex:1;padding:24px;border-radius:16px;background:#f4f4f5">One</div>
@@ -72,6 +72,19 @@ const html = await anonymous.text();
 check('a stranger with no account gets the page', anonymous.ok, `${anonymous.status}`);
 check('and it is a page, not the editor',
   !html.includes('id="root"') && html.includes('A published page'));
+/*
+ * A published page is set in the design's own typefaces.
+ *
+ * This file used to name Inter and IBM Plex Mono in the head whatever the
+ * document was set in, so a page designed in Fraunces published in Inter — the
+ * one thing a designer checks first, wrong on every published page.
+ */
+const publishedHtml = await (await rawFetch(published.url)).text();
+check('the fonts are the ones the design uses',
+  /fonts\.googleapis[^"']*Fraunces/.test(publishedHtml), (/href="(https:\/\/fonts[^"]*)"/.exec(publishedHtml) ?? [])[1] ?? 'no font link');
+check('and no others are requested',
+  !/family=Inter/.test(publishedHtml));
+
 check('with the document name as its title',
   html.includes(`<title>Publish check ${stamp}</title>`),
   html.match(/<title>[^<]*<\/title>/)?.[0]);

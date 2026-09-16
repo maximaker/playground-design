@@ -73,7 +73,9 @@ export function pageArtboard(doc: CanvasDocument, chosen: string | null): NodeId
  *    released to fill the viewport, and the media queries inside it — which
  *    were written against the artboard's width — then resolve against the
  *    window, which is what they were always for.
- *  - `<head>` gets a title, a description and the fonts the document uses.
+ *  - `<head>` gets a title and a description. The fonts come from
+ *    emitStandalone, which asks the document which ones it uses — this file
+ *    used to name Inter and IBM Plex Mono, whatever the design was set in.
  */
 export function publishedHtml(
   doc: CanvasDocument, artboardId: NodeId, pub: StoredPublication, canonical: string,
@@ -88,8 +90,6 @@ export function publishedHtml(
 <meta property="og:description" content="${escapeAttr(pub.description ?? '')}" />
 <meta property="og:url" content="${escapeAttr(canonical)}" />
 <link rel="canonical" href="${escapeAttr(canonical)}" />
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" />
 <style>
   /* The artboard becomes the page: full width, natural height, and its own
      background carried up to the document so there is no band of white under a
