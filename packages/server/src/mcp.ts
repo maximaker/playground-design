@@ -12,6 +12,9 @@ import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/
 import { z } from 'zod';
 import { SubscribeRequestSchema, UnsubscribeRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { randomUUID } from 'node:crypto';
+import { existsSync, readFileSync, statSync } from 'node:fs';
+import { join, resolve, sep } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   type CanvasDocument, type CanvasNode, type NodeId, type Op, type OpEnvelope, type Page, type StyleMap,
   applyOp, artboardOf, basicInfo, cloneSubtree, descendants, emitHtml, emitJsx, getNode,
@@ -142,6 +145,38 @@ function confirmer(server: McpServer) {
     }
   };
 }
+
+/**
+ * The project directory, when the client offers one and this process can see it.
+ *
+ * MCP roots are how a client says "the work is over here". For a hosted server
+ * that is information and nothing more — a path on someone else's machine is
+ * not a path. But the common case for this server is a developer running it
+ * beside their editor, and then the root is a real directory: the token file
+ * the agent would otherwise be asked to paste is sitting in it.
+ *
+ * So: only roots that exist on *this* filesystem, and only paths inside one of
+ * them. A client that declares a root has authorised that directory; it has
+ * not authorised the rest of the disk.
+ */
+async function projectRoots(server: McpServer): Promise<string[]> {
+  if (!server.server.getClientCapabilities()?.roots) return [];
+  try {
+    const { roots } = await server.server.listRoots();
+    return roots
+      .map((root) => (root.uri.startsWith('file://') ? fileURLToPath(root.uri) : null))
+      .filter((path): path is string => !!path && existsSync(path));
+  } catch {
+    return [];
+  }
+}
+
+/** Token sources worth offering, in the order a project usually keeps them. */
+const TOKEN_FILES = [
+  'tailwind.config.js', 'tailwind.config.ts', 'tailwind.config.mjs',
+  'src/styles/tokens.css', 'src/tokens.css', 'styles/tokens.css', 'tokens.css',
+  'src/app/globals.css', 'app/globals.css', 'src/index.css', 'src/styles.css', 'styles/globals.css',
+];
 
 function json(value: unknown) {
   return text(JSON.stringify(value, null, 2));
@@ -1547,6 +1582,42 @@ function registerWriteTools(server: McpServer, ctx: McpContext): void {
     return json({ deleted: ids.length, totalNodesRemoved: total });
   }));
 
+  server.registerTool('find_project_tokens', {
+    title: 'Look for the project’s token files',
+    description:
+      'Lists the stylesheets and Tailwind configs in the directories your client has shared with '
+      + 'this server, so sync_tokens_from_code can read one instead of asking you to paste it. '
+      + 'Finds nothing when the server runs somewhere else, which is the usual case for a hosted '
+      + 'instance — paste the file then.',
+    inputSchema: {},
+    annotations: { readOnlyHint: true },
+  }, async () => guard(async () => {
+    const roots = await projectRoots(server);
+    if (!roots.length) {
+      return json({
+        roots: [],
+        note: 'Your client shared no directories, or they are not on the machine running this server. '
+          + 'Pass the file contents to sync_tokens_from_code instead.',
+      });
+    }
+    const found = roots.flatMap((root) => TOKEN_FILES
+      .map((name) => join(root, name))
+      .filter((path) => existsSync(path))
+      .map((path) => ({
+        path,
+        bytes: statSync(path).size,
+        // Who has to read it: a stylesheet the server can, a config it cannot.
+        read: /\.css$/.test(path) ? 'server' : 'you',
+      })));
+    return json({
+      roots,
+      found,
+      next: found.length
+        ? 'sync_tokens_from_code with `path` set to one of these.'
+        : 'Nothing familiar in there; paste the file contents instead.',
+    });
+  }));
+
   server.registerTool('sync_tokens_from_code', {
     title: 'Bring the codebase’s tokens in',
     description:
@@ -1559,17 +1630,47 @@ function registerWriteTools(server: McpServer, ctx: McpContext): void {
       css: z.string().optional().describe('A stylesheet containing :root custom properties.'),
       tailwindTheme: z.record(z.string(), z.unknown()).optional()
         .describe('A Tailwind theme object, e.g. the value of theme.extend.'),
+      path: z.string().optional()
+        .describe('A file from find_project_tokens, read by the server. Only inside a directory your client shared.'),
       dryRun: z.boolean().optional().default(false).describe('Report the differences without applying them.'),
       removeMissing: z.boolean().optional().default(false)
         .describe('Also delete tokens the source does not mention. Off by default: a stylesheet is usually only part of a system.'),
     },
-  }, async ({ css, tailwindTheme, dryRun, removeMissing }) => guard(() => {
+  }, async ({ css, tailwindTheme, path, dryRun, removeMissing }) => guard(async () => {
     const doc = requireDoc(ctx);
-    if (!css && !tailwindTheme) return fail('Pass either `css` or `tailwindTheme`.');
 
-    const parsed = css
-      ? parseTokensFromCss(css, doc.tokens.map((t) => t.name))
-      : parseTokensFromTailwind(tailwindTheme!);
+    let source = css;
+    let fromTailwind = tailwindTheme;
+    if (path) {
+      // Inside a shared directory or not at all. A declared root authorises
+      // that directory; it does not authorise the rest of the disk, and
+      // "../../.ssh/id_rsa" resolves to somewhere outside every one of them.
+      const roots = await projectRoots(server);
+      const full = resolve(path);
+      const inside = roots.some((root) => full === root || full.startsWith(resolve(root) + sep));
+      if (!inside) {
+        return fail(roots.length
+          ? `${path} is not inside a directory your client shared (${roots.join(', ')}).`
+          : 'Your client has shared no directories with this server, so it cannot read files. Paste the contents instead.');
+      }
+      if (!existsSync(full)) return fail(`No file at ${full}.`);
+      /*
+       * CSS only. A Tailwind config is JavaScript — reading it gives text that
+       * has to be *executed* to become a theme object, and a design tool is not
+       * the place to run someone's config file. The agent can read it and pass
+       * the object; it has the file open anyway.
+       */
+      if (!/\.css$/.test(full)) {
+        return fail(`${path} is a config, not a stylesheet. Read it yourself and pass its theme object as \`tailwindTheme\`.`);
+      }
+      if (statSync(full).size > 512_000) return fail(`${path} is larger than 512KB; paste the relevant part instead.`);
+      source = readFileSync(full, 'utf8');
+    }
+    if (!source && !fromTailwind) return fail('Pass `css`, `tailwindTheme`, or a `path` from find_project_tokens.');
+
+    const parsed = source
+      ? parseTokensFromCss(source, doc.tokens.map((t) => t.name))
+      : parseTokensFromTailwind(fromTailwind!);
 
     if (!parsed.tokens.length) {
       return fail(parsed.warnings[0] ?? 'No tokens found in that source.');
