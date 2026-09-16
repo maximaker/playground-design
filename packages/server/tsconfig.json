@@ -3,7 +3,7 @@
     "target": "ES2022", "module": "ESNext", "moduleResolution": "bundler",
     "strict": true, "noEmit": true, "skipLibCheck": true,
     "allowImportingTsExtensions": true, "noUncheckedIndexedAccess": true,
-    "types": ["node"], "lib": ["ES2023", "DOM"]
+    "types": ["node"], "lib": ["ES2023", "DOM", "DOM.Iterable"]
   },
   "include": ["src/**/*.ts"]
 }

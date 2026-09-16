@@ -1,20 +1,35 @@
 /**
- * Reading a live page as a document.
+ * Reading a live page as something a document can hold.
  *
- * Injected into the site, so nothing here runs in Node — it is written as plain
- * functions that Playwright evaluates in the page. Shared by the importer and
- * the re-import, which must agree exactly: a fidelity fix is worth nothing if
- * only one of them has it.
+ * Everything here runs *inside the page*, handed to a browser by whoever is
+ * driving it — the server's import tool, or a script. That is the constraint
+ * that shapes the file: no imports, no module-scope references, nothing but
+ * what the page itself provides.
+ *
+ * What it produces is not the site's markup. It is a simplified tree with the
+ * *computed* styles inlined, which is the only honest way to read a page built
+ * with utility classes: the classes are not the design, the values they resolve
+ * to are. Several of the rules below are scars — each one is a way the obvious
+ * approach produced a document that was not the page.
  */
 
-/** The page-building part of the extractor, injected into the site. */
-function extractor() {
+export interface PageShot {
+  title: string;
+  /** The document's full height at the width it was read. */
+  height: number;
+  /** Styles for the wrapper the sections go into. */
+  wrapper: string;
+  /** One entry per top-level band of the page. */
+  sections: string[];
+}
+
+export function extractPage(): PageShot {
   const KEEP = ['display', 'flex-direction', 'flex-wrap', 'align-items', 'justify-content', 'gap',
     'grid-template-columns', 'padding', 'margin', 'max-width', 'min-height', 'background-color',
     'background-image', 'color', 'font-family', 'font-size', 'font-weight', 'line-height',
     'letter-spacing', 'text-transform', 'text-align', 'border-radius', 'border', 'box-shadow',
     'position', 'top', 'left', 'right', 'bottom', 'overflow', 'aspect-ratio', 'flex', 'width'];
-  const DEF = {
+  const DEF: Record<string, string> = {
     display: 'block', 'flex-direction': 'row', 'flex-wrap': 'nowrap', 'align-items': 'normal',
     'justify-content': 'normal', gap: 'normal', padding: '0px', margin: '0px',
     'background-color': 'rgba(0, 0, 0, 0)', 'background-image': 'none', 'border-radius': '0px',
@@ -28,10 +43,10 @@ function extractor() {
   const TAGS = new Set(['section', 'div', 'header', 'footer', 'nav', 'main', 'article', 'aside',
     'ul', 'ol', 'li', 'h1', 'h2', 'h3', 'h4', 'h5', 'p', 'span', 'a', 'button', 'strong', 'em',
     'blockquote', 'figure', 'figcaption', 'details', 'summary', 'label', 'form', 'br']);
-  const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-  const round = (v) => v.replace(/(\d+\.\d+)px/g, (_, n) => `${Math.round(Number(n))}px`);
+  const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  const round = (v: string) => v.replace(/(\d+\.\d+)px/g, (_, n) => `${Math.round(Number(n))}px`);
 
-  function styleOf(el, skip = []) {
+  function styleOf(el: Element, skip: string[] = []): string {
     const cs = getComputedStyle(el);
     const parent = el.parentElement;
     const ps = parent ? getComputedStyle(parent) : null;
@@ -77,7 +92,7 @@ function extractor() {
    */
   const INLINE_ONLY = new Set(['p', 'span', 'a', 'strong', 'em', 'b', 'i', 'label', 'summary', 'figcaption']);
 
-  function walk(el, depth, parentTag) {
+  function walk(el: Element, depth: number, parentTag: string): string {
     if (SKIP.has(el.tagName)) return '';
     const cs = getComputedStyle(el);
     if (cs.display === 'none' || cs.visibility === 'hidden') return '';
@@ -120,7 +135,7 @@ function extractor() {
      * at sixty pixels — one line became eight. A document has no pseudo
      * elements, so the marker is written as a real one.
      */
-    const marker = (pseudo) => {
+    const marker = (pseudo: string): string => {
       const ps = getComputedStyle(el, pseudo);
       const content = ps.content;
       if (!content || content === 'none' || content === 'normal') return '';
@@ -143,9 +158,9 @@ function extractor() {
     let inner = marker('::before');
     for (const n of el.childNodes) {
       if (n.nodeType === 3) {
-        const t = n.textContent.replace(/\s+/g, ' ');
+        const t = (n.textContent ?? '').replace(/\s+/g, ' ');
         if (t.trim()) inner += esc(t);
-      } else if (n.nodeType === 1 && depth < 16) inner += walk(n, depth + 1, tag);
+      } else if (n.nodeType === 1 && depth < 16) inner += walk(n as Element, depth + 1, tag);
     }
     inner += marker('::after');
     if (!inner.trim() && !/background|border|aspect/.test(style)) return '';
@@ -165,11 +180,11 @@ function extractor() {
 }
 
 /** The site's own custom properties, so the import arrives tokenised. */
-function readVars() {
-  const vars = {};
+export function readPageVars(): Record<string, string> {
+  const vars: Record<string, string> = {};
   for (const sheet of document.styleSheets) {
     try {
-      for (const rule of sheet.cssRules) {
+      for (const rule of sheet.cssRules as unknown as CSSStyleRule[]) {
         if (rule.selectorText !== ':root' && rule.selectorText !== 'html') continue;
         for (const p of rule.style) {
           if (p.startsWith('--')) vars[p.slice(2)] = rule.style.getPropertyValue(p).trim();
@@ -179,6 +194,3 @@ function readVars() {
   }
   return vars;
 }
-
-
-export { extractor, readVars };

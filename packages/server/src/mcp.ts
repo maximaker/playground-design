@@ -31,7 +31,8 @@ import { callTab, notifyTabs, selectionOf, hasLiveTab, NoTabError } from './real
 import { renderNode, measureSubtree } from './render.ts';
 import { storeAsset } from './assets.ts';
 import { GUIDES, guideList } from './guides.ts';
-import { importUrl } from './import.ts';
+import { importUrl, ImportError } from './import.ts';
+import { importUrlLive, tokenise, tokensFromVars } from './import-live.ts';
 import { getTemplate, templateSummaries } from './templates.ts';
 import { touchConnection, type Connection } from './connections.ts';
 
@@ -975,17 +976,94 @@ function registerWriteTools(server: McpServer, ctx: McpContext): void {
   server.registerTool('import_url', {
     title: 'Import a webpage onto the canvas',
     description:
-      'Fetches a public webpage and turns its markup and stylesheets into editable layers on a new ' +
-      'artboard. Use it to bring in a reference, a competitor page, or an existing page you are ' +
-      'redesigning. It is a static snapshot: scripts and client-rendered content are not included.',
+      'Loads a public webpage in a real browser at a real width and turns it into editable layers: '
+      + 'the computed styles, so a page built with utility classes arrives looking like itself, and '
+      + 'the site\'s own CSS variables as document tokens. Pass several routes to bring in a whole '
+      + 'site, one page each. Images become placeholders at the size they occupied. Falls back to a '
+      + 'static fetch where no browser is available, which cannot resolve utility classes.',
     inputSchema: {
       url: z.string().describe('Absolute http(s) URL.'),
-      artboardId: z.string().optional().describe('Import into this artboard instead of creating one.'),
+      width: z.number().min(320).max(3840).optional().default(1440)
+        .describe('The width to read the page at. The design you get is the one that width produces.'),
+      routes: z.array(z.string()).max(24).optional()
+        .describe('Paths on the same site, e.g. ["/", "/pricing"]. Each becomes its own page of the document.'),
+      tokens: z.boolean().optional().default(true)
+        .describe("Register the site's :root custom properties as tokens and reference them in the styles."),
+      artboardId: z.string().optional().describe('Import a single page into this artboard instead of creating one.'),
     },
-  }, async ({ url, artboardId }) => guard(async () => {
+  }, async ({ url, width, routes, tokens, artboardId }) => guard(async () => {
     const doc = requireDoc(ctx);
+    const live = await importUrlLive(url, { width, routes }).catch((err: unknown) => {
+      if (err instanceof ImportError) throw err;
+      return null;
+    });
+
+    // No browser on this host: the old path is worse but it is not nothing.
+    if (!live) return staticImport(ctx, url, artboardId);
+
+    const varTokens = tokens ? tokensFromVars(live.vars) : [];
+    if (varTokens.length) commit(ctx, [{ t: 'tokens', tokens: [...doc.tokens, ...varTokens] }]);
+
+    const made: { page: string; artboard: string; route: string; sections: number }[] = [];
+    const many = live.pages.length > 1;
+
+    for (const shot of live.pages) {
+      const label = shot.route === '/' ? 'Home' : shot.route.replace(/^\//, '').replace(/\/$/, '');
+      const title = label.charAt(0).toUpperCase() + label.slice(1);
+
+      // One route, one page: a site imported onto a single canvas is a wall.
+      let pageId = pageOf(ctx, doc).id;
+      if (many) {
+        const page = { id: newId('pg'), name: title || 'Home', artboards: [] };
+        commit(ctx, [{ t: 'page', action: 'add', page }]);
+        pageId = page.id;
+      }
+      const target = doc.pages.find((p) => p.id === pageId)!;
+
+      let boardId = !many ? artboardId : undefined;
+      if (boardId) node(doc, boardId);
+      else {
+        const artboard = makeNode({
+          type: 'artboard',
+          name: `${title || shot.title.slice(0, 30)} — ${width}`,
+          styles: {
+            ...DEFAULT_ARTBOARD_STYLES,
+            width: `${width}px`,
+            height: `${Math.min(20000, shot.height)}px`,
+          },
+          attrs: { 'data-x': String(many ? 0 : rightmostEdge(doc, target.artboards) + 120), 'data-y': '0' },
+        });
+        commit(ctx, [{ t: 'insert', nodes: [artboard], parent: null, index: target.artboards.length, page: target.id }]);
+        boardId = artboard.id;
+      }
+
+      // The wrapper first, then a section at a time: a page is tens of
+      // kilobytes of HTML, and a failure inside one giant write says nothing
+      // about where it happened.
+      const wrapper = parseHtml(`<div style="${shot.wrapper}"></div>`);
+      commit(ctx, [{ t: 'insert', nodes: wrapper.nodes, parent: boardId, index: 0 }]);
+      const root = wrapper.roots[0]!;
+      for (const section of shot.sections) {
+        const parsed = parseHtml(tokens ? tokenise(section, live.vars) : section);
+        if (!parsed.nodes.length) continue;
+        commit(ctx, [{ t: 'insert', nodes: parsed.nodes, parent: root, index: doc.nodes[root]!.children.length }]);
+      }
+      made.push({ page: target.name, artboard: boardId, route: shot.route, sections: shot.sections.length });
+    }
+
+    return json({
+      imported: made,
+      tokens: varTokens.length,
+      warnings: live.warnings,
+      next: 'find_repeated_shapes, then componentise the ones worth a name — an imported page is all copies.',
+    });
+  }));
+
+  /** The pre-browser path, kept for hosts that cannot run one. */
+  async function staticImport(context: McpContext, url: string, artboardId?: string) {
+    const doc = requireDoc(context);
     const result = await importUrl(url);
-    const page = pageOf(ctx, doc);
+    const page = pageOf(context, doc);
 
     let target = artboardId;
     if (target) node(doc, target);
@@ -996,19 +1074,19 @@ function registerWriteTools(server: McpServer, ctx: McpContext): void {
         styles: { ...DEFAULT_ARTBOARD_STYLES, width: '1440px', height: '1200px' },
         attrs: { 'data-x': String(rightmostEdge(doc, page.artboards) + 120), 'data-y': '0' },
       });
-      commit(ctx, [{ t: 'insert', nodes: [artboard], parent: null, index: page.artboards.length, page: page.id }]);
+      commit(context, [{ t: 'insert', nodes: [artboard], parent: null, index: page.artboards.length, page: page.id }]);
       target = artboard.id;
     }
 
-    commit(ctx, [{ t: 'insert', nodes: result.nodes, parent: target, index: 0 }]);
+    commit(context, [{ t: 'insert', nodes: result.nodes, parent: target, index: 0 }]);
     return json({
       artboardId: target,
       nodeCount: result.nodes.length,
       title: result.title,
-      warnings: result.warnings,
-      next: 'Call get_screenshot on the artboard, then get_tree_summary — imports are usually deeper than they need to be.',
+      warnings: [...result.warnings,
+        'No browser on this host, so this is a static fetch: utility classes and anything a script draws are missing.'],
     });
-  }));
+  }
 
   server.registerTool('write_html', {
     title: 'Write HTML into the document',

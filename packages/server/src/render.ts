@@ -11,6 +11,10 @@
  */
 
 import { emitStandalone, getNode, getArtboardSize, type CanvasDocument, type NodeId } from '@playground/shared';
+import {
+  closeBrowser, getBrowser, tryLoadPlaywright,
+  type PlaywrightBrowser, type PlaywrightModule, type PlaywrightPage,
+} from './browser.ts';
 import { callTab, NoTabError } from './realtime.ts';
 
 export type RenderFormat = 'png' | 'jpg' | 'webp' | 'svg' | 'html';
@@ -93,50 +97,6 @@ function sizeOf(doc: CanvasDocument, nodeId: NodeId): { width: number; height: n
  * Playwright is an optional dependency, so it is typed structurally rather than
  * imported for types — the server must compile without it installed.
  */
-interface PlaywrightPage {
-  setContent(html: string, opts?: { waitUntil?: string }): Promise<void>;
-  evaluate(fn: () => unknown): Promise<unknown>;
-  $(selector: string): Promise<PlaywrightElement | null>;
-  screenshot(opts: Record<string, unknown>): Promise<Uint8Array>;
-}
-interface PlaywrightElement { screenshot(opts: Record<string, unknown>): Promise<Uint8Array> }
-interface PlaywrightContext { newPage(): Promise<PlaywrightPage>; close(): Promise<void> }
-interface PlaywrightBrowser {
-  newContext(opts: Record<string, unknown>): Promise<PlaywrightContext>;
-  close(): Promise<void>;
-}
-interface PlaywrightModule {
-  chromium: { launch(opts?: Record<string, unknown>): Promise<PlaywrightBrowser> };
-}
-
-let playwrightCache: PlaywrightModule | null | undefined;
-let browserPromise: Promise<PlaywrightBrowser> | null = null;
-
-async function tryLoadPlaywright(): Promise<PlaywrightModule | null> {
-  if (playwrightCache !== undefined) return playwrightCache;
-  try {
-    playwrightCache = (await import(/* @vite-ignore */ 'playwright' as string)) as PlaywrightModule;
-  } catch {
-    playwrightCache = null;
-  }
-  return playwrightCache;
-}
-
-async function getBrowser(pw: PlaywrightModule) {
-  // One browser, reused: launching per screenshot costs ~400ms and agents take
-  // screenshots in tight loops while checking their own work.
-  if (!browserPromise) {
-    browserPromise = pw.chromium.launch({ args: ['--font-render-hinting=none'] }).catch((err: unknown) => {
-      browserPromise = null;
-      throw new Error(
-        `Playwright is installed but Chromium failed to launch (${err instanceof Error ? err.message : err}). ` +
-        `Run "npx playwright install chromium".`,
-      );
-    });
-  }
-  return browserPromise;
-}
-
 async function renderWithPlaywright(
   pw: PlaywrightModule,
   doc: CanvasDocument,
@@ -398,9 +358,5 @@ export async function measureSubtree(
 }
 
 export async function shutdownRenderer(): Promise<void> {
-  if (browserPromise) {
-    const b = await browserPromise.catch(() => null);
-    await b?.close().catch(() => {});
-    browserPromise = null;
-  }
+  await closeBrowser();
 }

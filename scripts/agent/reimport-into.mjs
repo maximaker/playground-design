@@ -18,7 +18,9 @@ import '../lib/session.mjs';
 import { chromium } from 'playwright';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import { extractor, readVars } from './extract.mjs';
+// The same reading the server's import_url does, from the same file: a
+// fidelity fix is worth nothing if only one of them has it.
+import { extractPage as extractor, readPageVars as readVars } from '@playground/shared';
 
 const SITE = process.argv[2];
 const DOC = process.argv[3];

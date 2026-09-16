@@ -11,6 +11,7 @@ export * from './color.ts';
 export * from './lint.ts';
 export * from './tokens.ts';
 export * from './fonts.ts';
+export * from './page-extract.ts';
 export * from './code-components.ts';
 export * from './sanitize.ts';
 export * from './numeric.ts';

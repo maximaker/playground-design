@@ -33,7 +33,7 @@ export interface ImportResult {
  * Without this the server is an open proxy into whatever network it runs on —
  * a URL is user input, and "fetch this URL" is the classic SSRF shape.
  */
-async function assertPublicUrl(raw: string): Promise<URL> {
+export async function assertPublicUrl(raw: string): Promise<URL> {
   let url: URL;
   try {
     url = new URL(raw);

@@ -28,7 +28,9 @@ const NAME = process.argv[3] ?? 'Imported site';
 const BASE = process.argv[4] ?? 'http://localhost:4000';
 if (!SITE) { console.error('usage: import-site.mjs <url> "<name>" [base]'); process.exit(1); }
 
-import { extractor, readVars } from './extract.mjs';
+// The same reading the server's import_url does, from the same file: a
+// fidelity fix is worth nothing if only one of them has it.
+import { extractPage as extractor, readPageVars as readVars } from '@playground/shared';
 
 const api = async (path, init) => {
   const res = await fetch(`${BASE}/api${path}`, {
