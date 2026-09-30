@@ -3116,3 +3116,34 @@ code { font-family: var(--mono); font-size: 0.92em; }
 .board-tool:hover { background: var(--bg-sunken); color: var(--fg); }
 .board-tool.is-active { background: var(--accent-soft, var(--bg-sunken)); color: var(--accent); }
 .board-stylebar-divider { width: 1px; height: 18px; background: var(--border); margin: 0 3px; }
+
+/* --- Grouped tools ------------------------------------------------------- */
+
+.tool-group { position: relative; display: flex; align-items: center; }
+.toolbar .tool-chevron {
+  /* Narrow to look at, but a full 22px to hit: it tucks under the tool beside
+     it with a negative margin rather than by being small. */
+  width: 24px; height: 2.3rem; margin-left: -9px; border-radius: var(--radius-xs);
+  color: var(--fg-faint); opacity: 0.8;
+}
+@media (pointer: coarse) { .toolbar .tool-chevron { width: 32px; margin-left: -6px; } }
+.tool-group:hover .tool-chevron, .tool-group.is-open .tool-chevron { opacity: 1; color: var(--fg); }
+.tool-flyout {
+  position: absolute; bottom: calc(100% + 10px); left: -0.3rem; z-index: 40;
+  display: flex; flex-direction: column; gap: 1px; min-width: 12.5rem; padding: 0.3rem;
+  background: var(--bg-panel); border: 1px solid var(--border);
+  border-radius: var(--radius-lg); box-shadow: var(--shadow);
+}
+/* The gap between the bar and the menu, made hoverable, so the pointer can cross it. */
+.tool-flyout::after { content: ''; position: absolute; left: 0; right: 0; top: 100%; height: 12px; }
+.toolbar .tool-flyout button {
+  width: 100%; height: 2.1rem; display: flex; align-items: center; gap: 0.65rem;
+  padding: 0 0.6rem; border-radius: var(--radius-sm); color: var(--fg); text-align: left;
+}
+.toolbar .tool-flyout button.is-current { color: var(--accent); }
+.tool-flyout-name { flex: 1; font-size: 0.85rem; }
+.tool-flyout kbd {
+  font: inherit; font-size: 0.75rem; color: var(--fg-faint); font-variant-numeric: tabular-nums;
+}
+/* With the menu open, the menu is the explanation; a tooltip under it is noise. */
+.tool-group.is-open .tip::after, .tip:not([data-tip])::after { display: none; }

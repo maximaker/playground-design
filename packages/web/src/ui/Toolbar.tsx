@@ -1,25 +1,126 @@
-/** The tool palette. Keyboard-first: every tool has a single-key shortcut. */
+/**
+ * The tool palette. Keyboard-first: every tool has a single-key shortcut.
+ *
+ * Twelve tools in a row was a bar as wide as the canvas under it. They are six
+ * groups now, the way Figma's toolbar is: each group shows the tool last used
+ * from it, and the others are one hover away. Shortcuts are unchanged — a key
+ * picks its tool wherever it lives, and that tool becomes its group's face.
+ */
 
+import { useEffect, useRef, useState } from 'react';
 import { useCanvas, type Tool } from '../state/store.ts';
 import { Icon, type IconName } from './Icon.tsx';
 import { zoomBy, zoomTo } from '../hooks/commands.ts';
 
-const TOOLS: { tool: Tool; icon: IconName; key: string; title: string }[] = [
-  { tool: 'move', icon: 'cursor', key: 'V', title: 'Move' },
-  { tool: 'hand', icon: 'hand', key: 'H', title: 'Pan' },
-  { tool: 'frame', icon: 'frame', key: 'F', title: 'Frame' },
-  { tool: 'text', icon: 'text', key: 'T', title: 'Text' },
-  { tool: 'rect', icon: 'square', key: 'R', title: 'Rectangle' },
-  { tool: 'ellipse', icon: 'circle', key: 'O', title: 'Ellipse' },
-  { tool: 'image', icon: 'image', key: 'I', title: 'Image' },
-  // The board. Rectangle, ellipse and text above also draw on it when they
-  // are used on empty canvas; these three only ever draw there.
-  { tool: 'diamond', icon: 'diamond', key: 'D', title: 'Diamond — a decision in a diagram' },
-  { tool: 'connector', icon: 'connector', key: 'X', title: 'Connector — drag from one thing to another' },
-  { tool: 'section', icon: 'section', key: '⇧S', title: 'Section — gather part of a diagram, or a set of screens' },
-  { tool: 'note', icon: 'note', key: 'N', title: 'Prompt card — leave a note or ask an agent' },
-  { tool: 'comment', icon: 'comment', key: 'C', title: 'Comment — say something about the design' },
+interface ToolInfo { tool: Tool; icon: IconName; key: string; name: string; title: string }
+
+const TOOLS: Record<Tool, ToolInfo> = {
+  move: { tool: 'move', icon: 'cursor', key: 'V', name: 'Move', title: 'Move' },
+  hand: { tool: 'hand', icon: 'hand', key: 'H', name: 'Pan', title: 'Pan' },
+  frame: { tool: 'frame', icon: 'frame', key: 'F', name: 'Frame', title: 'Frame' },
+  section: { tool: 'section', icon: 'section', key: '⇧S', name: 'Section', title: 'Section — gather part of a diagram, or a set of screens' },
+  text: { tool: 'text', icon: 'text', key: 'T', name: 'Text', title: 'Text' },
+  rect: { tool: 'rect', icon: 'square', key: 'R', name: 'Rectangle', title: 'Rectangle' },
+  ellipse: { tool: 'ellipse', icon: 'circle', key: 'O', name: 'Ellipse', title: 'Ellipse' },
+  diamond: { tool: 'diamond', icon: 'diamond', key: 'D', name: 'Diamond', title: 'Diamond — a decision in a diagram' },
+  image: { tool: 'image', icon: 'image', key: 'I', name: 'Image', title: 'Image' },
+  connector: { tool: 'connector', icon: 'connector', key: 'X', name: 'Connector', title: 'Connector — drag from one thing to another' },
+  note: { tool: 'note', icon: 'note', key: 'N', name: 'Prompt card', title: 'Prompt card — leave a note or ask an agent' },
+  comment: { tool: 'comment', icon: 'comment', key: 'C', name: 'Comment', title: 'Comment — say something about the design' },
+};
+
+const GROUPS: { id: string; label: string; tools: Tool[] }[] = [
+  { id: 'move', label: 'Move and pan', tools: ['move', 'hand'] },
+  { id: 'frame', label: 'Frame and section', tools: ['frame', 'section'] },
+  { id: 'shape', label: 'Shapes', tools: ['rect', 'ellipse', 'diamond', 'image'] },
+  { id: 'text', label: 'Text', tools: ['text'] },
+  { id: 'connector', label: 'Connector', tools: ['connector'] },
+  { id: 'note', label: 'Prompt cards and comments', tools: ['note', 'comment'] },
 ];
+
+const FACES_KEY = 'playground:toolbar-faces';
+
+/** Which tool each group shows, remembered per browser: a convenience, not state. */
+function loadFaces(): Record<string, Tool> {
+  try { return JSON.parse(localStorage.getItem(FACES_KEY) ?? '{}'); } catch { return {}; }
+}
+
+function ToolGroup({ group, faces, readOnly }: { group: (typeof GROUPS)[number]; faces: Record<string, Tool>; readOnly: boolean }) {
+  const tool = useCanvas((s) => s.tool);
+  const setTool = useCanvas((s) => s.setTool);
+  const [open, setOpen] = useState(false);
+  const timer = useRef<number | undefined>(undefined);
+  const tools = group.tools.filter((t) => !readOnly || ['move', 'hand', 'comment'].includes(t));
+
+  // Opens after a short hover, so sweeping the pointer along the bar does not
+  // pop every group open on the way past; closes a moment after leaving, so
+  // the gap between the button and its menu can be crossed.
+  const later = (fn: () => void, ms: number) => { window.clearTimeout(timer.current); timer.current = window.setTimeout(fn, ms); };
+  useEffect(() => () => window.clearTimeout(timer.current), []);
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open]);
+
+  // After the hooks, which must run on every render whatever the group holds.
+  if (!tools.length) return null;
+  const face = TOOLS[tools.includes(faces[group.id]!) ? faces[group.id]! : tools[0]!];
+  const active = tools.includes(tool);
+  const shown = active ? TOOLS[tool] : face;
+  const many = tools.length > 1;
+
+  return (
+    <div
+      className={`tool-group${many ? ' has-more' : ''}${open ? ' is-open' : ''}`}
+      onMouseEnter={() => many && later(() => setOpen(true), 260)}
+      onMouseLeave={() => later(() => setOpen(false), 180)}
+    >
+      <button
+        className={`tip is-top${active ? ' is-active' : ''}`}
+        data-tip={open ? undefined : `${shown.title}  ${shown.key}`}
+        onClick={() => { setTool(shown.tool); setOpen(false); }}
+        aria-label={shown.title}
+        aria-pressed={active}
+      >
+        <Icon name={shown.icon} size={16} />
+      </button>
+      {many && (
+        <button
+          className="tool-chevron tip is-top"
+          data-tip={open ? undefined : group.label}
+          aria-label={`More: ${group.label}`}
+          aria-haspopup="menu"
+          aria-expanded={open}
+          onClick={() => setOpen((o) => !o)}
+        >
+          <svg width="8" height="8" viewBox="0 0 8 8" aria-hidden="true"><path d="M1.5 5.2 4 2.8l2.5 2.4" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" /></svg>
+        </button>
+      )}
+      {open && (
+        <div className="tool-flyout" role="menu" aria-label={group.label}>
+          {tools.map((t) => {
+            const info = TOOLS[t];
+            return (
+              <button
+                key={t}
+                role="menuitemradio"
+                aria-checked={tool === t}
+                className={tool === t ? 'is-current' : undefined}
+                onClick={() => { setTool(t); setOpen(false); }}
+              >
+                <Icon name={info.icon} size={15} />
+                <span className="tool-flyout-name">{info.name}</span>
+                <kbd>{info.key}</kbd>
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export function Toolbar({ compact }: { compact?: boolean }) {
   const tool = useCanvas((s) => s.tool);
@@ -30,6 +131,17 @@ export function Toolbar({ compact }: { compact?: boolean }) {
   const redo = useCanvas((s) => s.redo);
   const canUndo = useCanvas((s) => s.undoStack.length > 0);
   const canRedo = useCanvas((s) => s.redoStack.length > 0);
+
+  // Whichever tool was picked last — by click or by key — becomes the face of
+  // its group, so the bar shows what you have been using.
+  const [faces, setFaces] = useState<Record<string, Tool>>(loadFaces);
+  useEffect(() => {
+    const group = GROUPS.find((g) => g.tools.includes(tool));
+    if (!group || group.tools.length < 2 || faces[group.id] === tool) return;
+    const next = { ...faces, [group.id]: tool };
+    setFaces(next);
+    try { localStorage.setItem(FACES_KEY, JSON.stringify(next)); } catch { /* a convenience */ }
+  }, [tool, faces]);
 
   // On a phone, eight 40px tap targets plus a zoom control do not fit the
   // width. The tools keep their size — shrinking them below a fingertip would
@@ -65,18 +177,7 @@ export function Toolbar({ compact }: { compact?: boolean }) {
         </>
       )}
 
-      {TOOLS.filter((t) => !readOnly || ['move', 'hand', 'comment'].includes(t.tool)).map((t) => (
-        <button
-          key={t.tool}
-          className={`tip is-top${tool === t.tool ? ' is-active' : ''}`}
-          data-tip={`${t.title}  ${t.key}`}
-          onClick={() => setTool(t.tool)}
-          aria-label={t.title}
-          aria-pressed={tool === t.tool}
-        >
-          <Icon name={t.icon} size={16} />
-        </button>
-      ))}
+      {GROUPS.map((g) => <ToolGroup key={g.id} group={g} faces={faces} readOnly={readOnly} />)}
       {!compact && <span className="toolbar-divider" />}
       {!compact && (
       <button className="tip is-top" data-tip="Zoom out" aria-label="Zoom out" onClick={() => zoomBy(1 / 1.25)}>
