@@ -2223,6 +2223,8 @@ function registerNoteTools(server: McpServer, ctx: McpContext): void {
             label: z.string().max(200).optional(),
             color: Color.optional(),
             dashed: z.boolean().optional(),
+            fromSide: z.enum(['left', 'right', 'top', 'bottom']).optional(),
+            toSide: z.enum(['left', 'right', 'top', 'bottom']).optional(),
             id: z.string().optional(),
           }).optional(),
         }),
@@ -2241,6 +2243,9 @@ function registerNoteTools(server: McpServer, ctx: McpContext): void {
             arrow: z.enum(['end', 'both', 'none']).optional(),
             label: z.string().max(200).nullable().optional().describe('null removes the label.'),
             dashed: z.boolean().optional(),
+            fromSide: z.enum(['left', 'right', 'top', 'bottom']).nullable().optional()
+              .describe('Which side the connector leaves from; null goes back to working it out.'),
+            toSide: z.enum(['left', 'right', 'top', 'bottom']).nullable().optional(),
           }),
         }),
         z.object({ action: z.literal('remove'), id: z.string() }),
@@ -2269,6 +2274,7 @@ function registerNoteTools(server: McpServer, ctx: McpContext): void {
             ...(k.id ? { id: k.id } : {}),
             from: toEndpoint(doc, page, k.from, known), to: toEndpoint(doc, page, k.to, known),
             route: k.route, arrow: k.arrow, label: k.label, color: k.color, dashed: k.dashed,
+            fromSide: k.fromSide, toSide: k.toSide,
           });
           known.add(connector.id);
           added.push(connector.id);

@@ -247,98 +247,44 @@ function sizeFor(node: DiagramNode): { width: number; height: number } {
 }
 
 /**
- * Places a graph as board items.
+ * One layered layout: positions for `ids`, top-left corners, relative to 0,0.
  *
- * A layered layout, in the usual four steps: reverse the edges that close a
- * cycle so the graph has a direction to flow in, give every node the layer of
- * its longest path from a source, order each layer by the average position of
- * its neighbours over a few sweeps down and up (which is what keeps edges from
- * crossing), then lay the layers out with even gaps. Members of a subgraph are
- * kept next to each other within every layer, so the section drawn round them
- * contains them rather than half the diagram.
+ * The usual four steps. Reverse the edges that close a cycle so the graph has
+ * a direction to flow in; give every node the layer of its longest path from a
+ * source; order each layer by the average position of its neighbours over a
+ * few sweeps down and up, which is what keeps edges from crossing; then lay
+ * the layers out with even gaps, each centred across the widest.
  */
-export function layoutDiagram(graph: DiagramGraph, opts: LayoutOptions = {}): LayoutResult {
-  const problems: string[] = [];
-  const rankGap = opts.rankGap ?? 80;
-  const nodeGap = opts.nodeGap ?? 48;
-  const origin = opts.origin ?? { x: 0, y: 0 };
-  const horizontal = graph.direction === 'LR' || graph.direction === 'RL';
-  /** Space between a section's edge and what it contains. */
-  const sectionPad = 28;
-  /** Height of a section's title, above its contents. */
-  const titleBand = graph.groups.length ? 36 : 0;
+function layered(
+  ids: string[], edges: { from: string; to: string }[], sizes: Map<string, { width: number; height: number }>,
+  direction: Direction, rankGap: number, nodeGap: number, blocks: Set<string> = new Set(),
+): { pos: Map<string, { x: number; y: number }>; width: number; height: number; layer: Map<string, number> } {
+  const horizontal = direction === 'LR' || direction === 'RL';
+  const inGraph = new Set(ids);
+  const flow = edges.filter((e) => inGraph.has(e.from) && inGraph.has(e.to) && e.from !== e.to);
 
-  const known = new Map(graph.nodes.map((n) => [n.id, n]));
-  const allEdges = graph.edges.filter((e) => {
-    const ok = known.has(e.from) && known.has(e.to);
-    if (!ok) problems.push(`edge ${e.from} → ${e.to} names a node that is not defined`);
-    return ok && e.from !== e.to;
-  });
-
-  // Artboard references resolved; anchored ones leave the layout entirely.
-  const artboardOf = new Map<string, string>();
-  const sized = new Map<string, Sized>();
-  const anchored = new Set<string>();
-  for (const n of graph.nodes) {
-    if (n.artboard) {
-      const found = opts.artboards?.(n.artboard);
-      if (found) {
-        artboardOf.set(n.id, found.id);
-        if (opts.placeArtboards) {
-          sized.set(n.id, { id: n.id, width: found.width, height: found.height });
-        } else {
-          // Laying out a slot for a screen that is not going to move there put
-          // a 1440px hole in the middle of the diagram, and a long connector
-          // from the real screen across it.
-          anchored.add(n.id);
-        }
-        continue;
-      }
-      problems.push(`no artboard called "${n.artboard}" — drawn as a shape instead`);
+  // 1. Break cycles: a depth-first search, reversing the edges that go back.
+  const adjacency = new Map(ids.map((id) => [id, [] as string[]]));
+  for (const e of flow) adjacency.get(e.from)!.push(e.to);
+  const state = new Map<string, number>();
+  const back = new Set<string>();
+  const visit = (id: string) => {
+    state.set(id, 1);
+    for (const to of adjacency.get(id)!) {
+      if (state.get(to) === 1) back.add(`${id}\u0000${to}`);
+      else if (!state.get(to)) visit(to);
     }
-    sized.set(n.id, { id: n.id, ...sizeFor(n) });
-  }
-  const laidOut = graph.nodes.filter((n) => !anchored.has(n.id));
-  // The layout runs on what it places; edges to an anchored artboard still
-  // become connectors, they just do not decide anyone's layer.
-  const edges = allEdges.filter((e) => !anchored.has(e.from) && !anchored.has(e.to));
+    state.set(id, 2);
+  };
+  for (const id of ids) if (!state.get(id)) visit(id);
+  const dag = flow.map((e) => (back.has(`${e.from}\u0000${e.to}`) ? { from: e.to, to: e.from } : e));
 
-  // 1. Break cycles with a depth-first search, reversing back edges.
-  const out = new Map<string, string[]>();
-  for (const n of laidOut) out.set(n.id, []);
-  const flow: { from: string; to: string }[] = [];
-  /** Edges that run against the flow, by index into `edges`. */
-  const reversed = new Set<number>();
-  {
-    const state = new Map<string, 0 | 1 | 2>();
-    const adjacency = new Map<string, string[]>();
-    for (const n of laidOut) adjacency.set(n.id, []);
-    for (const e of edges) adjacency.get(e.from)!.push(e.to);
-    const back = new Set<string>();
-    const visit = (id: string) => {
-      state.set(id, 1);
-      for (const to of adjacency.get(id)!) {
-        if (state.get(to) === 1) back.add(`${id}\u0000${to}`);
-        else if (!state.get(to)) visit(to);
-      }
-      state.set(id, 2);
-    };
-    for (const n of laidOut) if (!state.get(n.id)) visit(n.id);
-    edges.forEach((e, i) => {
-      const isBack = back.has(`${e.from}\u0000${e.to}`);
-      if (isBack) reversed.add(i);
-      const f = isBack ? { from: e.to, to: e.from } : { from: e.from, to: e.to };
-      flow.push(f);
-      out.get(f.from)!.push(f.to);
-    });
-  }
-
-  // 2. Layers by longest path from a source.
+  // 2. Layers by longest path.
+  const out = new Map(ids.map((id) => [id, [] as string[]]));
+  const indegree = new Map(ids.map((id) => [id, 0]));
+  for (const e of dag) { out.get(e.from)!.push(e.to); indegree.set(e.to, indegree.get(e.to)! + 1); }
   const layer = new Map<string, number>();
-  const indegree = new Map<string, number>();
-  for (const n of laidOut) indegree.set(n.id, 0);
-  for (const f of flow) indegree.set(f.to, indegree.get(f.to)! + 1);
-  const queue = laidOut.filter((n) => indegree.get(n.id) === 0).map((n) => n.id);
+  const queue = ids.filter((id) => indegree.get(id) === 0);
   for (const id of queue) layer.set(id, 0);
   for (let i = 0; i < queue.length; i++) {
     const id = queue[i]!;
@@ -348,44 +294,24 @@ export function layoutDiagram(graph: DiagramGraph, opts: LayoutOptions = {}): La
       if (indegree.get(to) === 0) queue.push(to);
     }
   }
-  const layerCount = Math.max(0, ...layer.values()) + 1;
-  const layers: string[][] = Array.from({ length: layerCount }, () => []);
-  // Declaration order is the starting order, so an unconnected graph keeps the
-  // order it was written in.
-  for (const n of laidOut) layers[layer.get(n.id) ?? 0]!.push(n.id);
+  const count = ids.length ? Math.max(...ids.map((id) => layer.get(id) ?? 0)) + 1 : 0;
+  const layers: string[][] = Array.from({ length: count }, () => []);
+  for (const id of ids) layers[layer.get(id) ?? 0]!.push(id);
 
-  // 3. Order within layers by barycentre, keeping groups together.
-  const groupOf = new Map<string, number>();
-  graph.groups.forEach((g, gi) => { for (const m of g.members) if (!groupOf.has(m)) groupOf.set(m, gi); });
-  const up = new Map<string, string[]>();
-  const down = new Map<string, string[]>();
-  for (const n of laidOut) { up.set(n.id, []); down.set(n.id, []); }
-  for (const f of flow) { down.get(f.from)!.push(f.to); up.get(f.to)!.push(f.from); }
-
+  // 3. Order within layers by barycentre.
+  const up = new Map(ids.map((id) => [id, [] as string[]]));
+  const down = new Map(ids.map((id) => [id, [] as string[]]));
+  for (const e of dag) { down.get(e.from)!.push(e.to); up.get(e.to)!.push(e.from); }
   const position = new Map<string, number>();
   const record = () => layers.forEach((l) => l.forEach((id, i) => position.set(id, i)));
   record();
   const reorder = (l: string[], neighbours: Map<string, string[]>) => {
     const score = new Map<string, number>();
     l.forEach((id, i) => {
-      const ns = neighbours.get(id)!.filter((n) => position.has(n));
-      score.set(id, ns.length ? ns.reduce((s, n) => s + position.get(n)!, 0) / ns.length : i);
+      const ns = neighbours.get(id)!;
+      score.set(id, ns.length ? ns.reduce((sum, n) => sum + position.get(n)!, 0) / ns.length : i);
     });
-    // A group sorts by the average of its members, so it moves as a block.
-    const groupScore = new Map<number, number>();
-    for (const [gi] of graph.groups.entries()) {
-      const members = l.filter((id) => groupOf.get(id) === gi);
-      if (members.length) groupScore.set(gi, members.reduce((s, id) => s + score.get(id)!, 0) / members.length);
-    }
-    l.sort((a, b) => {
-      const ga = groupOf.get(a);
-      const gb = groupOf.get(b);
-      const ka = ga === undefined ? score.get(a)! : groupScore.get(ga)!;
-      const kb = gb === undefined ? score.get(b)! : groupScore.get(gb)!;
-      if (ka !== kb) return ka - kb;
-      if (ga !== gb) return (ga ?? -1) - (gb ?? -1);
-      return score.get(a)! - score.get(b)!;
-    });
+    l.sort((a, b) => score.get(a)! - score.get(b)!);
   };
   for (let sweep = 0; sweep < 4; sweep++) {
     for (let i = 1; i < layers.length; i++) { reorder(layers[i]!, up); record(); }
@@ -393,107 +319,155 @@ export function layoutDiagram(graph: DiagramGraph, opts: LayoutOptions = {}): La
   }
 
   // 4. Coordinates. "Main" runs along the flow, "cross" across it.
-  const main = (s: Sized) => (horizontal ? s.width : s.height);
-  const cross = (s: Sized) => (horizontal ? s.height : s.width);
-  const layerMain = layers.map((l) => Math.max(0, ...l.map((id) => main(sized.get(id)!))));
-  const layerCross = layers.map((l) => l.reduce((s, id) => s + cross(sized.get(id)!), 0) + Math.max(0, l.length - 1) * nodeGap);
+  const main = (id: string) => (horizontal ? sizes.get(id)!.width : sizes.get(id)!.height);
+  const cross = (id: string) => (horizontal ? sizes.get(id)!.height : sizes.get(id)!.width);
+  const layerMain = layers.map((l) => Math.max(0, ...l.map(main)));
+  // Nodes are centred on the line of the other nodes in their layer, not on a
+  // block's: a node beside a tall section used to float to its middle, a
+  // thousand pixels from the edges that reach it.
+  const lineOf = layers.map((l) => Math.max(0, ...l.filter((id) => !blocks.has(id)).map(main)));
+  const layerCross = layers.map((l) => l.reduce((sum, id) => sum + cross(id), 0) + Math.max(0, l.length - 1) * nodeGap);
   const widest = Math.max(0, ...layerCross);
-  const centres = new Map<string, { x: number; y: number }>();
+  const totalMain = layerMain.reduce((sum, m) => sum + m, 0) + Math.max(0, layers.length - 1) * rankGap;
+  const pos = new Map<string, { x: number; y: number }>();
   let mainAt = 0;
   layers.forEach((l, li) => {
-    // Each layer is centred across the widest one, so a flow with a fan-out
-    // in the middle does not lean to one side.
     let crossAt = (widest - layerCross[li]!) / 2;
     for (const id of l) {
-      const s = sized.get(id)!;
-      const c = crossAt + cross(s) / 2;
-      const m = mainAt + layerMain[li]! / 2;
-      centres.set(id, horizontal ? { x: m, y: c } : { x: c, y: m });
-      crossAt += cross(s) + nodeGap;
+      // Centred on its layer's line, so a small node beside a big one sits
+      // level with it rather than hanging from its top edge.
+      let m = mainAt + (blocks.has(id) ? 0 : (lineOf[li]! - main(id)) / 2);
+      if (direction === 'BT' || direction === 'RL') m = totalMain - m - main(id);
+      pos.set(id, horizontal ? { x: m, y: crossAt } : { x: crossAt, y: m });
+      crossAt += cross(id) + nodeGap;
     }
     mainAt += layerMain[li]! + rankGap;
   });
+  return {
+    pos, layer,
+    width: horizontal ? totalMain : widest,
+    height: horizontal ? widest : totalMain,
+  };
+}
 
-  // Reversed directions are mirrored along the main axis.
-  const totalMain = Math.max(0, mainAt - rankGap);
-  if (graph.direction === 'BT' || graph.direction === 'RL') {
-    for (const c of centres.values()) {
-      if (horizontal) c.x = totalMain - c.x;
-      else c.y = totalMain - c.y;
+/**
+ * Places a graph as board items.
+ *
+ * A subgraph is laid out as a block. Its members are arranged on their own,
+ * the block they make is sized to fit them with room for a title, and then
+ * the blocks and the nodes outside any group are arranged together as though
+ * each block were one big node. Laying everything out as one flat graph and
+ * drawing a rectangle round each group afterwards is what the first version
+ * did, and with more than one or two groups the rectangles overlapped and
+ * sections claimed nodes that were not in them. As blocks, a section contains
+ * exactly its members and no two sections can overlap.
+ */
+export function layoutDiagram(graph: DiagramGraph, opts: LayoutOptions = {}): LayoutResult {
+  const problems: string[] = [];
+  const rankGap = opts.rankGap ?? 72;
+  const nodeGap = opts.nodeGap ?? 44;
+  const origin = opts.origin ?? { x: 0, y: 0 };
+  const direction = graph.direction;
+  const horizontal = direction === 'LR' || direction === 'RL';
+  /** Space between a section's edge and what it contains. */
+  const sectionPad = 28;
+  /** Height of a section's title, above its contents. */
+  const titleBand = 40;
+
+  const known = new Map(graph.nodes.map((n) => [n.id, n]));
+  const allEdges = graph.edges.filter((e) => {
+    const ok = known.has(e.from) && known.has(e.to);
+    if (!ok) problems.push(`edge ${e.from} → ${e.to} names a node that is not defined`);
+    return ok && e.from !== e.to;
+  });
+
+  // Artboard references; anchored ones take no part in the layout.
+  const artboardOf = new Map<string, string>();
+  const sizes = new Map<string, { width: number; height: number }>();
+  const anchored = new Set<string>();
+  for (const n of graph.nodes) {
+    if (n.artboard) {
+      const found = opts.artboards?.(n.artboard);
+      if (found) {
+        artboardOf.set(n.id, found.id);
+        // Laying out a slot for a screen that is not going to move there put
+        // a 1440px hole in the middle of the diagram.
+        if (opts.placeArtboards) sizes.set(n.id, { width: found.width, height: found.height });
+        else anchored.add(n.id);
+        continue;
+      }
+      problems.push(`no artboard called "${n.artboard}" — drawn as a shape instead`);
+    }
+    sizes.set(n.id, sizeFor(n));
+  }
+  const laidOut = graph.nodes.filter((n) => !anchored.has(n.id)).map((n) => n.id);
+  const edges = allEdges.filter((e) => !anchored.has(e.from) && !anchored.has(e.to));
+
+  // Each node belongs to at most one group: the first that names it.
+  const groupOf = new Map<string, number>();
+  graph.groups.forEach((g, gi) => { for (const m of g.members) if (sizes.has(m) && !anchored.has(m) && !groupOf.has(m)) groupOf.set(m, gi); });
+  const blockId = (gi: number) => `\u0000group${gi}`;
+
+  // Inner layouts, one per group, and the block each becomes.
+  const inner = new Map<number, ReturnType<typeof layered>>();
+  graph.groups.forEach((_, gi) => {
+    const members = laidOut.filter((id) => groupOf.get(id) === gi);
+    if (!members.length) return;
+    const own = edges.filter((e) => groupOf.get(e.from) === gi && groupOf.get(e.to) === gi);
+    const l = layered(members, own, sizes, direction, rankGap, nodeGap);
+    inner.set(gi, l);
+    sizes.set(blockId(gi), { width: l.width + sectionPad * 2, height: l.height + sectionPad * 2 + titleBand });
+  });
+
+  // The outer layout: top-level nodes and blocks, joined by whatever crosses.
+  const outerOf = (id: string) => (groupOf.has(id) && inner.has(groupOf.get(id)!) ? blockId(groupOf.get(id)!) : id);
+  const outerIds = [...new Set(laidOut.map(outerOf))];
+  const seen = new Set<string>();
+  const outerEdges: { from: string; to: string }[] = [];
+  for (const e of edges) {
+    const from = outerOf(e.from);
+    const to = outerOf(e.to);
+    if (from === to || seen.has(`${from}\u0000${to}`)) continue;
+    seen.add(`${from}\u0000${to}`);
+    outerEdges.push({ from, to });
+  }
+  const outer = layered(outerIds, outerEdges, sizes, direction, rankGap, nodeGap,
+    new Set([...inner.keys()].map(blockId)));
+
+  // Absolute boxes.
+  const at = { x: origin.x + sectionPad, y: origin.y + sectionPad };
+  const boxes = new Map<string, { x: number; y: number; width: number; height: number }>();
+  const sections: BoardShape[] = [];
+  for (const id of outerIds) {
+    const p = outer.pos.get(id)!;
+    const size = sizes.get(id)!;
+    const gi = [...inner.keys()].find((g) => blockId(g) === id);
+    if (gi === undefined) {
+      boxes.set(id, { x: Math.round(at.x + p.x), y: Math.round(at.y + p.y), ...size });
+      continue;
+    }
+    const block = { x: Math.round(at.x + p.x), y: Math.round(at.y + p.y), ...size };
+    const g = graph.groups[gi]!;
+    sections.push(makeBoardShape({ kind: 'section', text: g.label, ...block, color: g.color ?? 'neutral' }));
+    const l = inner.get(gi)!;
+    for (const [member, q] of l.pos) {
+      boxes.set(member, {
+        x: Math.round(block.x + sectionPad + q.x),
+        y: Math.round(block.y + sectionPad + titleBand + q.y),
+        ...sizes.get(member)!,
+      });
     }
   }
-
-  /*
-   * Keep what is not in a group out of its section.
-   *
-   * Members sit together within each layer, but a section is one rectangle
-   * across every layer its members reach — so a node that shares a layer with
-   * a narrow member can still land inside the box drawn for a wide member two
-   * layers up, and the diagram then says it belongs to a group it is not in.
-   * Such a node is moved out, taking everything beyond it along, so nothing
-   * else ends up on top of it.
-   */
-  const crossOf = (id: string) => (horizontal ? centres.get(id)!.y : centres.get(id)!.x);
-  const shiftCross = (id: string, by: number) => {
-    const c = centres.get(id)!;
-    if (horizontal) c.y += by; else c.x += by;
-  };
-  graph.groups.forEach((g, gi) => {
-    const members = g.members.filter((m) => centres.has(m));
-    if (!members.length) return;
-    // In a left-to-right flow the cross axis is vertical, and the title band
-    // is part of the section on that axis: a node cleared of the members but
-    // not of the title sat on top of the section's name.
-    const lo = Math.min(...members.map((m) => crossOf(m) - cross(sized.get(m)!) / 2)) - sectionPad - (horizontal ? titleBand : 0);
-    const hi = Math.max(...members.map((m) => crossOf(m) + cross(sized.get(m)!) / 2)) + sectionPad;
-    const middle = (lo + hi) / 2;
-    // Only the layers the section actually spans: it is a rectangle, and a
-    // node above or below it is nowhere near it however wide it is.
-    const spanned = members.map((m) => layer.get(m) ?? 0);
-    const first = Math.min(...spanned);
-    const last = Math.max(...spanned);
-    for (const l of layers.slice(first, last + 1)) {
-      const order = [...l].sort((a, b) => crossOf(a) - crossOf(b));
-      for (let i = 0; i < order.length; i++) {
-        const id = order[i]!;
-        if (groupOf.get(id) === gi) continue;
-        const half = cross(sized.get(id)!) / 2;
-        const left = crossOf(id) - half;
-        const right = crossOf(id) + half;
-        if (right <= lo || left >= hi) continue;
-        if (crossOf(id) < middle) {
-          const by = lo - nodeGap / 2 - right;
-          for (let j = 0; j <= i; j++) if (groupOf.get(order[j]!) !== gi) shiftCross(order[j]!, by);
-        } else {
-          const by = hi + nodeGap / 2 - left;
-          for (let j = i; j < order.length; j++) if (groupOf.get(order[j]!) !== gi) shiftCross(order[j]!, by);
-        }
-      }
-    }
-  });
-  // Shifting can push a column past the origin; bring the whole thing back.
-  const minCross = Math.min(...[...centres.keys()].map((id) => crossOf(id) - cross(sized.get(id)!) / 2));
-  if (minCross < 0) for (const id of centres.keys()) shiftCross(id, -minCross);
-
-  // Sections get a title band; members are shifted so the band fits above
-  // the first row rather than over it.
 
   const items: BoardItem[] = [];
   const placed: Record<string, Endpoint> = {};
   for (const id of anchored) placed[id] = { kind: 'artboard', id: artboardOf.get(id)! };
-  const boxes = new Map<string, { x: number; y: number; width: number; height: number }>();
-  for (const n of laidOut) {
-    const s = sized.get(n.id)!;
-    const c = centres.get(n.id)!;
-    const box = {
-      x: Math.round(origin.x + sectionPad + c.x - s.width / 2),
-      y: Math.round(origin.y + sectionPad + titleBand + c.y - s.height / 2),
-      width: s.width, height: s.height,
-    };
-    boxes.set(n.id, box);
+  for (const n of graph.nodes) {
+    const box = boxes.get(n.id);
+    if (!box) continue;
     const artboard = artboardOf.get(n.id);
     if (artboard) { placed[n.id] = { kind: 'artboard', id: artboard }; continue; }
-    const shape: BoardShape = makeBoardShape({
+    const shape = makeBoardShape({
       kind: n.kind ?? 'rect', text: n.label, ...box,
       color: n.color && BOARD_COLOR_NAMES.includes(n.color) ? n.color : 'neutral',
       ...(n.rounded ? { rounded: true } : {}),
@@ -502,45 +476,45 @@ export function layoutDiagram(graph: DiagramGraph, opts: LayoutOptions = {}): La
     placed[n.id] = { kind: 'shape', id: shape.id };
   }
 
-  // Sections first in stacking order, so they sit under what they contain.
-  const sections: BoardShape[] = [];
-  for (const g of graph.groups) {
-    const member = g.members.map((m) => boxes.get(m)).filter((b): b is NonNullable<typeof b> => !!b);
-    if (!member.length) continue;
-    const minX = Math.min(...member.map((b) => b.x)) - sectionPad;
-    const minY = Math.min(...member.map((b) => b.y)) - sectionPad - titleBand;
-    const maxX = Math.max(...member.map((b) => b.x + b.width)) + sectionPad;
-    const maxY = Math.max(...member.map((b) => b.y + b.height)) + sectionPad;
-    sections.push(makeBoardShape({
-      kind: 'section', text: g.label, x: minX, y: minY, width: maxX - minX, height: maxY - minY,
-      // Sections are sheets: white, lifted, titled in slate. Colour is left
-      // for the steps that mean something.
-      color: g.color ?? 'neutral',
-    }));
-  }
-
-  // An edge that runs back up the flow goes round the outside — out of one
-  // side and into the same side of its target — rather than straight back
-  // along the path of the edge it answers.
+  /*
+   * An edge that runs back up the flow goes round the outside — out of one
+   * side and into the same side of its target — rather than straight back
+   * along the path of the edge it answers. Judged from where things ended up,
+   * so it holds for edges inside a block and for edges between blocks alike.
+   */
+  const upstream = (a: { x: number; y: number; width: number; height: number }, b: typeof a) => {
+    switch (direction) {
+      case 'TB': return b.y + b.height <= a.y;
+      case 'BT': return b.y >= a.y + a.height;
+      case 'LR': return b.x + b.width <= a.x;
+      case 'RL': return b.x >= a.x + a.width;
+    }
+  };
   const loopSide = horizontal ? 'bottom' as const : 'right' as const;
-  const connectors: Connector[] = allEdges.map((e) => makeConnector({
-    from: placed[e.from]!, to: placed[e.to]!,
-    route: 'elbow', arrow: e.arrow ?? 'end',
-    ...(e.label ? { label: e.label } : {}), ...(e.dashed ? { dashed: true } : {}),
-    ...(reversed.has(edges.indexOf(e)) && layer.get(e.from) !== layer.get(e.to) ? { fromSide: loopSide, toSide: loopSide } : {}),
-  }));
+  const connectors: Connector[] = allEdges.map((e) => {
+    const a = boxes.get(e.from);
+    const b = boxes.get(e.to);
+    return makeConnector({
+      from: placed[e.from]!, to: placed[e.to]!,
+      route: 'elbow', arrow: e.arrow ?? 'end',
+      ...(e.label ? { label: e.label } : {}), ...(e.dashed ? { dashed: true } : {}),
+      ...(a && b && upstream(a, b) ? { fromSide: loopSide, toSide: loopSide } : {}),
+    });
+  });
 
-  const all = [...boxes.values()];
-  const bx = Math.min(origin.x, ...all.map((b) => b.x), ...sections.map((s) => s.x));
-  const by = Math.min(origin.y, ...all.map((b) => b.y), ...sections.map((s) => s.y));
-  const bw = Math.max(...all.map((b) => b.x + b.width), ...sections.map((s) => s.x + s.width)) - bx;
-  const bh = Math.max(...all.map((b) => b.y + b.height), ...sections.map((s) => s.y + s.height)) - by;
-
+  const all = [...boxes.values(), ...sections];
+  const bx = all.length ? Math.min(...all.map((b) => b.x)) : origin.x;
+  const by = all.length ? Math.min(...all.map((b) => b.y)) : origin.y;
   return {
+    // Sections first in stacking order, so they sit under what they contain.
     items: [...sections, ...items, ...connectors],
     placed,
     boxes: Object.fromEntries(boxes),
-    bounds: { x: bx, y: by, width: all.length ? bw : 0, height: all.length ? bh : 0 },
+    bounds: {
+      x: bx, y: by,
+      width: all.length ? Math.max(...all.map((b) => b.x + b.width)) - bx : 0,
+      height: all.length ? Math.max(...all.map((b) => b.y + b.height)) - by : 0,
+    },
     problems,
   };
 }
