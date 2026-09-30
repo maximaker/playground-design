@@ -9,6 +9,7 @@
 import { useState } from 'react';
 import { useCanvas } from '../state/store.ts';
 import { Icon } from '../ui/Icon.tsx';
+import { Modal } from '../ui/Modal.tsx';
 
 export function Import({ onClose }: { onClose: () => void }) {
   const docId = useCanvas((s) => s.docId);
@@ -47,14 +48,7 @@ export function Import({ onClose }: { onClose: () => void }) {
   };
 
   return (
-    <div className="modal-backdrop" onPointerDown={onClose}>
-      <div className="modal" onPointerDown={(e) => e.stopPropagation()}>
-        <header className="modal-header">
-          <h2>Import a webpage</h2>
-          <button className="icon-button" onClick={onClose} aria-label="Close"><Icon name="close" size={14} /></button>
-        </header>
-
-        <div className="modal-body">
+    <Modal title={'Import a webpage'} onClose={onClose}>
           <p className="modal-lede">
             Fetches the page and its stylesheets and turns them into editable layers on a new
             artboard — real text, real flexbox, real styles. Good for a reference, a competitor, or
@@ -90,8 +84,6 @@ export function Import({ onClose }: { onClose: () => void }) {
             It is a static snapshot of the served markup: scripts, hover states and anything rendered
             client-side will not come across. Private and loopback addresses are refused.
           </p>
-        </div>
-      </div>
-    </div>
+    </Modal>
   );
 }

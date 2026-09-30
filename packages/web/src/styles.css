@@ -3147,3 +3147,42 @@ code { font-family: var(--mono); font-size: 0.92em; }
 }
 /* With the menu open, the menu is the explanation; a tooltip under it is noise. */
 .tool-group.is-open .tip::after, .tip:not([data-tip])::after { display: none; }
+
+/* --- Polish from the UX walk --------------------------------------------- */
+
+/* A toast can be read by a screen reader and closed by a button, not only by
+   clicking on its text — which nobody guessed. */
+.toast { display: flex; align-items: flex-start; gap: var(--s3); cursor: default; }
+.toast > span { flex: 1; }
+.toast-close {
+  flex: none; background: none; border: 0; padding: 0.15rem; margin: 0 -0.2rem 0 0;
+  color: var(--fg-faint); border-radius: var(--radius-xs); display: grid; place-items: center;
+}
+.toast-close:hover { color: var(--fg); background: var(--bg-hover); }
+/* Over the presentation too, where a copied link used to say nothing. */
+.toasts { z-index: 320; }
+
+.peer-dot.is-more { background: var(--bg-sunken); color: var(--fg-muted); font-size: 0.68rem; }
+
+/* Hover-only controls are also there for the keyboard. */
+.layer-toggle:focus-visible, .layer-row:focus-within .layer-toggle { opacity: .75; }
+.component-tile:focus-within .component-tile-actions { opacity: 1; }
+
+/* Tooltips at a rail's edge open inward rather than off the screen. */
+.rail-left .rail-tabs .tip.is-bottom::after { left: 0; transform: none; }
+.rail-right .rail-tabs .tip.is-bottom::after { left: auto; right: 0; transform: none; }
+
+/* The board style bar, flipped under the selection when its top is off screen. */
+.board-stylebar.is-below { transform: translate(-50%, 0); }
+.board-swatches { display: flex; gap: 4px; flex-wrap: wrap; padding: 0.15rem 0; }
+.board-swatches .board-swatch { width: 22px; height: 22px; }
+
+.home-error { display: flex; align-items: center; gap: var(--s3); }
+
+@media (pointer: coarse) {
+  .rail-tabs button { min-height: 40px; }
+  .board-swatch { width: 26px; height: 26px; }
+  .board-tool { min-width: 34px; min-height: 34px; }
+}
+
+.comment-thread.is-left { left: auto; right: 2.1rem; }

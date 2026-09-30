@@ -137,7 +137,7 @@ export function Layers() {
       ))}
       {page.artboards.length === 0 && (
         <p className="panel-empty">
-          No artboards yet. Press <kbd>F</kbd> and drag on the canvas.
+          No frames yet. Press <kbd>F</kbd> and drag on the canvas.
         </p>
       )}
     </div>

@@ -979,7 +979,7 @@ export function Canvas({ onContextMenu }: CanvasProps) {
       // a confusing answer to that.
       if (tool !== 'frame') {
         useCanvas.getState().toast(
-          'Draw inside an artboard — or press F to create one first.',
+          'Draw inside a frame — or press F to create one first.',
           'info',
         );
         setTool('move');
@@ -1138,7 +1138,7 @@ export function Canvas({ onContextMenu }: CanvasProps) {
 
       {dropping && (
         <div className="canvas-dropzone">
-          <span>Drop to place — on a frame to put it inside, anywhere else for a new artboard</span>
+          <span>Drop to place — on a frame to put it inside, anywhere else for a new frame</span>
         </div>
       )}
 

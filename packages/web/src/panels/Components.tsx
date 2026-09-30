@@ -79,7 +79,7 @@ export function Components() {
       parent = parent.parent ? doc.nodes[parent.parent] : undefined;
     }
     const parentId = parent?.id ?? page.artboards[0];
-    if (!parentId) { toast('Create an artboard first', 'error'); return; }
+    if (!parentId) { toast('Create a frame first', 'error'); return; }
 
     const def = doc.components?.[componentId];
     const instance = makeNode({ type: 'instance', name: def?.name ?? 'Instance', componentRef: componentId });
@@ -125,7 +125,7 @@ export function Components() {
       parent = parent.parent ? doc.nodes[parent.parent] : undefined;
     }
     const parentId = parent?.id ?? page.artboards[0];
-    if (!parentId) { toast('Create an artboard first', 'error'); return; }
+    if (!parentId) { toast('Create a frame first', 'error'); return; }
 
     const component = doc.codeComponents?.[componentId];
     const node = makeNode({

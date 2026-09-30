@@ -12,8 +12,10 @@ import { useCanvas, getDoc, currentPage } from '../state/store.ts';
 import { Icon, iconForNodeType, type IconName } from './Icon.tsx';
 import {
   copyProperties, detachSelection, duplicateSelection, createComponentFromSelection,
-  pasteProperties, selectParent, wrapInFrame, zoomToFit, zoomToSelection,
+  pasteProperties, selectParent, toggleLock, toggleVisibility, wrapInFrame,
+  zoomBy, zoomTo, zoomToFit, zoomToSelection,
 } from '../hooks/commands.ts';
+import { MOD, TOOLS, TOOL_ORDER } from './tools.ts';
 import { reorder } from '../canvas/arrange.ts';
 
 export interface PaletteActions {
@@ -21,8 +23,12 @@ export interface PaletteActions {
   openExport: () => void;
   openConnect: () => void;
   openShortcuts: () => void;
+  openShare: () => void;
+  openAppearance: () => void;
   openPanel: (tab: string) => void;
-  goHome: () => void;
+  present: () => void;
+  /** Null for a viewer on a share link, who has no library to go back to. */
+  goHome: (() => void) | null;
 }
 
 interface Entry {
@@ -148,22 +154,18 @@ function buildEntries({
   const hasSelection = selection.length > 0;
   const entries: Entry[] = [];
 
-  const tool = (id: string, label: string, icon: IconName, key: string) =>
+  const tool = (id: string, label: string, icon: IconName, key: string, hint?: string) =>
     entries.push({
-      id: `tool:${id}`, label, icon, shortcut: key, group: 'Tools',
+      id: `tool:${id}`, label, icon, shortcut: key, group: 'Tools', hint,
       run: () => setTool(id as never),
     });
 
-  tool('move', 'Move tool', 'cursor', 'V');
-  tool('frame', 'Frame tool', 'frame', 'F');
-  tool('text', 'Text tool', 'text', 'T');
-  tool('rect', 'Rectangle tool', 'square', 'R');
-  tool('ellipse', 'Ellipse tool', 'circle', 'O');
-  tool('image', 'Image tool', 'image', 'I');
-  tool('note', 'Prompt card', 'note', 'N');
-  tool('diamond', 'Diamond — for a diagram', 'diamond', 'D');
-  tool('connector', 'Connector', 'connector', 'X');
-  tool('section', 'Section', 'section', '⇧S');
+  // The same names and order as the toolbar, so the two never disagree.
+  for (const id of TOOL_ORDER) {
+    const info = TOOLS[id];
+    const hint = info.title.includes(' — ') ? info.title.split(' — ')[1] : undefined;
+    tool(id, `${info.name} tool`, info.icon, info.key, hint);
+  }
 
   const action = (id: string, label: string, icon: IconName, run: () => void, shortcut?: string, hint?: string) =>
     entries.push({ id: `action:${id}`, label, icon, run, shortcut, hint, group: 'Actions' });
@@ -172,25 +174,39 @@ function buildEntries({
   action('review', 'Review this design', 'check', () => actions.openPanel('review'), undefined, 'Contrast, tap targets, tokens');
   action('import', 'Import a webpage', 'download', actions.openImport);
   action('export', 'Export', 'upload', actions.openExport, '⌘⇧E');
+  action('present', 'Present this page', 'play', actions.present, 'P');
+  action('share', 'Share a link', 'share', actions.openShare);
   action('shortcuts', 'Keyboard shortcuts', 'keyboard', actions.openShortcuts, '?');
+  action('appearance', 'Appearance', 'settings', actions.openAppearance, undefined, 'Theme and interface scale');
 
-  action('undo', 'Undo', 'undo', () => useCanvas.getState().undo(), '⌘Z');
-  action('redo', 'Redo', 'redo', () => useCanvas.getState().redo(), '⌘⇧Z');
+  action('undo', 'Undo', 'undo', () => useCanvas.getState().undo(), `${MOD}Z`);
+  action('redo', 'Redo', 'redo', () => useCanvas.getState().redo(), `${MOD}⇧Z`);
 
   // Shown whether or not something is selected: hiding them makes the palette
   // feel unreliable, and each one explains itself when there is nothing to act on.
   {
     const needs = hasSelection ? undefined : 'Select something first';
-    action('duplicate', 'Duplicate', 'copy', duplicateSelection, '⌘D', needs);
-    action('group', 'Wrap in a frame', 'frame', wrapInFrame, '⌘G', needs);
-    action('component', 'Create a component', 'component', createComponentFromSelection, undefined, needs);
+    const ids = () => selection.map(stripKey);
+    action('duplicate', 'Duplicate', 'copy', duplicateSelection, `${MOD}D`, needs);
+    action('group', 'Wrap in frame', 'frame', wrapInFrame, `${MOD}G`, needs);
+    action('rename', 'Rename', 'edit', () => {
+      const id = selection[0];
+      if (!id) return;
+      useCanvas.getState().requestPanel('layers');
+      useCanvas.getState().setRenaming(stripKey(id));
+    }, 'F2', needs);
+    action('component', 'Create component', 'component', createComponentFromSelection, undefined, needs);
     action('detach', 'Detach from component', 'instance', detachSelection, undefined, needs);
-    action('copy-props', 'Copy properties', 'copy', copyProperties, '⌥⌘C');
-    action('paste-props', 'Paste properties', 'copy', pasteProperties, '⌥⌘V');
-    action('front', 'Bring to front', 'chevronUp', () => doc && dispatch(reorder(doc, selection.map(stripKey), 'front')), ']');
-    action('back', 'Send to back', 'chevronDown', () => doc && dispatch(reorder(doc, selection.map(stripKey), 'back')), '[');
-    action('parent', 'Select parent', 'layers', selectParent, 'esc');
-    action('zoom-sel', 'Zoom to selection', 'search', zoomToSelection, '2');
+    action('copy-props', 'Copy properties', 'copy', copyProperties, `⌥${MOD}C`, needs);
+    action('paste-props', 'Paste properties', 'copy', pasteProperties, `⌥${MOD}V`, needs);
+    action('front', 'Bring to front', 'chevronUp', () => doc && dispatch(reorder(doc, ids(), 'front')), ']', needs);
+    action('forward', 'Bring forward', 'chevronUp', () => doc && dispatch(reorder(doc, ids(), 'forward')), `${MOD}]`, needs);
+    action('backward', 'Send backward', 'chevronDown', () => doc && dispatch(reorder(doc, ids(), 'backward')), `${MOD}[`, needs);
+    action('back', 'Send to back', 'chevronDown', () => doc && dispatch(reorder(doc, ids(), 'back')), '[', needs);
+    action('hide', 'Hide or show', 'eyeOff', toggleVisibility, `${MOD}⇧H`, needs);
+    action('lock', 'Lock or unlock', 'lock', toggleLock, `${MOD}⇧L`, needs);
+    action('parent', 'Select parent', 'layers', selectParent, '\\', needs);
+    action('zoom-sel', 'Zoom to selection', 'search', zoomToSelection, '2', needs);
     action('delete', 'Delete', 'trash', () => {
       if (!hasSelection) return;
       dispatch([{ t: 'remove', ids: selection.map(stripKey) }]);
@@ -212,9 +228,15 @@ function buildEntries({
   }
 
   action('zoom-fit', 'Zoom to fit', 'search', zoomToFit, '1');
+  action('zoom-in', 'Zoom in', 'plus', () => zoomBy(1.25), '+');
+  action('zoom-out', 'Zoom out', 'minus', () => zoomBy(1 / 1.25), '−');
+  action('zoom-100', 'Zoom to 100%', 'search', () => zoomTo(1), '⇧0');
   action('tokens', 'Design tokens', 'palette', () => actions.openPanel('tokens'));
-  action('history', 'Version history', 'history', () => actions.openPanel('history'));
-  action('home', 'All documents', 'page', actions.goHome);
+  action('components', 'Components', 'component', () => actions.openPanel('components'));
+  action('comments', 'Comments', 'comment', () => actions.openPanel('comments'));
+  action('spec', 'Spec', 'ruler', () => actions.openPanel('spec'), undefined, 'Measured size, tokens and code');
+  action('history', 'Version history', 'history', () => useCanvas.getState().requestPanel('history'));
+  if (actions.goHome) action('home', 'All documents', 'page', actions.goHome);
 
   // --- Layers --------------------------------------------------------------
 
@@ -257,7 +279,7 @@ function buildEntries({
     for (const p of doc.pages) {
       if (p.id === page.id) continue;
       entries.push({
-        id: `page:${p.id}`, label: p.name, hint: `${p.artboards.length} artboards`,
+        id: `page:${p.id}`, label: p.name, hint: `${p.artboards.length} frame${p.artboards.length === 1 ? '' : 's'}`,
         icon: 'page', group: 'Pages', run: () => setPage(p.id),
       });
     }

@@ -85,6 +85,12 @@ export function HistoryBar() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rev]);
 
+  // "Version history" in the palette asks for the bar the way it asks for a panel.
+  const requested = useCanvas((s) => s.panelRequest);
+  useEffect(() => {
+    if (requested === 'history') { setOpen(true); useCanvas.getState().requestPanel(null); }
+  }, [requested]);
+
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };

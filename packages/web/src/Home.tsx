@@ -273,7 +273,8 @@ export function Home({ onOpen, appearance, onAppearance, session }: {
             <input
               type="file"
               accept="application/json,.json"
-              style={{ display: 'none' }}
+              className="sr-only"
+              aria-label="Import a bundle"
               onChange={(e) => {
                 const file = e.target.files?.[0];
                 // Reset first: picking the same file twice must fire again.
@@ -326,7 +327,11 @@ export function Home({ onOpen, appearance, onAppearance, session }: {
         </section>
       )}
 
-      {error && <p className="home-error">{error}. Is the server running on port 4000?</p>}
+      {error && (
+        <p className="home-error">
+          Could not load your documents. <button className="button" onClick={() => void refresh()}>Try again</button>
+        </p>
+      )}
       {loading && <p className="dim">Loading…</p>}
 
       {!loading && !error && (
@@ -441,6 +446,9 @@ export function Home({ onOpen, appearance, onAppearance, session }: {
                 <div
                   key={d.id}
                   className="home-card"
+                  role="link"
+                  tabIndex={0}
+                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen(d.id); } }}
                   draggable
                   onDragStart={(e) => {
                     // A private type, so the canvas's file-drop handler and any
@@ -528,9 +536,13 @@ export function Home({ onOpen, appearance, onAppearance, session }: {
 
             {!shown.length && (
               <p className="dim">
-                {filter === null
-                  ? 'No documents yet. Create one to get started.'
-                  : 'Nothing here yet — drag a document onto this project, or create one while it is open.'}
+                {query.trim()
+                  ? <>Nothing matches “{query.trim()}”.</>
+                  : filter === null
+                    ? 'No documents yet. Create one to get started.'
+                    : filter === 'unfiled'
+                      ? 'Every document is in a project.'
+                      : 'Nothing here yet — drag a document onto this project, or create one while it is open.'}
               </p>
             )}
           </section>

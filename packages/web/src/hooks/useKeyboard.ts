@@ -32,6 +32,11 @@ function onCanvas(target: EventTarget | null): boolean {
   return !!el.closest?.('.stage');
 }
 
+/** True while a dialog, palette or menu is open and should get the keys. */
+function overlayOpen(): boolean {
+  return !!document.querySelector('.modal-backdrop, .context-menu, .overflow-menu, .settings-popover');
+}
+
 function isTyping(target: EventTarget | null): boolean {
   const el = target as HTMLElement | null;
   if (!el) return false;
@@ -56,6 +61,12 @@ export function useKeyboard(actions: KeyboardActions = {}): void {
         return;
       }
       if (isTyping(e.target)) return;
+      // A dialog or a menu owns the keyboard while it is open. Without this,
+      // Backspace in the export sheet deleted the selection behind it, and the
+      // Escape that closed a menu also walked the selection up to its parent.
+      if (overlayOpen()) return;
+      // A hover menu on the toolbar closes on Escape and otherwise takes no keys.
+      if (e.key === 'Escape' && document.querySelector('.tool-flyout')) return;
 
       const mod = e.metaKey || e.ctrlKey;
       const key = e.key.toLowerCase();
@@ -72,7 +83,7 @@ export function useKeyboard(actions: KeyboardActions = {}): void {
 
       // --- Structure -------------------------------------------------------
       if (mod && key === 'd') { e.preventDefault(); duplicateSelection(); return; }
-      if (mod && key === 'g') { e.preventDefault(); wrapInFrame(); return; }
+      if (mod && !e.shiftKey && key === 'g') { e.preventDefault(); wrapInFrame(); return; }
       if (mod && e.shiftKey && key === 'g') {
         // Ungroup: lift children into the grandparent, then drop the wrapper.
         e.preventDefault();
@@ -171,7 +182,6 @@ export function useKeyboard(actions: KeyboardActions = {}): void {
       // shifted ones, which is what a hand arriving from Figma will press.
       if (!mod && (e.key === '1' || e.key === '!')) { e.preventDefault(); zoomToFit(); return; }
       if (!mod && (e.key === '2' || e.key === '@')) { e.preventDefault(); zoomToSelection(); return; }
-      if (!mod && (e.key === '3' || e.key === '#')) { e.preventDefault(); zoomToSelection(); return; }
 
       // --- The board --------------------------------------------------------
       // Board items are selected separately from layers, so their keys come

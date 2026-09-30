@@ -250,13 +250,13 @@ export function Present() {
         </span>
 
         <span className="present-nav">
-          <button className="icon-button" onClick={() => go(index - 1)} disabled={index === 0} aria-label="Previous frame">
+          <button className="icon-button" onClick={() => go(index - 1)} disabled={index === 0} aria-label="Previous frame" title="Previous  ←">
             <Icon name="chevronLeft" size={14} />
           </button>
           <span className="present-counter tabular">{index + 1} / {frames.length}</span>
           <button
             className="icon-button" onClick={() => go(index + 1)}
-            disabled={index === frames.length - 1} aria-label="Next frame"
+            disabled={index === frames.length - 1} aria-label="Next frame" title="Next  →"
           ><Icon name="chevronRight" size={14} /></button>
         </span>
 
@@ -301,7 +301,7 @@ export function Present() {
         ><Icon name="comment" size={14} /></button>
 
         <button className="icon-button" onClick={() => void toggleFullscreen()} title="Full screen  F" aria-label="Full screen">
-          <Icon name="frame" size={14} />
+          <Icon name="fullscreen" size={14} />
         </button>
       </div>
 

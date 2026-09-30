@@ -11,7 +11,7 @@
  * few pixels wide — the same reason the note card collapses to a marker.
  */
 
-import { memo, useEffect, useRef, useState } from 'react';
+import { memo, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { type Comment, type CommentReply, newId } from '@playground/shared';
 import { useCanvas } from '../state/store.ts';
 import { Icon } from '../ui/Icon.tsx';
@@ -75,7 +75,7 @@ export const CommentPin = memo(function CommentPin({ comment, scale }: {
       </button>
 
       {open && (
-        <div className="comment-thread">
+        <Thread>
           <Entry author={comment.author} text={comment.text} at={comment.createdAt} />
           {comment.replies.map((r) => (
             <Entry key={r.id} author={r.author} text={r.text} at={r.createdAt} agent={r.kind === 'agent'} />
@@ -102,11 +102,31 @@ export const CommentPin = memo(function CommentPin({ comment, scale }: {
             </button>
             <button className="button" onClick={reply} disabled={!draft.trim()}>Reply</button>
           </footer>
-        </div>
+        </Thread>
       )}
     </div>
   );
 });
+
+/**
+ * The thread beside a pin, opening to the right — or to the left when the
+ * right would put it under the inspector. A pin on a layer's top-right corner,
+ * with the document fitted to the screen, is often a rail's width from the
+ * edge of the stage.
+ */
+function Thread({ children }: { children: ReactNode }) {
+  const ref = useRef<HTMLDivElement | null>(null);
+  const [left, setLeft] = useState(false);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    const stage = el?.closest('.stage');
+    if (!el || !stage) return;
+    const box = el.getBoundingClientRect();
+    const room = stage.getBoundingClientRect();
+    if (box.right > room.right - 8 && box.left - box.width - 40 > room.left) setLeft(true);
+  }, []);
+  return <div ref={ref} className={`comment-thread${left ? ' is-left' : ''}`}>{children}</div>;
+}
 
 function Entry({ author, text, at, agent }: { author: string; text: string; at: number; agent?: boolean }) {
   return (
@@ -186,7 +206,7 @@ export const CommentComposer = memo(function CommentComposer({ scale }: { scale?
       onPointerDown={(e) => e.stopPropagation()}
     >
       <span className="comment-marker is-draft">{initials(draft.author)}</span>
-      <div className="comment-thread">
+      <Thread>
         <textarea
           ref={ref}
           className="comment-input"
@@ -203,7 +223,7 @@ export const CommentComposer = memo(function CommentComposer({ scale }: { scale?
           <button className="button subtle" onClick={() => setDraft(null)}>Cancel</button>
           <button className="button primary" onClick={post} disabled={!text.trim()}>Comment</button>
         </footer>
-      </div>
+      </Thread>
     </div>
   );
 });

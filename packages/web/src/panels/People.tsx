@@ -66,7 +66,7 @@ export function People({ docId, myRole }: { docId: string; myRole: Role | null }
   const copy = async (text: string) => {
     try {
       await navigator.clipboard.writeText(text);
-      toast('Invitation link copied', 'info');
+      toast('Invitation link copied', 'success');
     } catch {
       toast('Could not reach the clipboard — select the link and copy it.', 'error');
     }
@@ -86,7 +86,7 @@ export function People({ docId, myRole }: { docId: string; myRole: Role | null }
       };
       if (!res.ok) { toast(body.error ?? 'That did not work', 'error'); return; }
       if (body.added) {
-        toast(`${body.added.name} can now open this document`, 'info');
+        toast(`${body.added.name} can now open this document`, 'success');
       } else if (body.invite) {
         setMadeLink(body.invite.url);
         await copy(body.invite.url);

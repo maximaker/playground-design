@@ -68,7 +68,7 @@ export function Publish({ canPublish }: { canPublish: boolean }) {
   const copy = async (text: string) => {
     try {
       await navigator.clipboard.writeText(text);
-      toast('Link copied', 'info');
+      toast('Link copied', 'success');
     } catch {
       toast('Could not reach the clipboard — select the link and copy it.', 'error');
     }
@@ -92,7 +92,7 @@ export function Publish({ canPublish }: { canPublish: boolean }) {
       setPub(body.publication);
       setSlug(body.publication.slug);
       if (!pub) await copy(body.publication.url);
-      toast(pub ? 'Published page updated' : 'Published', 'info');
+      toast(pub ? 'Published page updated' : 'Published', 'success');
     } finally {
       setBusy(false);
     }

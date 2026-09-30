@@ -11,6 +11,7 @@ import { emitHtml, emitJsx } from '@playground/shared';
 import { useCanvas, getDoc, topLevelSelection } from '../state/store.ts';
 import { reorder } from '../canvas/arrange.ts';
 import { createComponentFromSelection, duplicateSelection, wrapInFrame } from '../hooks/commands.ts';
+import { MOD } from './tools.ts';
 
 export interface ContextMenuState { x: number; y: number; nodeId: NodeId | null }
 
@@ -66,8 +67,13 @@ export function ContextMenu({ state, onClose, onExport }: {
       if (what === 'html') return emitHtml(doc, id, { mode: 'inline', includeTokens: false }).html;
       return emitJsx(doc, id, { format: what === 'tailwind' ? 'tailwind' : 'inline' });
     }).join('\n\n');
-    await navigator.clipboard.writeText(text);
-    toast(`Copied ${what.toUpperCase()}`, 'success');
+    const label = { tailwind: 'JSX + Tailwind', jsx: 'JSX', css: 'CSS', html: 'HTML' }[what];
+    try {
+      await navigator.clipboard.writeText(text);
+      toast(`Copied as ${label}`, 'success');
+    } catch {
+      toast('Could not reach the clipboard', 'error');
+    }
   };
 
   const hasComponents = Object.keys(doc?.components ?? {}).length > 0;
@@ -76,7 +82,7 @@ export function ContextMenu({ state, onClose, onExport }: {
     { label: 'Copy as JSX + Tailwind', run: () => void copy('tailwind'), disabled: !has },
     { label: 'Copy as JSX + inline styles', run: () => void copy('jsx'), disabled: !has },
     { label: 'Copy as HTML', run: () => void copy('html'), disabled: !has },
-    { label: 'Copy as CSS', shortcut: '⌘⇧C', run: () => void copy('css'), disabled: !has },
+    { label: 'Copy as CSS', shortcut: `${MOD}⇧C`, run: () => void copy('css'), disabled: !has },
     { label: '', separator: true },
     {
       label: 'Rename',
@@ -88,8 +94,8 @@ export function ContextMenu({ state, onClose, onExport }: {
       },
       disabled: !state.nodeId,
     },
-    { label: 'Duplicate', shortcut: '⌘D', run: duplicateSelection, disabled: !has },
-    { label: 'Wrap in frame', shortcut: '⌘G', run: wrapInFrame, disabled: !has },
+    { label: 'Duplicate', shortcut: `${MOD}D`, run: duplicateSelection, disabled: !has },
+    { label: 'Wrap in frame', shortcut: `${MOD}G`, run: wrapInFrame, disabled: !has },
     { label: 'Create component', run: createComponentFromSelection, disabled: !has },
     {
       // Arms the library rather than opening a submenu of names: which
@@ -110,35 +116,36 @@ export function ContextMenu({ state, onClose, onExport }: {
     },
     { label: '', separator: true },
     { label: 'Bring to front', shortcut: ']', run: () => doc && dispatch(reorder(doc, ids, 'front')), disabled: !has },
-    { label: 'Bring forward', run: () => doc && dispatch(reorder(doc, ids, 'forward')), disabled: !has },
-    { label: 'Send backward', run: () => doc && dispatch(reorder(doc, ids, 'backward')), disabled: !has },
+    { label: 'Bring forward', shortcut: `${MOD}]`, run: () => doc && dispatch(reorder(doc, ids, 'forward')), disabled: !has },
+    { label: 'Send backward', shortcut: `${MOD}[`, run: () => doc && dispatch(reorder(doc, ids, 'backward')), disabled: !has },
     { label: 'Send to back', shortcut: '[', run: () => doc && dispatch(reorder(doc, ids, 'back')), disabled: !has },
     { label: '', separator: true },
     {
       label: 'Select parent',
-      shortcut: '⏎',
+      shortcut: '\\',
       run: () => node?.parent && select([node.parent]),
       disabled: !node?.parent,
     },
     {
       label: 'Select children',
+      shortcut: '↵',
       run: () => node?.children.length && select(node.children),
       disabled: !node?.children.length,
     },
     {
       label: node?.visible === false ? 'Show' : 'Hide',
-      shortcut: '⌘⇧H',
+      shortcut: `${MOD}⇧H`,
       run: () => dispatch([{ t: 'meta', updates: ids.map((id) => ({ id, visible: !(doc?.nodes[id]?.visible ?? true) })) }]),
       disabled: !has,
     },
     {
       label: node?.locked ? 'Unlock' : 'Lock',
-      shortcut: '⌘⇧L',
+      shortcut: `${MOD}⇧L`,
       run: () => dispatch([{ t: 'meta', updates: ids.map((id) => ({ id, locked: !(doc?.nodes[id]?.locked ?? false) })) }]),
       disabled: !has,
     },
     { label: '', separator: true },
-    { label: 'Export…', shortcut: '⌘⇧E', run: onExport, disabled: !has },
+    { label: 'Export…', shortcut: `${MOD}⇧E`, run: onExport, disabled: !has },
     {
       label: 'Delete',
       shortcut: '⌫',

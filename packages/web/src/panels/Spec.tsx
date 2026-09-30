@@ -208,7 +208,7 @@ export function Spec() {
         </ul>
 
         {!readOnly && !adding && (
-          <button className="button subtle full" onClick={() => setAdding(true)}>+ Add a note</button>
+          <button className="button subtle full" onClick={() => setAdding(true)}>+ Add a spec note</button>
         )}
 
         {!readOnly && adding && (

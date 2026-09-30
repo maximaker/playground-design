@@ -70,7 +70,11 @@ await view.waitForTimeout(2200);
 
 // --- Getting in and out --------------------------------------------------------
 
+// A click to give the page focus; the document opens fitted now, so the
+// middle of the screen is a frame and the click selects it. Presenting starts
+// on the selection, and this step is about starting from the top.
 await view.mouse.click(640, 400);
+await view.evaluate(() => window.__playground.store.getState().select([]));
 await view.keyboard.press('p');
 await view.waitForTimeout(1200);
 check('P starts presenting', (await view.locator('.present').count()) === 1);

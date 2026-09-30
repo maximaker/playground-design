@@ -131,8 +131,12 @@ await page.evaluate(() => {
   if (frame) s.select([frame.id]);
 });
 await page.waitForTimeout(600);
+// A viewer's inspector opens on the spec, which is theirs to use; the Design
+// panel is the one that must be inert.
+await page.locator('.rail-right .rail-tabs button[aria-label="Design"]').click();
+await page.waitForTimeout(400);
 const panel = await page.evaluate(() => {
-  const all = [...document.querySelectorAll('.rail-right input, .rail-right button, .rail-right select')];
+  const all = [...document.querySelectorAll('.rail-right .rail-body input, .rail-right .rail-body button, .rail-right .rail-body select')];
   // A disabled <fieldset> does not set `disabled` on its descendants — it
   // disables them through the CSS/UA layer — so ask the selector, not the IDL
   // property. Checking `.disabled` here reports every control as live.

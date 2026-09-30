@@ -26,6 +26,8 @@ import { Toolbar } from './ui/Toolbar.tsx';
 import { ContextMenu, type ContextMenuState } from './ui/ContextMenu.tsx';
 import { Shortcuts } from './ui/Shortcuts.tsx';
 import { Icon, type IconName } from './ui/Icon.tsx';
+import { MOD } from './ui/tools.ts';
+import { zoomToFit } from './hooks/commands.ts';
 import { Logo } from './ui/Logo.tsx';
 import { Settings } from './ui/Settings.tsx';
 import { Landing } from './Landing.tsx';
@@ -55,10 +57,10 @@ type LeftTab = 'layers' | 'pages' | 'components' | 'tokens';
 type RightTab = 'properties' | 'spec' | 'comments' | 'review';
 
 const RIGHT_TABS: { id: RightTab; icon: IconName; label: string; hint: string }[] = [
-  { id: 'properties', icon: 'settings', label: 'Design', hint: 'Edit the selected layer' },
+  { id: 'properties', icon: 'sliders', label: 'Design', hint: 'Edit the selected layer' },
   { id: 'spec', icon: 'ruler', label: 'Spec', hint: 'Measured size, tokens, notes and code to paste' },
-  { id: 'comments', icon: 'comment', label: 'Comments', hint: 'The conversation about this design — shows the pins while open' },
-  { id: 'review', icon: 'check', label: 'Review', hint: 'Contrast, tap targets, tokens and layout — outlines what it finds' },
+  { id: 'comments', icon: 'comment', label: 'Comments', hint: 'The conversation about this design' },
+  { id: 'review', icon: 'check', label: 'Review', hint: 'Contrast, tap targets, tokens and layout' },
 ];
 
 const LEFT_TABS: { id: LeftTab; icon: IconName; label: string; hint: string }[] = [
@@ -199,9 +201,6 @@ function Editor({ source, onHome, appearance, onAppearance, session }: {
 
   const [leftTab, setLeftTab] = useState<LeftTab>('layers');
 
-  // A command can ask for a panel — "go to component" selects a node that lives
-  // in no page, and doing that without showing where would look like nothing
-  // happened.
   /*
    * Presenting starts on the frame you are looking at.
    *
@@ -245,8 +244,15 @@ function Editor({ source, onHome, appearance, onAppearance, session }: {
     window.history.replaceState(null, '', url.toString());
   }, [present]);
 
-  // And read back on arrival, once the document is there to check it against.
+  // The first thing you see of a document is all of it. The viewport used to
+  // start at a fixed offset and zoom, which opened most documents on the top
+  // left corner of the first frame.
   const docReady = !!doc;
+  useEffect(() => {
+    if (docReady) requestAnimationFrame(() => zoomToFit());
+  }, [docReady]);
+
+  // And read back on arrival, once the document is there to check it against.
   useEffect(() => {
     if (!docReady) return;
     const url = new URL(window.location.href);
@@ -262,6 +268,9 @@ function Editor({ source, onHome, appearance, onAppearance, session }: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [docReady]);
 
+  // A command can ask for a panel — "go to component" selects a node that lives
+  // in no page, and doing that without showing where would look like nothing
+  // happened.
   const panelRequest = useCanvas((s) => s.panelRequest);
   useEffect(() => {
     if (!panelRequest) return;
@@ -291,7 +300,7 @@ function Editor({ source, onHome, appearance, onAppearance, session }: {
   const leftOpen = !overlay || openPanel === 'left';
   const rightOpen = !overlay || openPanel === 'right';
 
-  // Selecting something on the canvas is a request to see the canvas.
+  // Crossing into a narrow layout closes the panels: the canvas gets the screen.
   useEffect(() => {
     if (overlay) setOpenPanel(null);
   }, [overlay]);
@@ -307,8 +316,6 @@ function Editor({ source, onHome, appearance, onAppearance, session }: {
   // Subscribed to the depths rather than the arrays, so a new entry only
   // re-renders the header when it changes whether the buttons are usable.
   const canUndo = useCanvas((s) => s.undoStack.length > 0);
-  // Tooltips name the key the reader actually has.
-  const modKey = typeof navigator !== 'undefined' && /Mac|iP(hone|ad)/.test(navigator.platform) ? '⌘' : 'Ctrl+';
   const canRedo = useCanvas((s) => s.redoStack.length > 0);
 
   useEffect(() => {
@@ -333,7 +340,7 @@ function Editor({ source, onHome, appearance, onAppearance, session }: {
                   {/access/i.test(fatalError) && (
                     <p className="boot-hint dim">
                       It exists, but you are not on it. Ask whoever sent the link to add you —
-                      they can do that from People in the right rail.
+                      they can do that from Share → People.
                     </p>
                   )}
                   {onHome && <button className="button primary" onClick={onHome}>Back to all documents</button>}
@@ -363,7 +370,7 @@ function Editor({ source, onHome, appearance, onAppearance, session }: {
 
         <button
           className="icon-button"
-          title="Search and commands (⌘K)"
+          title={`Search and commands (${MOD}K)`}
           aria-label="Search and commands"
           onClick={() => setShowPalette(true)}
         ><Icon name="search" size={15} /></button>
@@ -408,6 +415,7 @@ function Editor({ source, onHome, appearance, onAppearance, session }: {
                 {p.kind === 'agent' ? <Icon name="agent" size={12} /> : p.name.charAt(0).toUpperCase()}
               </span>
             ))}
+            {peers.length > 5 && <span className="peer-dot is-more">+{peers.length - 5}</span>}
           </div>
         )}
 
@@ -425,8 +433,8 @@ function Editor({ source, onHome, appearance, onAppearance, session }: {
                 onClose={() => setShowOverflow(false)}
                 items={[
                   ...(readOnly ? [] : [
-                    { label: 'Undo', icon: 'undo' as IconName, run: () => useCanvas.getState().undo() },
-                    { label: 'Redo', icon: 'redo' as IconName, run: () => useCanvas.getState().redo() },
+                    { label: 'Undo', icon: 'undo' as IconName, run: () => useCanvas.getState().undo(), disabled: !canUndo },
+                    { label: 'Redo', icon: 'redo' as IconName, run: () => useCanvas.getState().redo(), disabled: !canRedo },
                     { label: 'Import a webpage', icon: 'download' as IconName, run: () => setModal('import') },
                     { label: 'Share a link', icon: 'share' as IconName, run: () => setModal('share') },
                   ]),
@@ -466,7 +474,7 @@ function Editor({ source, onHome, appearance, onAppearance, session }: {
                 <span className="button-label">Import</span>
               </button>
             )}
-            <button className="button" onClick={() => setModal('export')} title="Export this design (\u2318\u21e7E)">
+            <button className="button" onClick={() => setModal('export')} title={`Export this design (${MOD}⇧E)`}>
               <Icon name="upload" size={14} />
               <span className="button-label">Export</span>
             </button>
@@ -503,11 +511,11 @@ function Editor({ source, onHome, appearance, onAppearance, session }: {
         {overlay && (
           <button
             className={`icon-button panel-toggle${openPanel === 'right' ? ' is-active' : ''}`}
-            title="Properties"
-            aria-label="Toggle the properties panel"
+            title="Design, spec, comments and review"
+            aria-label="Toggle the right panel"
             aria-expanded={openPanel === 'right'}
             onClick={() => setOpenPanel((p) => (p === 'right' ? null : 'right'))}
-          ><Icon name="settings" size={16} /></button>
+          ><Icon name="sliders" size={16} /></button>
         )}
       </header>
 
@@ -652,8 +660,14 @@ function Editor({ source, onHome, appearance, onAppearance, session }: {
             openExport: () => setModal('export'),
             openConnect: () => setModal('connect'),
             openShortcuts: () => setModal('shortcuts'),
-            openPanel: (tab) => { setLeftTab(tab as LeftTab); if (overlay) setOpenPanel('left'); },
-            goHome: onHome ?? (() => {}),
+            openPanel: (tab) => {
+              if (RIGHT_TABS.some((t) => t.id === tab)) { setRightTab(tab as RightTab); if (overlay) setOpenPanel('right'); }
+              else { setLeftTab(tab as LeftTab); if (overlay) setOpenPanel('left'); }
+            },
+            openShare: () => setModal('share'),
+            openAppearance: () => setShowSettings(true),
+            present: startPresenting,
+            goHome: onHome,
           }}
         />
       )}
@@ -686,8 +700,9 @@ function Toasts() {
   return (
     <div className="toasts">
       {toasts.map((t) => (
-        <div key={t.id} className={`toast is-${t.tone}`} onClick={() => dismiss(t.id)} role="status">
-          {t.message}
+        <div key={t.id} className={`toast is-${t.tone}`} role={t.tone === 'error' ? 'alert' : 'status'}>
+          <span>{t.message}</span>
+          <button className="toast-close" onClick={() => dismiss(t.id)} aria-label="Dismiss"><Icon name="close" size={12} /></button>
         </div>
       ))}
     </div>

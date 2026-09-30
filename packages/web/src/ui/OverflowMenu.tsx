@@ -13,6 +13,7 @@ export interface OverflowItem {
   label: string;
   icon: IconName;
   run: () => void;
+  disabled?: boolean;
 }
 
 export function OverflowMenu({ items, onClose }: { items: OverflowItem[]; onClose: () => void }) {
@@ -40,6 +41,7 @@ export function OverflowMenu({ items, onClose }: { items: OverflowItem[]; onClos
           key={item.label}
           role="menuitem"
           className="context-item"
+          disabled={item.disabled}
           onClick={() => { item.run(); onClose(); }}
         >
           <span><Icon name={item.icon} size={14} /> {item.label}</span>

@@ -10,6 +10,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useCanvas } from '../state/store.ts';
 import { Icon } from '../ui/Icon.tsx';
+import { Modal } from '../ui/Modal.tsx';
 
 interface ConnectionRow {
   code: string; label: string | null;
@@ -90,14 +91,7 @@ export function ConnectAgent({ onClose }: { onClose: () => void }) {
   const agentPeers = peers.filter((p) => p.kind === 'agent');
 
   return (
-    <div className="modal-backdrop" onPointerDown={onClose}>
-      <div className="modal" onPointerDown={(e) => e.stopPropagation()}>
-        <header className="modal-header">
-          <h2>Connect an agent</h2>
-          <button className="icon-button" onClick={onClose} aria-label="Close"><Icon name="close" size={14} /></button>
-        </header>
-
-        <div className="modal-body">
+    <Modal title={'Connect an agent'} onClose={onClose}>
           <p className="modal-lede">
             Generate a connection code, then paste the setup line into your coding agent. The agent
             gets read and write access to <strong>this document</strong> — it can inspect the tree,
@@ -184,12 +178,10 @@ export function ConnectAgent({ onClose }: { onClose: () => void }) {
           )}
 
           <p className="security-note">
-            There are no accounts in this version, so anyone holding a connection code can edit this
-            document. Revoke codes you are no longer using.
+            A connection code is a credential on its own: anyone holding one can edit this document
+            without signing in. Revoke codes you are no longer using.
           </p>
-        </div>
-      </div>
-    </div>
+    </Modal>
   );
 }
 

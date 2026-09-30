@@ -21,6 +21,7 @@ import { GradientEditor } from '../ui/GradientEditor.tsx';
 import { Icon } from '../ui/Icon.tsx';
 import { AlignExtras, AlignPad } from '../ui/AlignPad.tsx';
 import { BoxEditor } from '../ui/BoxEditor.tsx';
+import { BoardProperties } from './BoardProperties.tsx';
 import { nodeInnerRect } from '../canvas/registry.ts';
 
 const MIXED = '—'; // em dash: "these nodes disagree"
@@ -57,6 +58,7 @@ export function Properties() {
   // there was no way back to the component from the thing it made.
   const isInstance = nodes.length === 1 && nodes[0]?.type === 'instance';
   const readOnly = useCanvas((s) => s.readOnly);
+  const boardSelected = useCanvas((s) => s.boardSelection.length > 0);
 
   // A single selected instance gets its variant switcher.
   const instanceNode = resolved.length === 1 ? doc?.nodes[resolved[0]!.targetId] : undefined;
@@ -73,6 +75,8 @@ export function Properties() {
     })),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [doc, version]);
+
+  if (nodes.length === 0 && boardSelected) return <BoardProperties />;
 
   if (nodes.length === 0) {
     return (

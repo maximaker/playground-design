@@ -14,6 +14,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useCanvas } from '../state/store.ts';
 import { Icon } from '../ui/Icon.tsx';
+import { Modal } from '../ui/Modal.tsx';
 import { People } from './People.tsx';
 import { Publish } from './Publish.tsx';
 
@@ -76,7 +77,7 @@ export function Share({ onClose }: { onClose: () => void }) {
   const copy = async (text: string) => {
     try {
       await navigator.clipboard.writeText(text);
-      toast('Link copied', 'info');
+      toast('Link copied', 'success');
     } catch {
       toast('Could not reach the clipboard — select the link and copy it.', 'error');
     }
@@ -89,14 +90,7 @@ export function Share({ onClose }: { onClose: () => void }) {
   };
 
   return (
-    <div className="modal-backdrop" onPointerDown={onClose}>
-      <div className="modal" onPointerDown={(e) => e.stopPropagation()}>
-        <header className="modal-header">
-          <h2>Share</h2>
-          <button className="icon-button" onClick={onClose} aria-label="Close"><Icon name="close" size={15} /></button>
-        </header>
-
-        <div className="modal-body">
+    <Modal title={'Share'} onClose={onClose}>
           {docId && (
             <>
               <h3 className="share-heading">People</h3>
@@ -166,9 +160,7 @@ export function Share({ onClose }: { onClose: () => void }) {
             effect immediately, for everyone holding that link. To give someone editing rights,
             invite them by name above instead.
           </p>
-        </div>
-      </div>
-    </div>
+    </Modal>
   );
 }
 

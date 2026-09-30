@@ -376,24 +376,28 @@ function BoardTextEditor({ id, value, zoom, align, single }: {
 function StyleBar({ zoom }: { zoom: number }) {
   const ids = useCanvas((s) => s.boardSelection);
   const dispatch = useCanvas((s) => s.dispatch);
+  const panY = useCanvas((s) => s.viewport.y);
   const page = currentPage();
   const doc = getDoc();
   if (!page || !doc) return null;
   const items = boardOf(page).filter((i) => ids.includes(i.id));
   if (!items.length) return null;
 
-  // Above the top of the selection, centred on it.
-  let minX = Infinity, minY = Infinity, maxX = -Infinity;
+  // Above the top of the selection, centred on it — or below it when the top
+  // is off the screen, where a bar hung above it would be under the topbar.
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   for (const item of items) {
     if (isShape(item)) {
-      minX = Math.min(minX, item.x); maxX = Math.max(maxX, item.x + item.width); minY = Math.min(minY, item.y);
+      minX = Math.min(minX, item.x); maxX = Math.max(maxX, item.x + item.width);
+      minY = Math.min(minY, item.y); maxY = Math.max(maxY, item.y + item.height);
     } else {
       for (const p of routeConnector(doc, page, item)?.points ?? []) {
-        minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x); minY = Math.min(minY, p.y);
+        minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x); minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y);
       }
     }
   }
   if (!Number.isFinite(minX)) return null;
+  const below = panY + minY * zoom - 12 < 52;
 
   const connectors = items.filter(isConnector);
   const shapes = items.filter(isShape);
@@ -409,8 +413,8 @@ function StyleBar({ zoom }: { zoom: number }) {
 
   return (
     <div
-      className="board-stylebar"
-      style={{ left: ((minX + maxX) / 2) * zoom, top: minY * zoom - 12 }}
+      className={`board-stylebar${below ? ' is-below' : ''}`}
+      style={{ left: ((minX + maxX) / 2) * zoom, top: below ? maxY * zoom + 12 : minY * zoom - 12 }}
       onPointerDown={(e) => e.stopPropagation()}
     >
       {BOARD_COLOR_NAMES.map((name) => (

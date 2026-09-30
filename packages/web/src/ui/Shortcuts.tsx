@@ -5,7 +5,7 @@
  * most useful thing the sheet does is confirm that the shortcut already in
  * someone's fingers works here too.
  */
-import { Icon } from './Icon.tsx';
+import { Modal } from './Modal.tsx';
 
 const GROUPS: { title: string; items: [string, string][] }[] = [
   {
@@ -13,6 +13,8 @@ const GROUPS: { title: string; items: [string, string][] }[] = [
     items: [
       ['V', 'Move'], ['H', 'Pan'], ['F', 'Frame'], ['T', 'Text'],
       ['R', 'Rectangle'], ['O', 'Ellipse'], ['I', 'Image'], ['N', 'Prompt card'],
+      ['C', 'Comment'],
+      ['D', 'Diamond, for a diagram'], ['X', 'Connector'], ['⇧S', 'Section'],
       ['Space + drag', 'Pan from any tool'],
     ],
   },
@@ -29,11 +31,11 @@ const GROUPS: { title: string; items: [string, string][] }[] = [
       ['Click', 'Select the outermost layer'],
       ['⌘ Click', 'Select the deepest layer, or a part inside a component'],
       ['Shift Click', 'Add to selection'],
-      ['⌘A', 'Select artboard contents'],
+      ['⌘A', 'Select frame contents'],
       ['Tab / ⇧Tab', 'Next / previous sibling'],
-      ['Esc', 'Select parent'],
+      ['\\', 'Select parent'],
+      ['Esc', 'Select parent — or leave the tool, or stop editing'],
       ['Enter', 'Edit text, or select children'],
-      ['\\\\', 'Select parent'],
     ],
   },
   {
@@ -85,13 +87,7 @@ const GROUPS: { title: string; items: [string, string][] }[] = [
 
 export function Shortcuts({ onClose }: { onClose: () => void }) {
   return (
-    <div className="modal-backdrop" onPointerDown={onClose}>
-      <div className="modal is-wide" onPointerDown={(e) => e.stopPropagation()}>
-        <header className="modal-header">
-          <h2>Keyboard shortcuts</h2>
-          <button className="icon-button" onClick={onClose} aria-label="Close"><Icon name="close" size={14} /></button>
-        </header>
-        <div className="modal-body">
+    <Modal title={'Keyboard shortcuts'} wide onClose={onClose}>
           <p className="modal-lede">
             These follow Figma wherever Figma has a binding, so most of what you already know works.
           </p>
@@ -108,8 +104,6 @@ export function Shortcuts({ onClose }: { onClose: () => void }) {
               </section>
             ))}
           </div>
-        </div>
-      </div>
-    </div>
+    </Modal>
   );
 }

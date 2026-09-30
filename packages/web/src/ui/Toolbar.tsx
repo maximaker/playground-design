@@ -9,25 +9,9 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useCanvas, type Tool } from '../state/store.ts';
-import { Icon, type IconName } from './Icon.tsx';
+import { Icon } from './Icon.tsx';
+import { MOD, TOOLS } from './tools.ts';
 import { zoomBy, zoomTo } from '../hooks/commands.ts';
-
-interface ToolInfo { tool: Tool; icon: IconName; key: string; name: string; title: string }
-
-const TOOLS: Record<Tool, ToolInfo> = {
-  move: { tool: 'move', icon: 'cursor', key: 'V', name: 'Move', title: 'Move' },
-  hand: { tool: 'hand', icon: 'hand', key: 'H', name: 'Pan', title: 'Pan' },
-  frame: { tool: 'frame', icon: 'frame', key: 'F', name: 'Frame', title: 'Frame' },
-  section: { tool: 'section', icon: 'section', key: '⇧S', name: 'Section', title: 'Section — gather part of a diagram, or a set of screens' },
-  text: { tool: 'text', icon: 'text', key: 'T', name: 'Text', title: 'Text' },
-  rect: { tool: 'rect', icon: 'square', key: 'R', name: 'Rectangle', title: 'Rectangle' },
-  ellipse: { tool: 'ellipse', icon: 'circle', key: 'O', name: 'Ellipse', title: 'Ellipse' },
-  diamond: { tool: 'diamond', icon: 'diamond', key: 'D', name: 'Diamond', title: 'Diamond — a decision in a diagram' },
-  image: { tool: 'image', icon: 'image', key: 'I', name: 'Image', title: 'Image' },
-  connector: { tool: 'connector', icon: 'connector', key: 'X', name: 'Connector', title: 'Connector — drag from one thing to another' },
-  note: { tool: 'note', icon: 'note', key: 'N', name: 'Prompt card', title: 'Prompt card — leave a note or ask an agent' },
-  comment: { tool: 'comment', icon: 'comment', key: 'C', name: 'Comment', title: 'Comment — say something about the design' },
-};
 
 const GROUPS: { id: string; label: string; tools: Tool[] }[] = [
   { id: 'move', label: 'Move and pan', tools: ['move', 'hand'] },
@@ -149,8 +133,6 @@ export function Toolbar({ compact }: { compact?: boolean }) {
   return (
     <>
     <div className={`toolbar${compact ? ' is-compact' : ''}`}>
-      {/* A viewer can move around and look; the drawing tools would only ever
-          produce a refusal, so they are not offered. */}
       {/* A viewer can move around, look, and comment — commenting is the whole
           reason a review link exists. The rest would only ever be refused. */}
       {/*
@@ -162,13 +144,13 @@ export function Toolbar({ compact }: { compact?: boolean }) {
       {!readOnly && !compact && (
         <>
           <button
-            className="tip is-top" data-tip="Undo  ⌘Z"
+            className="tip is-top" data-tip={`Undo  ${MOD}Z`}
             aria-label="Undo"
             disabled={!canUndo}
             onClick={() => undo()}
           ><Icon name="undo" size={16} /></button>
           <button
-            className="tip is-top" data-tip="Redo  ⌘⇧Z"
+            className="tip is-top" data-tip={`Redo  ${MOD}⇧Z`}
             aria-label="Redo"
             disabled={!canRedo}
             onClick={() => redo()}
@@ -180,17 +162,17 @@ export function Toolbar({ compact }: { compact?: boolean }) {
       {GROUPS.map((g) => <ToolGroup key={g.id} group={g} faces={faces} readOnly={readOnly} />)}
       {!compact && <span className="toolbar-divider" />}
       {!compact && (
-      <button className="tip is-top" data-tip="Zoom out" aria-label="Zoom out" onClick={() => zoomBy(1 / 1.25)}>
+      <button className="tip is-top" data-tip="Zoom out  −" aria-label="Zoom out" onClick={() => zoomBy(1 / 1.25)}>
         <Icon name="minus" size={16} />
       </button>
       )}
       {!compact && (
-        <button className="zoom-readout tip is-top" data-tip="Reset zoom  ⌘0" onClick={() => zoomTo(1)}>
+        <button className="zoom-readout tip is-top" data-tip="Zoom to 100%  ⇧0" aria-label={`Zoom ${Math.round(zoom * 100)} percent. Reset to 100%.`} onClick={() => zoomTo(1)}>
           {Math.round(zoom * 100)}%
         </button>
       )}
       {!compact && (
-      <button className="tip is-top" data-tip="Zoom in" aria-label="Zoom in" onClick={() => zoomBy(1.25)}>
+      <button className="tip is-top" data-tip="Zoom in  +" aria-label="Zoom in" onClick={() => zoomBy(1.25)}>
         <Icon name="plus" size={16} />
       </button>
       )}
