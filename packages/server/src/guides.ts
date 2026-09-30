@@ -46,9 +46,11 @@ artboard (\`artboard: "Checkout"\` in the structured form, or
 where the person put them; only pass \`arrangeArtboards: true\` when you were
 asked to lay the screens out as a flow.
 
-Colours are six names, not hex: neutral, blue, green, yellow, red, purple.
-Use them for meaning — green for the happy path, red for failure — and leave
-most of a diagram neutral.
+Colours are seven names, not hex. Leave most of a diagram neutral (white
+pills with a hairline edge). Use slate for the system's own steps (a solid
+grey pill — "System email", "Permission granted"), green for where the flow
+succeeds, red for errors, and blue, yellow or purple sparingly. Label the two
+ways out of a decision "yes" and "no": they are drawn as a tick and a cross.
 `.trim(),
 
   layout: `

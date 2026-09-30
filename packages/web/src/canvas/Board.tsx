@@ -14,8 +14,20 @@
 import { memo, useEffect, useRef } from 'react';
 import {
   type BoardItem, type BoardShape, type Connector, type Point,
-  BOARD_COLORS, BOARD_COLOR_NAMES, BOARD_FONT, arrowHead, boardOf, isConnector, isShape, pathData, routeConnector,
+  BOARD_COLORS, BOARD_COLOR_NAMES, BOARD_FONT, BOARD_STYLE, arrowHead, boardOf, diamondPath, isConnector, isShape,
+  connectorPathData, pathData, routeConnector, shapeLook, verdictOf,
 } from '@playground/shared';
+
+function cardShadow(zoom: number): string {
+  const z = Math.max(0.25, zoom);
+  return `0 ${z}px ${2 * z}px rgba(30, 41, 59, 0.05), 0 ${2 * z}px ${8 * z}px ${-2 * z}px rgba(30, 41, 59, 0.06)`;
+}
+
+/** BOARD_STYLE's section shadow at the canvas zoom, so a sheet lifts the same at any scale. */
+function sheetShadow(zoom: number): string {
+  const z = Math.max(0.25, zoom);
+  return `0 ${z}px ${2 * z}px rgba(30, 41, 59, 0.05), 0 ${12 * z}px ${32 * z}px ${-8 * z}px rgba(30, 41, 59, 0.14)`;
+}
 import { useCanvas, getDoc, currentPage } from '../state/store.ts';
 import { Icon } from '../ui/Icon.tsx';
 
@@ -114,25 +126,28 @@ export function BoardLayer({ part, preview, dragging }: {
 const ShapeView = memo(function ShapeView({ shape: s, zoom, selected, editing }: {
   shape: BoardShape; zoom: number; selected: boolean; editing: boolean;
 }) {
-  const c = BOARD_COLORS[s.color];
-  const stroke = Math.max(1, 2 * zoom);
+  const S = BOARD_STYLE;
+  const look = shapeLook(s);
+  const stroke = Math.max(1, look.strokeWidth * zoom);
   const isSection = s.kind === 'section';
   const isText = s.kind === 'text';
 
   const style: React.CSSProperties = {
     left: s.x * zoom, top: s.y * zoom, width: s.width * zoom, height: s.height * zoom,
-    color: c.text, fontFamily: BOARD_FONT,
-    fontSize: (isText ? 16 : isSection ? 14 : 14) * zoom,
+    color: look.text, fontFamily: BOARD_FONT,
+    fontSize: look.fontSize * zoom, fontWeight: look.weight,
   };
   if (s.kind === 'rect') Object.assign(style, {
-    background: c.fill, border: `${stroke}px solid ${c.stroke}`,
-    borderRadius: (s.rounded ? Math.min(s.height / 2, 24) : 6) * zoom,
+    background: look.fill, border: `${stroke}px solid ${look.stroke}`,
+    ...(s.color === 'neutral' ? { boxShadow: cardShadow(zoom) } : {}),
+    borderRadius: (s.rounded ? s.height / 2 : Math.min(S.radius, s.height / 2)) * zoom,
   });
-  if (s.kind === 'ellipse') Object.assign(style, { background: c.fill, border: `${stroke}px solid ${c.stroke}`, borderRadius: '50%' });
+  if (s.kind === 'ellipse') Object.assign(style, {
+    background: look.fill, border: `${stroke}px solid ${look.stroke}`, borderRadius: '50%',
+  });
+  // A section is a sheet: white, lifted off the canvas, no edge.
   if (isSection) Object.assign(style, {
-    background: `color-mix(in srgb, ${c.fill} 45%, transparent)`,
-    border: `${Math.max(1, 1.5 * zoom)}px solid color-mix(in srgb, ${c.stroke} 35%, transparent)`,
-    borderRadius: 12 * zoom,
+    background: '#ffffff', borderRadius: S.sectionRadius * zoom, boxShadow: sheetShadow(zoom),
   });
 
   return (
@@ -143,9 +158,10 @@ const ShapeView = memo(function ShapeView({ shape: s, zoom, selected, editing }:
     >
       {s.kind === 'diamond' && (
         <svg className="board-diamond-outline" viewBox={`0 0 ${s.width} ${s.height}`} preserveAspectRatio="none">
-          <polygon
-            points={`${s.width / 2},1 ${s.width - 1},${s.height / 2} ${s.width / 2},${s.height - 1} 1,${s.height / 2}`}
-            fill={c.fill} stroke={c.stroke} strokeWidth={stroke}
+          <path
+            d={diamondPath(s.width, s.height, 0, 0, 3)}
+            fill={look.fill} stroke={look.stroke} strokeWidth={stroke}
+            strokeDasharray={look.dashed ? `${3 * zoom} ${3 * zoom}` : undefined}
             // The polygon is drawn in the shape's own units and stretched to its
             // box, which would stretch the stroke with it; this keeps it even.
             vectorEffect="non-scaling-stroke"
@@ -158,8 +174,10 @@ const ShapeView = memo(function ShapeView({ shape: s, zoom, selected, editing }:
         <span
           className={isSection ? 'board-section-title' : 'board-shape-text'}
           style={{
-            padding: isSection ? `${10 * zoom}px ${16 * zoom}px` : s.kind === 'diamond' ? `${s.height / 4 * zoom}px ${s.width / 4 * zoom}px` : `${4 * zoom}px ${8 * zoom}px`,
-            fontWeight: isSection ? 600 : 400,
+            padding: isSection ? `${18 * zoom}px ${24 * zoom}px`
+              : s.kind === 'diamond' ? `${s.height / 4 * zoom}px ${s.width / 4 * zoom}px`
+              : s.kind === 'ellipse' ? `${s.height * 0.15 * zoom}px ${s.width * 0.15 * zoom}px`
+              : `${4 * zoom}px ${14 * zoom}px`,
             justifyContent: isText || isSection ? 'flex-start' : 'center',
             textAlign: isText || isSection ? 'left' : 'center',
           }}
@@ -197,20 +215,24 @@ const ConnectorView = memo(function ConnectorView({ connector: c, zoom, selected
   const page = currentPage();
   const route = doc && page ? routeConnector(doc, page, c) : null;
   if (!route) return null;
-  const color = selected ? 'var(--accent)' : BOARD_COLORS[c.color].stroke;
-  const d = pathData(route.points, zoom);
+  const color = selected ? 'var(--accent)' : BOARD_COLORS[c.color].accent;
+  const d = connectorPathData(route, zoom);
   const pts = route.points.map((p) => ({ x: p.x * zoom, y: p.y * zoom }));
-  const size = Math.max(5, 10 * zoom);
+  const size = Math.max(3, BOARD_STYLE.arrowSize * zoom);
   const head = (tip: Point, from: Point) => arrowHead(tip, from, size).map((p) => `${p.x},${p.y}`).join(' ');
   const n = pts.length;
   return (
     <g className={`board-connector${selected ? ' is-selected' : ''}`}>
       {/* A wide invisible stroke to click on: a 2px line is too thin to hit. */}
       <path d={d} className="board-connector-hit" data-board-id={c.id} stroke="transparent" strokeWidth={14} fill="none" />
-      <path d={d} stroke={color} strokeWidth={Math.max(1, 2 * zoom)} fill="none" strokeLinejoin="round"
-        strokeDasharray={c.dashed ? `${7 * zoom} ${6 * zoom}` : undefined} pointerEvents="none" />
+      <path d={d} stroke={color} strokeWidth={Math.max(1, BOARD_STYLE.lineWidth * zoom)} fill="none"
+        strokeLinejoin="round"
+        strokeDasharray={c.dashed ? `${3 * zoom} ${3 * zoom}` : undefined} pointerEvents="none" />
       {c.arrow !== 'none' && <polygon points={head(pts[n - 1]!, pts[n - 2]!)} fill={color} pointerEvents="none" />}
-      {c.arrow === 'both' && <polygon points={head(pts[0]!, pts[1]!)} fill={color} pointerEvents="none" />}
+      {c.arrow === 'both'
+        ? <polygon points={head(pts[0]!, pts[1]!)} fill={color} pointerEvents="none" />
+        // Where a line starts, a small hollow ring: the flow's "from here".
+        : <circle cx={pts[0]!.x} cy={pts[0]!.y} r={Math.max(1.5, BOARD_STYLE.originDot * zoom)} fill="#ffffff" stroke={color} strokeWidth={1} pointerEvents="none" />}
     </g>
   );
 });
@@ -221,14 +243,37 @@ function ConnectorLabel({ connector: c, zoom, editing }: { connector: Connector;
   if (!c.label && !editing) return null;
   const route = doc && page ? routeConnector(doc, page, c) : null;
   if (!route) return null;
+  const verdict = editing ? null : verdictOf(c.label);
+  if (verdict) {
+    // Yes and no are a tick and a cross on the line, the way a flow sheet
+    // marks the two ways out of a decision; the words are still the label.
+    const size = Math.max(10, 18 * zoom);
+    return (
+      <div
+        className={`board-verdict is-${verdict}`}
+        data-board-id={c.id}
+        title={c.label}
+        style={{ left: route.label.x * zoom, top: route.label.y * zoom, width: size, height: size,
+          background: verdict === 'yes' ? BOARD_STYLE.yes : BOARD_STYLE.no }}
+      >
+        <svg viewBox="-9 -9 18 18" width="100%" height="100%">
+          {verdict === 'yes'
+            ? <path d="M-4 0 L-1 3 L4.5 -3" fill="none" stroke="#fff" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" />
+            : <path d="M-3.5 -3.5 L3.5 3.5 M3.5 -3.5 L-3.5 3.5" stroke="#fff" strokeWidth={1.8} strokeLinecap="round" />}
+        </svg>
+      </div>
+    );
+  }
   return (
     <div
       className="board-label"
       data-board-id={c.id}
       style={{
         left: route.label.x * zoom, top: route.label.y * zoom,
-        fontSize: 12 * zoom, padding: `${2 * zoom}px ${7 * zoom}px`, borderRadius: 4 * zoom,
-        color: BOARD_COLORS[c.color].text, fontFamily: BOARD_FONT,
+        fontSize: BOARD_STYLE.labelFontSize * zoom,
+        padding: `${3 * zoom}px ${9 * zoom}px`, borderRadius: 999,
+        background: BOARD_STYLE.labelFill,
+        color: c.color === 'neutral' ? BOARD_STYLE.labelText : BOARD_COLORS[c.color].text, fontFamily: BOARD_FONT,
       }}
     >
       {editing ? <BoardTextEditor id={c.id} value={c.label ?? ''} zoom={zoom} align="center" single /> : c.label}
@@ -372,7 +417,9 @@ function StyleBar({ zoom }: { zoom: number }) {
         <button
           key={name}
           className={`board-swatch${items.every((i) => i.color === name) ? ' is-active' : ''}`}
-          style={{ background: BOARD_COLORS[name].fill, borderColor: BOARD_COLORS[name].stroke }}
+          // The accent as the ring: the fills are pale enough that six of them
+          // side by side would be hard to tell apart.
+          style={{ background: BOARD_COLORS[name].fill, borderColor: BOARD_COLORS[name].accent }}
           aria-label={`Colour: ${name}`}
           title={name}
           onClick={() => change(() => ({ color: name }))}
@@ -393,6 +440,8 @@ function StyleBar({ zoom }: { zoom: number }) {
         <>
           <button className={`board-tool${all('route', 'elbow') ? ' is-active' : ''}`} aria-label="Elbow" title="Elbow"
             onClick={() => change((i) => (isConnector(i) ? { route: 'elbow' } : null))}><Icon name="lineElbow" size={14} /></button>
+          <button className={`board-tool${all('route', 'curved') ? ' is-active' : ''}`} aria-label="Curved" title="Curved"
+            onClick={() => change((i) => (isConnector(i) ? { route: 'curved' } : null))}><Icon name="lineCurved" size={14} /></button>
           <button className={`board-tool${all('route', 'straight') ? ' is-active' : ''}`} aria-label="Straight" title="Straight"
             onClick={() => change((i) => (isConnector(i) ? { route: 'straight' } : null))}><Icon name="lineStraight" size={14} /></button>
           <button

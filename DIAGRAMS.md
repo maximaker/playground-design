@@ -54,7 +54,7 @@ interface Connector {
   id: string;
   from: Endpoint;
   to: Endpoint;
-  route: 'straight' | 'elbow';
+  route: 'straight' | 'elbow' | 'curved';
   arrow: 'end' | 'both' | 'none';
   label?: string;
   color: BoardColor;
@@ -69,10 +69,19 @@ type Endpoint =
   | { kind: 'point'; x: number; y: number };
 ```
 
-Colours are a small named set (`neutral`, `blue`, `green`, `yellow`, `red`,
-`purple`) resolved to fill, stroke and text colours in one table, so a board
-stays coherent the way a token set keeps a design coherent, and so an agent
-chooses a meaning rather than a hex value.
+Colours are a small named set (`neutral`, `slate`, `blue`, `green`, `yellow`,
+`red`, `purple`) resolved to fill, edge, text and line colours in one table, so
+a board stays coherent the way a token set keeps a design coherent, and so an
+agent chooses a meaning rather than a hex value.
+
+The look is a user-flow sheet rather than a whiteboard: slim white pills with
+a hairline slate edge, solid slate pills for the system's own steps, soft grey
+circles, dashed open diamonds for decisions, hairline connectors that start
+from a small hollow ring, grey pill labels, and "yes"/"no" drawn as a green
+tick and a red cross on the line. Colour is kept for meaning. Sections are
+white sheets lifted off the canvas. `shapeLook` and `BOARD_STYLE` hold all of
+it, and both renderers read them. Connectors can be elbow (the default),
+curved — a node-editor wire — or straight.
 
 A section is a shape too: a titled region drawn under everything else. It does
 not own its contents — dragging a section moves what sits inside it, which is

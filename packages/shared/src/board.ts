@@ -53,7 +53,7 @@ export interface Connector {
   id: string;
   from: Endpoint;
   to: Endpoint;
-  route: 'straight' | 'elbow';
+  route: 'straight' | 'elbow' | 'curved';
   arrow: 'end' | 'both' | 'none';
   label?: string;
   color: BoardColor;
@@ -78,22 +78,96 @@ export type BoardItem = BoardShape | Connector;
  * coherent however many hands are on it, and an agent picks a meaning ("this
  * step failed") instead of a hex value.
  */
-export type BoardColor = 'neutral' | 'blue' | 'green' | 'yellow' | 'red' | 'purple';
+export type BoardColor = 'neutral' | 'slate' | 'blue' | 'green' | 'yellow' | 'red' | 'purple';
 
-export const BOARD_COLORS: Record<BoardColor, { fill: string; stroke: string; text: string }> = {
-  neutral: { fill: '#ffffff', stroke: '#3f3f46', text: '#18181b' },
-  blue: { fill: '#dbeafe', stroke: '#2563eb', text: '#1e3a8a' },
-  green: { fill: '#dcfce7', stroke: '#16a34a', text: '#14532d' },
-  yellow: { fill: '#fef9c3', stroke: '#ca8a04', text: '#713f12' },
-  red: { fill: '#fee2e2', stroke: '#dc2626', text: '#7f1d1d' },
-  purple: { fill: '#ede9fe', stroke: '#7c3aed', text: '#4c1d95' },
+/**
+ * Each swatch is a family: a fill, an edge, text in the same hue, and an
+ * accent for the lines drawn in it.
+ *
+ * The look is a user-flow sheet rather than a whiteboard: almost everything
+ * is slate, outlines are hairlines, and colour is kept for meaning — a pale
+ * green pill for where the flow succeeds, a pale red one for an error. Neutral
+ * is the only outlined family; the others are soft fills with no edge, which
+ * is what lets a coloured pill read as a state rather than as a decoration.
+ * Slate is the solid one, for the system's own steps.
+ */
+export const BOARD_COLORS: Record<BoardColor, { fill: string; stroke: string; text: string; accent: string }> = {
+  neutral: { fill: '#ffffff', stroke: '#cfd6df', text: '#3b4656', accent: '#a3acb9' },
+  slate: { fill: '#aeb6c2', stroke: '#aeb6c2', text: '#ffffff', accent: '#8e98a6' },
+  blue: { fill: '#e7effd', stroke: '#e7effd', text: '#2f5fb3', accent: '#5b8def' },
+  green: { fill: '#e2f5e7', stroke: '#e2f5e7', text: '#2d8649', accent: '#3fb865' },
+  yellow: { fill: '#fcf2d6', stroke: '#fcf2d6', text: '#946c17', accent: '#dcae34' },
+  red: { fill: '#fde5e5', stroke: '#fde5e5', text: '#c03d3d', accent: '#ec6262' },
+  purple: { fill: '#eee8fd', stroke: '#eee8fd', text: '#6a4bc2', accent: '#9373ea' },
 };
+
+/**
+ * Everything else about how the board looks, in one place.
+ *
+ * Read by the canvas and by the SVG emitter alike, for the same reason the
+ * geometry is shared: an agent judging its diagram from a picture has to be
+ * looking at what the person sees.
+ */
+export const BOARD_STYLE = {
+  strokeWidth: 1,
+  /** Corners: a node one line tall comes out a pill, a big box a soft rectangle. */
+  radius: 22,
+  sectionRadius: 14,
+  /** Neutral steps are white cards: lifted, but only just. */
+  cardShadow: '0 1px 2px rgba(30, 41, 59, 0.05), 0 2px 8px -2px rgba(30, 41, 59, 0.06)',
+  /** Sections are lifted properly: a white sheet on the canvas. */
+  sectionShadow: '0 1px 2px rgba(30, 41, 59, 0.05), 0 12px 32px -8px rgba(30, 41, 59, 0.14)',
+  fontSize: 13,
+  fontWeight: 600,
+  textFontSize: 15,
+  titleFontSize: 16,
+  lineWidth: 1,
+  arrowSize: 6,
+  bendRadius: 6,
+  /** The small hollow circle a connector starts from. */
+  originDot: 2.5,
+  labelFontSize: 11,
+  labelFill: '#eef1f5',
+  labelText: '#7a8594',
+  /** The canvas colour a diagram is pictured on. */
+  page: '#f3f6fa',
+  yes: '#46c16a',
+  no: '#ef6b6b',
+} as const;
+
+/** How one shape is drawn — shared, so the canvas and the SVG agree. */
+export function shapeLook(s: BoardShape): {
+  fill: string; stroke: string; strokeWidth: number; dashed: boolean;
+  text: string; weight: number; fontSize: number;
+} {
+  const c = BOARD_COLORS[s.color];
+  const S = BOARD_STYLE;
+  const base = { fill: c.fill, stroke: c.stroke, strokeWidth: S.strokeWidth, dashed: false, text: c.text, weight: S.fontWeight, fontSize: S.fontSize };
+  switch (s.kind) {
+    // A decision is an open, dashed diamond: it is a question, not a step.
+    case 'diamond': return { ...base, fill: s.color === 'neutral' ? '#ffffff' : c.fill, stroke: s.color === 'neutral' ? '#b4bcc8' : c.accent, dashed: true };
+    // A circle is a soft grey disc with no edge — the system doing something.
+    case 'ellipse': return s.color === 'neutral' ? { ...base, fill: '#edf0f4', stroke: '#edf0f4' } : base;
+    case 'text': return { ...base, fill: 'none', stroke: 'none', strokeWidth: 0, weight: 400, fontSize: S.textFontSize };
+    case 'section': return { ...base, fill: '#ffffff', stroke: 'none', strokeWidth: 0, weight: 600, fontSize: S.titleFontSize,
+      text: s.color === 'neutral' ? '#3b4656' : c.text };
+    default: return base;
+  }
+}
+
+/** Whether a connector label is a yes or a no, drawn as a badge rather than as words. */
+export function verdictOf(label: string | undefined): 'yes' | 'no' | null {
+  const l = (label ?? '').trim().toLowerCase();
+  if (['yes', 'y', 'true', 'ok', '✓', '✔'].includes(l)) return 'yes';
+  if (['no', 'n', 'false', '✗', '✕', '×'].includes(l)) return 'no';
+  return null;
+}
 
 export const BOARD_COLOR_NAMES = Object.keys(BOARD_COLORS) as BoardColor[];
 
 export const DEFAULT_SHAPE_SIZE: Record<BoardShapeKind, { width: number; height: number }> = {
-  rect: { width: 160, height: 80 },
-  ellipse: { width: 140, height: 90 },
+  rect: { width: 160, height: 44 },
+  ellipse: { width: 96, height: 96 },
   diamond: { width: 150, height: 100 },
   text: { width: 160, height: 32 },
   section: { width: 480, height: 320 },
@@ -314,9 +388,16 @@ function sidePoint(end: ResolvedEnd, side: Side): Point {
 }
 
 export interface Route {
+  /**
+   * The path as a polyline. A curved route is sampled into one, so everything
+   * that measures a route — hit-testing, bounds, labels, arrowheads, the ends
+   * a deleted shape leaves behind — works on curves without knowing about them.
+   */
   points: Point[];
   /** Where the label goes: halfway along the path by length. */
   label: Point;
+  /** For a curved route, the cubic to draw exactly: start, two controls, end. */
+  bezier?: [Point, Point, Point, Point];
 }
 
 /**
@@ -342,6 +423,27 @@ export function routeConnector(doc: CanvasDocument, page: Page, connector: Conne
       connector.fromSide && a.outline !== 'point' ? sidePoint(a, connector.fromSide) : boundaryToward(a, cb),
       connector.toSide && b.outline !== 'point' ? sidePoint(b, connector.toSide) : boundaryToward(b, ca),
     ];
+  } else if (connector.route === 'curved') {
+    // Out of the sides facing each other, as a node editor draws a wire: each
+    // end leaves along its side's normal and the two bend into one S-curve.
+    const sa = connector.fromSide ?? facingSide(a, b);
+    const sb = connector.toSide ?? facingSide(b, a);
+    const p0 = a.outline === 'point' ? centre(a.box) : sidePoint(a, sa);
+    const p3 = b.outline === 'point' ? centre(b.box) : sidePoint(b, sb);
+    const reach = Math.max(40, Math.hypot(p3.x - p0.x, p3.y - p0.y) * 0.45);
+    const na = NORMAL[sa];
+    const nb = NORMAL[sb];
+    const c1 = { x: p0.x + na.x * reach, y: p0.y + na.y * reach };
+    const c2 = { x: p3.x + nb.x * reach, y: p3.y + nb.y * reach };
+    const at = (t: number): Point => {
+      const u = 1 - t;
+      return {
+        x: u * u * u * p0.x + 3 * u * u * t * c1.x + 3 * u * t * t * c2.x + t * t * t * p3.x,
+        y: u * u * u * p0.y + 3 * u * u * t * c1.y + 3 * u * t * t * c2.y + t * t * t * p3.y,
+      };
+    };
+    points = Array.from({ length: 25 }, (_, i) => at(i / 24));
+    return { points, label: at(0.5), bezier: [p0, c1, c2, p3] };
   } else if (connector.fromSide || connector.toSide) {
     points = elbowBetween(a, connector.fromSide ?? facing(a, b), b, connector.toSide ?? facing(b, a));
   } else {
@@ -361,6 +463,15 @@ export function routeConnector(doc: CanvasDocument, page: Page, connector: Conne
     }
   }
   return { points, label: pointAlong(points, 0.5) };
+}
+
+/** The side of `a` that faces `b`, judged by the gap between them, as the elbow does. */
+function facingSide(a: ResolvedEnd, b: ResolvedEnd): Side {
+  const gapX = Math.max(b.box.x - (a.box.x + a.box.width), a.box.x - (b.box.x + b.box.width));
+  const gapY = Math.max(b.box.y - (a.box.y + a.box.height), a.box.y - (b.box.y + b.box.height));
+  const ca = centre(a.box);
+  const cb = centre(b.box);
+  return gapX >= gapY ? (cb.x >= ca.x ? 'right' : 'left') : (cb.y >= ca.y ? 'bottom' : 'top');
 }
 
 const NORMAL: Record<Side, Point> = { left: { x: -1, y: 0 }, right: { x: 1, y: 0 }, top: { x: 0, y: -1 }, bottom: { x: 0, y: 1 } };
@@ -441,9 +552,9 @@ export function pointAlong(points: Point[], fraction: number): Point {
 }
 
 /** The three corners of an arrowhead whose tip is at `tip`, pointing away from `from`. */
-export function arrowHead(tip: Point, from: Point, size = 10): Point[] {
+export function arrowHead(tip: Point, from: Point, size: number = BOARD_STYLE.arrowSize): Point[] {
   const angle = Math.atan2(tip.y - from.y, tip.x - from.x);
-  const spread = Math.PI / 7;
+  const spread = Math.PI / 6.5;
   return [
     tip,
     { x: tip.x - size * Math.cos(angle - spread), y: tip.y - size * Math.sin(angle - spread) },
@@ -454,6 +565,45 @@ export function arrowHead(tip: Point, from: Point, size = 10): Point[] {
 /** An SVG path for a polyline, in whatever units the points are in. */
 export function pathData(points: Point[], scale = 1): string {
   return points.map((p, i) => `${i ? 'L' : 'M'}${(p.x * scale).toFixed(1)} ${(p.y * scale).toFixed(1)}`).join(' ');
+}
+
+/**
+ * An SVG path for a polyline with its corners rounded.
+ *
+ * A square elbow reads as a wiring diagram; a small radius at each bend reads
+ * as a drawing. The radius shrinks on short segments so two bends close
+ * together never overlap, and the ends are left exactly where they were, so
+ * arrowheads still meet their shapes.
+ */
+export function roundedPathData(points: Point[], radius: number = BOARD_STYLE.bendRadius, scale = 1): string {
+  const pts = points.map((p) => ({ x: p.x * scale, y: p.y * scale }));
+  const r = radius * scale;
+  if (pts.length < 3 || r <= 0) return pathData(points, scale);
+  const f = (n: number) => n.toFixed(1);
+  let d = `M${f(pts[0]!.x)} ${f(pts[0]!.y)}`;
+  for (let i = 1; i < pts.length - 1; i++) {
+    const prev = pts[i - 1]!;
+    const at = pts[i]!;
+    const next = pts[i + 1]!;
+    const inLen = Math.hypot(at.x - prev.x, at.y - prev.y);
+    const outLen = Math.hypot(next.x - at.x, next.y - at.y);
+    const cut = Math.min(r, inLen / 2, outLen / 2);
+    if (!inLen || !outLen || !cut) { d += ` L${f(at.x)} ${f(at.y)}`; continue; }
+    const a = { x: at.x - ((at.x - prev.x) / inLen) * cut, y: at.y - ((at.y - prev.y) / inLen) * cut };
+    const b = { x: at.x + ((next.x - at.x) / outLen) * cut, y: at.y + ((next.y - at.y) / outLen) * cut };
+    d += ` L${f(a.x)} ${f(a.y)} Q${f(at.x)} ${f(at.y)} ${f(b.x)} ${f(b.y)}`;
+  }
+  const last = pts[pts.length - 1]!;
+  return `${d} L${f(last.x)} ${f(last.y)}`;
+}
+
+/** The SVG path for a route: the exact cubic when it is curved, rounded elbows otherwise. */
+export function connectorPathData(route: Route, scale = 1): string {
+  if (route.bezier) {
+    const [p0, c1, c2, p3] = route.bezier.map((p) => ({ x: (p.x * scale).toFixed(1), y: (p.y * scale).toFixed(1) }));
+    return `M${p0!.x} ${p0!.y} C${c1!.x} ${c1!.y} ${c2!.x} ${c2!.y} ${p3!.x} ${p3!.y}`;
+  }
+  return roundedPathData(route.points, BOARD_STYLE.bendRadius, scale);
 }
 
 /** The box around every board item on a page, and the artboards connectors reach. */
@@ -526,14 +676,18 @@ const SVG_FONT = 'Inter, system-ui, -apple-system, sans-serif';
  * breaks.
  */
 export function emitBoardSvg(doc: CanvasDocument, page: Page, opts: { padding?: number } = {}): string {
-  const pad = opts.padding ?? 40;
+  const pad = opts.padding ?? 48;
   const bounds = boardBounds(doc, page) ?? { x: 0, y: 0, width: 200, height: 120 };
   const vx = bounds.x - pad;
   const vy = bounds.y - pad;
   const vw = bounds.width + pad * 2;
   const vh = bounds.height + pad * 2;
+  const S = BOARD_STYLE;
   const out: string[] = [];
+  const font = `font-family="${SVG_FONT}"`;
+  const num = (n: number) => n.toFixed(1);
 
+  // Screens a connector reaches, as the phone-sheet outlines a flow shows.
   const artboards = new Set<NodeId>();
   for (const item of boardOf(page)) {
     if (!isConnector(item)) continue;
@@ -544,30 +698,32 @@ export function emitBoardSvg(doc: CanvasDocument, page: Page, opts: { padding?: 
     const end = endpointBox(doc, page, { kind: 'artboard', id });
     if (!node || !end) continue;
     const { x, y, width, height } = end.box;
-    out.push(`<rect x="${x}" y="${y}" width="${width}" height="${height}" rx="4" fill="#ffffff" stroke="#d4d4d8" stroke-width="2"/>`);
-    out.push(`<text x="${x}" y="${y - 10}" font-family="${SVG_FONT}" font-size="14" fill="#71717a">${escapeXml(node.name)}</text>`);
+    out.push(`<rect x="${x}" y="${y}" width="${width}" height="${height}" rx="8" fill="#fbfcfd" stroke="#cfd6df"/>`);
+    out.push(`<text x="${x + width / 2}" y="${y + height + 22}" text-anchor="middle" ${font} font-size="13" fill="#7a8594">${escapeXml(node.name)}</text>`);
   }
 
   const shapes = boardOf(page).filter(isShape);
   const ordered = [...shapes.filter((s) => s.kind === 'section'), ...shapes.filter((s) => s.kind !== 'section')];
   for (const s of ordered) {
-    const c = BOARD_COLORS[s.color];
+    const look = shapeLook(s);
     const { x, y, width: w, height: h } = s;
     if (s.kind === 'section') {
-      out.push(`<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="12" fill="${c.fill}" fill-opacity="0.45" stroke="${c.stroke}" stroke-opacity="0.35" stroke-width="1.5"/>`);
-      out.push(`<text x="${x + 16}" y="${y + 26}" font-family="${SVG_FONT}" font-size="14" font-weight="600" fill="${c.text}">${escapeXml(s.text)}</text>`);
+      out.push(`<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${S.sectionRadius}" fill="#ffffff" filter="url(#sheet)"/>`);
+      out.push(`<text x="${x + 24}" y="${y + 34}" ${font} font-size="${look.fontSize}" font-weight="600" fill="${look.text}">${escapeXml(s.text)}</text>`);
       continue;
     }
-    if (s.kind === 'rect') out.push(`<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${s.rounded ? Math.min(h / 2, 24) : 6}" fill="${c.fill}" stroke="${c.stroke}" stroke-width="2"/>`);
-    if (s.kind === 'ellipse') out.push(`<ellipse cx="${x + w / 2}" cy="${y + h / 2}" rx="${w / 2}" ry="${h / 2}" fill="${c.fill}" stroke="${c.stroke}" stroke-width="2"/>`);
-    if (s.kind === 'diamond') out.push(`<polygon points="${x + w / 2},${y} ${x + w},${y + h / 2} ${x + w / 2},${y + h} ${x},${y + h / 2}" fill="${c.fill}" stroke="${c.stroke}" stroke-width="2"/>`);
+    const lifted = s.color === 'neutral' && s.kind === 'rect';
+    const edge = `fill="${look.fill}" stroke="${look.stroke}" stroke-width="${look.strokeWidth}"${look.dashed ? ' stroke-dasharray="3 3"' : ''}${lifted ? ' filter="url(#card)"' : ''}`;
+    if (s.kind === 'rect') out.push(`<rect x="${x + 0.5}" y="${y + 0.5}" width="${w - 1}" height="${h - 1}" rx="${s.rounded ? h / 2 : Math.min(S.radius, h / 2)}" ${edge}/>`);
+    if (s.kind === 'ellipse') out.push(`<ellipse cx="${x + w / 2}" cy="${y + h / 2}" rx="${w / 2 - 0.5}" ry="${h / 2 - 0.5}" ${edge}/>`);
+    if (s.kind === 'diamond') out.push(`<path d="${diamondPath(w - 1, h - 1, x + 0.5, y + 0.5, 3)}" ${edge}/>`);
     if (s.text) {
-      // A diamond's text has to fit inside the diamond, which is half its box.
-      const inset = s.kind === 'diamond' ? { x: w / 4, y: h / 4 } : { x: 8, y: 4 };
+      const inset = s.kind === 'diamond' ? { x: w / 4, y: h / 4 } : s.kind === 'ellipse' ? { x: w * 0.15, y: h * 0.15 } : { x: 14, y: 4 };
+      const isText = s.kind === 'text';
       out.push(`<foreignObject x="${x + inset.x}" y="${y + inset.y}" width="${Math.max(1, w - inset.x * 2)}" height="${Math.max(1, h - inset.y * 2)}">`
-        + `<div xmlns="http://www.w3.org/1999/xhtml" style="display:flex;align-items:center;justify-content:${s.kind === 'text' ? 'flex-start' : 'center'};`
-        + `width:100%;height:100%;text-align:${s.kind === 'text' ? 'left' : 'center'};font-family:${escapeXml(BOARD_FONT)};font-size:${s.kind === 'text' ? 16 : 14}px;`
-        + `line-height:1.3;color:${c.text};overflow-wrap:anywhere">${escapeXml(s.text)}</div></foreignObject>`);
+        + `<div xmlns="http://www.w3.org/1999/xhtml" style="display:flex;align-items:center;justify-content:${isText ? 'flex-start' : 'center'};`
+        + `width:100%;height:100%;text-align:${isText ? 'left' : 'center'};font-family:${escapeXml(BOARD_FONT)};`
+        + `font-size:${look.fontSize}px;font-weight:${look.weight};line-height:1.3;color:${look.text};overflow-wrap:break-word">${escapeXml(s.text)}</div></foreignObject>`);
     }
   }
 
@@ -576,21 +732,60 @@ export function emitBoardSvg(doc: CanvasDocument, page: Page, opts: { padding?: 
     const route = routeConnector(doc, page, item);
     if (!route) continue;
     const c = BOARD_COLORS[item.color];
-    out.push(`<path d="${pathData(route.points)}" fill="none" stroke="${c.stroke}" stroke-width="2" stroke-linejoin="round"${item.dashed ? ' stroke-dasharray="7 6"' : ''}/>`);
     const n = route.points.length;
-    if (item.arrow !== 'none') {
-      out.push(`<polygon points="${arrowHead(route.points[n - 1]!, route.points[n - 2]!).map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ')}" fill="${c.stroke}"/>`);
+    out.push(`<path d="${connectorPathData(route)}" fill="none" stroke="${c.accent}" stroke-width="${S.lineWidth}" stroke-linejoin="round"${item.dashed ? ' stroke-dasharray="3 3"' : ''}/>`);
+    const head = (tip: Point, from: Point) => arrowHead(tip, from).map((p) => `${num(p.x)},${num(p.y)}`).join(' ');
+    if (item.arrow !== 'none') out.push(`<polygon points="${head(route.points[n - 1]!, route.points[n - 2]!)}" fill="${c.accent}"/>`);
+    if (item.arrow === 'both') out.push(`<polygon points="${head(route.points[0]!, route.points[1]!)}" fill="${c.accent}"/>`);
+    else {
+      const o = route.points[0]!;
+      out.push(`<circle cx="${num(o.x)}" cy="${num(o.y)}" r="${S.originDot}" fill="#ffffff" stroke="${c.accent}" stroke-width="1"/>`);
     }
-    if (item.arrow === 'both') {
-      out.push(`<polygon points="${arrowHead(route.points[0]!, route.points[1]!).map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ')}" fill="${c.stroke}"/>`);
-    }
-    if (item.label) {
-      const w = Math.max(24, item.label.length * 7.2 + 14);
-      out.push(`<rect x="${route.label.x - w / 2}" y="${route.label.y - 11}" width="${w}" height="22" rx="4" fill="#ffffff" stroke="${c.stroke}" stroke-opacity="0.25"/>`);
-      out.push(`<text x="${route.label.x}" y="${route.label.y + 4.5}" text-anchor="middle" font-family="${SVG_FONT}" font-size="12" fill="${c.text}">${escapeXml(item.label)}</text>`);
+    const verdict = verdictOf(item.label);
+    if (verdict) {
+      const { x, y } = route.label;
+      out.push(`<circle cx="${num(x)}" cy="${num(y)}" r="9" fill="${verdict === 'yes' ? S.yes : S.no}"/>`);
+      out.push(verdict === 'yes'
+        ? `<path d="M${num(x - 4)} ${num(y)} L${num(x - 1)} ${num(y + 3)} L${num(x + 4.5)} ${num(y - 3)}" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>`
+        : `<path d="M${num(x - 3.5)} ${num(y - 3.5)} L${num(x + 3.5)} ${num(y + 3.5)} M${num(x + 3.5)} ${num(y - 3.5)} L${num(x - 3.5)} ${num(y + 3.5)}" stroke="#fff" stroke-width="1.8" stroke-linecap="round"/>`);
+    } else if (item.label) {
+      const w = Math.max(28, item.label.length * 6 + 18);
+      out.push(`<rect x="${num(route.label.x - w / 2)}" y="${num(route.label.y - 10)}" width="${num(w)}" height="20" rx="10" fill="${S.labelFill}"/>`);
+      out.push(`<text x="${num(route.label.x)}" y="${num(route.label.y + 3.8)}" text-anchor="middle" ${font} font-size="${S.labelFontSize}" fill="${item.color === 'neutral' ? S.labelText : c.text}">${escapeXml(item.label)}</text>`);
     }
   }
 
+  const defs = '<defs><filter id="card" x="-10%" y="-20%" width="120%" height="160%">'
+    + '<feDropShadow dx="0" dy="1" stdDeviation="0.8" flood-color="#1e293b" flood-opacity="0.06"/>'
+    + '<feDropShadow dx="0" dy="2" stdDeviation="2.5" flood-color="#1e293b" flood-opacity="0.05"/></filter>'
+    + '<filter id="sheet" x="-10%" y="-10%" width="120%" height="130%">'
+    + '<feDropShadow dx="0" dy="1" stdDeviation="1" flood-color="#1e293b" flood-opacity="0.05"/>'
+    + '<feDropShadow dx="0" dy="10" stdDeviation="14" flood-color="#1e293b" flood-opacity="0.10"/></filter></defs>';
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${vx} ${vy} ${vw} ${vh}" width="${Math.round(vw)}" height="${Math.round(vh)}">`
-    + `<rect x="${vx}" y="${vy}" width="${vw}" height="${vh}" fill="#fafafa"/>${out.join('')}</svg>`;
+    + `${defs}<rect x="${vx}" y="${vy}" width="${vw}" height="${vh}" fill="${S.page}"/>${out.join('')}</svg>`;
+}
+
+/**
+ * A diamond with softened corners, as a path in its own box (or offset).
+ *
+ * Sharp diamond points are the most sketch-like thing on a whiteboard; a
+ * small rounding at each vertex keeps the shape unmistakable and makes it
+ * belong with the rounded rectangles around it.
+ */
+export function diamondPath(w: number, h: number, x = 0, y = 0, radius = 6): string {
+  const pts = [{ x: x + w / 2, y }, { x: x + w, y: y + h / 2 }, { x: x + w / 2, y: y + h }, { x, y: y + h / 2 }];
+  const f = (n: number) => n.toFixed(1);
+  let d = '';
+  for (let i = 0; i < 4; i++) {
+    const prev = pts[(i + 3) % 4]!;
+    const at = pts[i]!;
+    const next = pts[(i + 1) % 4]!;
+    const inLen = Math.hypot(at.x - prev.x, at.y - prev.y);
+    const outLen = Math.hypot(next.x - at.x, next.y - at.y);
+    const cut = Math.min(radius, inLen / 3, outLen / 3);
+    const a = { x: at.x - ((at.x - prev.x) / inLen) * cut, y: at.y - ((at.y - prev.y) / inLen) * cut };
+    const b = { x: at.x + ((next.x - at.x) / outLen) * cut, y: at.y + ((next.y - at.y) / outLen) * cut };
+    d += `${i ? ' L' : 'M'}${f(a.x)} ${f(a.y)} Q${f(at.x)} ${f(at.y)} ${f(b.x)} ${f(b.y)}`;
+  }
+  return `${d} Z`;
 }

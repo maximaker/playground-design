@@ -33,7 +33,7 @@ const r = await client.callTool({ name: 'write_diagram', arguments: { mermaid: `
     A
     B
     D
-  end`, colors: { H: 'green', D: 'yellow', start: 'blue' } } });
+  end`, colors: { H: 'green', D: 'red', start: 'slate' } } });
 console.log(r.content[0].text.slice(0, 300));
 const pic = await client.callTool({ name: 'get_board', arguments: { image: true } });
 const img = pic.content.find((c) => c.type === 'image');

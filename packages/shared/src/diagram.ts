@@ -233,13 +233,16 @@ interface Sized { id: string; width: number; height: number }
 function sizeFor(node: DiagramNode): { width: number; height: number } {
   const text = node.label ?? '';
   const longest = Math.max(4, ...text.split(/\s+/).map((w) => w.length));
-  // Wrap at about eighteen characters; 7.4px per character at 14px Inter.
-  const perLine = Math.max(longest, Math.min(18, text.length));
+  // Wrap at about twenty characters; 7px a character at 13px semibold Inter.
+  const perLine = Math.max(longest, Math.min(20, text.length));
   const lines = Math.max(1, Math.ceil(text.length / perLine));
-  let width = Math.max(120, perLine * 7.4 + 36);
-  let height = Math.max(56, lines * 19 + 30);
-  if (node.kind === 'diamond') { width *= 1.45; height *= 1.45; }
-  if (node.kind === 'ellipse') { width *= 1.2; height *= 1.15; }
+  // Slim: a one-line step is a 40px pill, the way a user flow draws one.
+  let width = Math.max(112, perLine * 7 + 40);
+  let height = Math.max(40, lines * 17 + 22);
+  if (node.kind === 'diamond') { width = Math.max(128, perLine * 6.4 + 70); height = Math.max(92, lines * 17 + 62); }
+  // A circle's text sits in the square inside it, which is 70% of its width,
+  // so it is sized for its longest line to fit there, not across the middle.
+  if (node.kind === 'ellipse') { const d = Math.max(88, Math.round((perLine * 7.4 + 12) / 0.7)); width = d; height = d; }
   return { width: Math.round(width), height: Math.round(height) };
 }
 
@@ -510,7 +513,9 @@ export function layoutDiagram(graph: DiagramGraph, opts: LayoutOptions = {}): La
     const maxY = Math.max(...member.map((b) => b.y + b.height)) + sectionPad;
     sections.push(makeBoardShape({
       kind: 'section', text: g.label, x: minX, y: minY, width: maxX - minX, height: maxY - minY,
-      color: g.color ?? (BOARD_COLOR_NAMES[(sections.length % (BOARD_COLOR_NAMES.length - 1)) + 1] as BoardColor),
+      // Sections are sheets: white, lifted, titled in slate. Colour is left
+      // for the steps that mean something.
+      color: g.color ?? 'neutral',
     }));
   }
 

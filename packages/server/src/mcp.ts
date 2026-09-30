@@ -2218,7 +2218,7 @@ function registerNoteTools(server: McpServer, ctx: McpContext): void {
           }).optional(),
           connector: z.object({
             from: EndpointInput, to: EndpointInput,
-            route: z.enum(['straight', 'elbow']).optional(),
+            route: z.enum(['straight', 'elbow', 'curved']).optional(),
             arrow: z.enum(['end', 'both', 'none']).optional(),
             label: z.string().max(200).optional(),
             color: Color.optional(),
@@ -2237,7 +2237,7 @@ function registerNoteTools(server: McpServer, ctx: McpContext): void {
             rounded: z.boolean().optional(),
             kind: z.enum(['rect', 'ellipse', 'diamond', 'text', 'section']).optional(),
             from: EndpointInput.optional(), to: EndpointInput.optional(),
-            route: z.enum(['straight', 'elbow']).optional(),
+            route: z.enum(['straight', 'elbow', 'curved']).optional(),
             arrow: z.enum(['end', 'both', 'none']).optional(),
             label: z.string().max(200).nullable().optional().describe('null removes the label.'),
             dashed: z.boolean().optional(),
@@ -2329,6 +2329,8 @@ function registerNoteTools(server: McpServer, ctx: McpContext): void {
         label: z.string().max(200), members: z.array(z.string()), color: Color.optional(),
       })).max(50).optional(),
       colors: z.record(z.string(), Color).optional().describe('Mermaid node id → colour, to mark meaning.'),
+      route: z.enum(['elbow', 'curved', 'straight']).optional().describe(
+        'How connectors are drawn. Elbow (the default) suits a flow sheet; curved suits a pipeline of cards.'),
       x: z.number().optional(),
       y: z.number().optional(),
       replace: z.array(z.string()).optional().describe('Board items to remove first — the ids a previous write_diagram returned.'),
@@ -2394,9 +2396,13 @@ function registerNoteTools(server: McpServer, ctx: McpContext): void {
 
     const existing = new Set(boardOf(page).map((i) => i.id));
     for (const id of replaced) if (!existing.has(id)) throw new Error(`No board item "${id}" to replace.`);
+    const route = args.route;
     const changes: BoardChange[] = [
       ...deleteBoardItems(doc, page, [...replaced]),
-      ...layout.items.map((item) => ({ action: 'add' as const, item })),
+      ...layout.items.map((item) => ({
+        action: 'add' as const,
+        item: route && item.type === 'connector' ? { ...item, route } : item,
+      })),
     ];
     const ops: Op[] = [{ t: 'board', pageId: page.id, changes }];
     // Artboards keep their place unless asked: connectors run to wherever they

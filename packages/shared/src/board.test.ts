@@ -91,6 +91,20 @@ test('an elbow leaves along the axis the gap runs', () => {
   }
 });
 
+test('a curved connector leaves each side along its normal and draws an exact cubic', () => {
+  const { doc, page } = fixture([rect('a', 0, 0), rect('b', 300, 200)]);
+  const c = makeConnector({ from: { kind: 'shape', id: 'a' }, to: { kind: 'shape', id: 'b' }, route: 'curved' });
+  const route = routeConnector(doc, page, c)!;
+  assert.deepEqual(route.bezier![0], { x: 100, y: 30 });
+  assert.deepEqual(route.bezier![3], { x: 300, y: 230 });
+  // The first control point is straight out of the right side.
+  assert.equal(route.bezier![1].y, 30);
+  assert.ok(route.bezier![1].x > 100);
+  // Sampled, so arrowheads and labels work on it like any other route.
+  assert.equal(route.points.length, 25);
+  assert.deepEqual(route.points[24], { x: 300, y: 230 });
+});
+
 test('a connector can end on an artboard', () => {
   const { doc, page } = fixture([rect('a', 0, 0)]);
   const board = makeNode({ type: 'artboard', name: 'Checkout', styles: { width: '400px', height: '800px' }, attrs: { 'data-x': '600', 'data-y': '0' } });

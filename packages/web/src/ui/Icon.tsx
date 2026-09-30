@@ -30,6 +30,7 @@ const PATHS = {
   // A region with its title tab: a section, not a frame.
   section: 'M2.2 5.2h11.6v8.6H2.2zM2.2 5.2V2.6h5l1 2.6',
   lineStraight: 'M2.6 13.4 13.4 2.6M9.6 2.6h3.8v3.8',
+  lineCurved: 'M2.6 12.6C7 12.6 7.6 3.4 13.4 3.4M10.6 1.6l2.8 1.8-1.8 2.8',
   lineElbow: 'M2.6 13.4V8h10.8M10.6 5.2 13.4 8l-2.8 2.8',
   arrowBoth: 'M2.4 8h11.2M5 5.4 2.4 8 5 10.6M11 5.4 13.6 8 11 10.6',
   arrowNone: 'M2.4 8h11.2',
