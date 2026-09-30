@@ -9,7 +9,8 @@
 import { useEffect } from 'react';
 import { useCanvas, getDoc, currentPage, topLevelSelection } from '../state/store.ts';
 import { reorder } from '../canvas/arrange.ts';
-import { artboardOf } from '@playground/shared';
+import { artboardOf, deleteBoardItems } from '@playground/shared';
+import { moveChanges, movingSet } from '../canvas/boardGestures.ts';
 import {
   copyProperties, duplicateSelection, moveInParent, nudge, pasteProperties, selectChildren,
   selectParent, selectSibling, toggleLock, toggleVisibility, wrapInFrame,
@@ -20,6 +21,8 @@ import type { Tool } from '../state/store.ts';
 const TOOL_KEYS: Record<string, Tool> = {
   v: 'move', h: 'hand', f: 'frame', a: 'frame', t: 'text',
   r: 'rect', o: 'ellipse', i: 'image', n: 'note', c: 'comment',
+  // The board. X for a connector and Shift-S for a section are FigJam's keys.
+  d: 'diamond', x: 'connector',
 };
 
 /** True when the keystroke belongs to the canvas rather than to the chrome. */
@@ -170,6 +173,33 @@ export function useKeyboard(actions: KeyboardActions = {}): void {
       if (!mod && (e.key === '2' || e.key === '@')) { e.preventDefault(); zoomToSelection(); return; }
       if (!mod && (e.key === '3' || e.key === '#')) { e.preventDefault(); zoomToSelection(); return; }
 
+      // --- The board --------------------------------------------------------
+      // Board items are selected separately from layers, so their keys come
+      // first and only act when it is the board that has the selection. First
+      // means before selection navigation too: Escape and Enter are claimed
+      // there for layers, and returned before the board ever saw them.
+      const board = state.boardSelection;
+      const boardPage = currentPage();
+      if (board.length && boardPage && doc) {
+        if (e.key === 'Delete' || e.key === 'Backspace') {
+          e.preventDefault();
+          dispatch([{ t: 'board', pageId: boardPage.id, changes: deleteBoardItems(doc, boardPage, board) }]);
+          state.selectBoard([]);
+          return;
+        }
+        if (e.key === 'Escape') { state.selectBoard([]); return; }
+        if (e.key === 'Enter' && !mod && board.length === 1) { e.preventDefault(); state.setEditingBoard(board[0]!); return; }
+        if (e.key.startsWith('Arrow') && onCanvas(e.target) && !mod) {
+          e.preventDefault();
+          const step = e.shiftKey ? 10 : 1;
+          const dx = e.key === 'ArrowLeft' ? -step : e.key === 'ArrowRight' ? step : 0;
+          const dy = e.key === 'ArrowUp' ? -step : e.key === 'ArrowDown' ? step : 0;
+          const origins = movingSet(boardPage, board);
+          // Consecutive nudges coalesce into one undo step, like a drag.
+          dispatch([moveChanges(boardPage, origins, dx, dy)], { coalesce: `board-nudge:${board.join(',')}` });
+          return;
+        }
+      }
       // --- Selection navigation --------------------------------------------
       if (e.key === 'Enter' && !mod) {
         e.preventDefault();
@@ -205,6 +235,8 @@ export function useKeyboard(actions: KeyboardActions = {}): void {
         return;
       }
       if (e.key === '\\' && !mod) { e.preventDefault(); selectParent(); return; }
+
+      if (!mod && e.shiftKey && key === 's') { e.preventDefault(); setTool('section'); return; }
 
       // --- Delete and nudge -------------------------------------------------
       if (e.key === 'Delete' || e.key === 'Backspace') {

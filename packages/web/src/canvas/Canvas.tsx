@@ -7,12 +7,17 @@ import {
   type Box, type NodeId, type Op, type SnapGuide,
   makeNode, boxOf, getArtboardPosition, getArtboardSize,
   DEFAULT_ARTBOARD_STYLES, defaultStylesFor, makeComment, makeNote, notesOf, commentsOf, breakpointsOf,
+  type Endpoint, type Point, boardOf, boardItemsInRect, isShape, isConnector, makeConnector,
 } from '@playground/shared';
 import { useCanvas, getDoc, currentPage, topLevelSelection, getNodeById } from '../state/store.ts';
 import { resolveKey, treeNodeId } from '../state/keys.ts';
 import { artboardOf } from '@playground/shared';
 import { Artboard } from './Artboard.tsx';
 import { NoteCard } from './NoteCard.tsx';
+import { BoardLayer, type BoardHandle, type ConnectPreview } from './Board.tsx';
+import {
+  boardIdAt, boardKindFor, drawnShape, endpointAt, moveChanges, movingSet, resizedBox, restoreMove,
+} from './boardGestures.ts';
 import { Overlay } from './Overlay.tsx';
 import { PeerCursors } from './PeerCursors.tsx';
 import { imageSize, insertImages } from '../hooks/useClipboard.ts';
@@ -44,7 +49,13 @@ type Drag =
   | { kind: 'move-absolute'; ids: NodeId[]; startX: number; startY: number; origins: Record<NodeId, { left: number; top: number }>; batch: string; restore: Op; candidates: Box[]; container: Box | null; size: { width: number; height: number } }
   | { kind: 'resize'; start: ResizeStart; startX: number; startY: number; batch: string; restore: Op; candidates: Box[]; container: Box | null }
   | { kind: 'draw'; startX: number; startY: number; artboardId: NodeId | null }
-  | { kind: 'move-note'; id: string; startX: number; startY: number; origin: { x: number; y: number }; batch: string; restore: Op };
+  | { kind: 'move-note'; id: string; startX: number; startY: number; origin: { x: number; y: number }; batch: string; restore: Op }
+  // --- The board ---
+  | { kind: 'board-maybe-move'; startX: number; startY: number; origins: Record<string, { x: number; y: number }>; clicked: string; narrow: boolean }
+  | { kind: 'board-move'; startX: number; startY: number; origins: Record<string, { x: number; y: number }>; batch: string; restore: Op }
+  | { kind: 'board-resize'; id: string; handle: BoardHandle; box: { x: number; y: number; width: number; height: number }; startX: number; startY: number; batch: string; restore: Op }
+  | { kind: 'board-connect'; startX: number; startY: number; from: Endpoint; fromPoint: Point }
+  | { kind: 'board-end'; id: string; end: 'from' | 'to'; startX: number; startY: number; fixed: Point };
 
 const DRAG_THRESHOLD = 4;
 
@@ -85,6 +96,8 @@ export function Canvas({ onContextMenu }: CanvasProps) {
    * throttled for the network; a marker that lags the cursor reads as broken.
    */
   const [rulerPointer, setRulerPointer] = useState<{ x: number; y: number } | null>(null);
+  /** A connector being drawn or re-attached, for the board to preview. */
+  const [connectPreview, setConnectPreview] = useState<ConnectPreview | null>(null);
 
   /**
    * Picking the comment tool with something selected comments on *that*.
@@ -374,10 +387,80 @@ export function Canvas({ onContextMenu }: CanvasProps) {
       return;
     }
 
+    // --- The board ---------------------------------------------------------
+
+    if (tool === 'connector') {
+      const start = endpointAt(page, e.clientX, e.clientY);
+      drag.current = { kind: 'board-connect', startX: e.clientX, startY: e.clientY, from: start.endpoint, fromPoint: start.at };
+      setConnectPreview({ from: start.at, to: start.at, target: start.target });
+      return;
+    }
+    // Board-only tools draw on the board even over an artboard: a section is
+    // how a set of screens gets gathered into a named flow, and it is drawn
+    // across them.
+    if (tool === 'diamond' || tool === 'section') {
+      drag.current = { kind: 'draw', startX: e.clientX, startY: e.clientY, artboardId: null };
+      return;
+    }
+
     if (tool !== 'move') {
-      const hit = hitTest(e.clientX, e.clientY);
+      // A rectangle, ellipse or text started on a board shape is another board
+      // shape, not a layer in whatever artboard happens to be underneath.
+      const onBoard = boardIdAt(e.target);
+      const hit = onBoard ? null : hitTest(e.clientX, e.clientY);
       drag.current = { kind: 'draw', startX: e.clientX, startY: e.clientY, artboardId: hit?.artboardId ?? null };
       return;
+    }
+
+    if (!e.button) {
+      const el = e.target as HTMLElement;
+      const handleEl = el.closest<HTMLElement>('[data-board-handle]');
+      if (handleEl) {
+        const id = handleEl.dataset.boardFor!;
+        const shape = boardOf(page).find((i) => i.id === id);
+        if (isShape(shape)) {
+          const box = { x: shape.x, y: shape.y, width: shape.width, height: shape.height };
+          drag.current = {
+            kind: 'board-resize', id, handle: handleEl.dataset.boardHandle as BoardHandle, box,
+            startX: e.clientX, startY: e.clientY, batch: `b_${Date.now()}`,
+            restore: { t: 'board', pageId: page.id, changes: [{ action: 'update', id, patch: box }] },
+          };
+          return;
+        }
+      }
+      const endEl = el.closest<HTMLElement>('[data-board-end]');
+      if (endEl) {
+        const id = endEl.dataset.boardFor!;
+        const connector = boardOf(page).find((i) => i.id === id);
+        const which = endEl.dataset.boardEnd as 'from' | 'to';
+        const other = document.querySelector<HTMLElement>(`[data-board-for="${id}"][data-board-end="${which === 'from' ? 'to' : 'from'}"]`);
+        if (isConnector(connector) && other) {
+          const r = other.getBoundingClientRect();
+          const fixed = toCanvasSpace(r.left + r.width / 2, r.top + r.height / 2, viewport);
+          drag.current = { kind: 'board-end', id, end: which, startX: e.clientX, startY: e.clientY, fixed };
+          setConnectPreview({ from: fixed, to: toCanvasSpace(e.clientX, e.clientY, viewport), target: null });
+          return;
+        }
+      }
+      const boardId = boardIdAt(e.target);
+      if (boardId) {
+        const state = useCanvas.getState();
+        const already = state.boardSelection.includes(boardId);
+        if (e.shiftKey) {
+          state.selectBoard(already ? state.boardSelection.filter((x) => x !== boardId) : [...state.boardSelection, boardId]);
+        } else if (!already) {
+          state.selectBoard([boardId]);
+        }
+        drag.current = {
+          kind: 'board-maybe-move', startX: e.clientX, startY: e.clientY,
+          origins: movingSet(page, useCanvas.getState().boardSelection),
+          // Pressing on one of several selected items keeps them all, so they
+          // can be dragged together; letting go without dragging means "just
+          // this one", the way every design tool behaves.
+          clicked: boardId, narrow: already && !e.shiftKey && state.boardSelection.length > 1,
+        };
+        return;
+      }
     }
 
     // Dragging an artboard's label moves the artboard.
@@ -419,7 +502,7 @@ export function Canvas({ onContextMenu }: CanvasProps) {
 
     const hit = hitTest(e.clientX, e.clientY);
     if (!hit) {
-      if (!e.shiftKey) { select([]); useCanvas.getState().selectNote(null); }
+      if (!e.shiftKey) { select([]); useCanvas.getState().selectNote(null); useCanvas.getState().selectBoard([]); }
       drag.current = { kind: 'marquee', startX: e.clientX, startY: e.clientY, additive: e.shiftKey };
       return;
     }
@@ -508,7 +591,17 @@ export function Canvas({ onContextMenu }: CanvasProps) {
           const hits = nodesInRect(doc, page, {
             left: rect.left, top: rect.top, right: rect.left + rect.width, bottom: rect.top + rect.height,
           });
-          select(hits, d.additive);
+          const a = toCanvasSpace(rect.left, rect.top, vp);
+          const boardHits = boardItemsInRect(doc, page, { x: a.x, y: a.y, width: rect.width / vp.zoom, height: rect.height / vp.zoom });
+          // The two selections cannot be held at once, so a marquee that
+          // catches design layers takes those, and one that only reaches the
+          // board takes the board.
+          if (hits.length || !boardHits.length) {
+            select(hits, d.additive);
+            if (!hits.length && !d.additive) useCanvas.getState().selectBoard([]);
+          } else {
+            useCanvas.getState().selectBoard(boardHits, d.additive);
+          }
         }
         return;
       }
@@ -518,6 +611,40 @@ export function Canvas({ onContextMenu }: CanvasProps) {
           t: 'note', action: 'update', pageId: page!.id,
           note: { id: d.id, x: Math.round(d.origin.x + dx), y: Math.round(d.origin.y + dy) },
         }], { batch: d.batch, skipUndo: true });
+        return;
+      }
+
+      case 'board-maybe-move': {
+        if (Math.abs(dxScreen) < DRAG_THRESHOLD && Math.abs(dyScreen) < DRAG_THRESHOLD) return;
+        if (!page || !Object.keys(d.origins).length) { drag.current = { kind: 'none' }; return; }
+        drag.current = {
+          kind: 'board-move', startX: d.startX, startY: d.startY, origins: d.origins,
+          batch: `b_${Date.now()}`, restore: restoreMove(page, d.origins),
+        };
+        return;
+      }
+
+      case 'board-move': {
+        dispatch([moveChanges(page!, d.origins, dx, dy)], { batch: d.batch, skipUndo: true });
+        return;
+      }
+
+      case 'board-resize': {
+        const box = resizedBox(d.box, d.handle, dx, dy, e.shiftKey);
+        dispatch([{ t: 'board', pageId: page!.id, changes: [{ action: 'update', id: d.id, patch: box }] }],
+          { batch: d.batch, skipUndo: true });
+        return;
+      }
+
+      case 'board-connect': {
+        const next = endpointAt(page!, e.clientX, e.clientY, d.from.kind === 'shape' ? d.from.id : undefined);
+        setConnectPreview({ from: d.fromPoint, to: next.at, target: next.target });
+        return;
+      }
+
+      case 'board-end': {
+        const next = endpointAt(page!, e.clientX, e.clientY);
+        setConnectPreview({ from: d.fixed, to: next.at, target: next.target });
         return;
       }
 
@@ -728,7 +855,36 @@ export function Canvas({ onContextMenu }: CanvasProps) {
       handleDraw(d, e);
       return;
     }
-  }, [dispatch, page, selection]);
+
+    if (d.kind === 'board-maybe-move') {
+      if (d.narrow) useCanvas.getState().selectBoard([d.clicked]);
+      return;
+    }
+
+    if (d.kind === 'board-move' || d.kind === 'board-resize') {
+      useCanvas.getState().pushUndo([d.restore], selection);
+      return;
+    }
+
+    if (d.kind === 'board-connect') {
+      setConnectPreview(null);
+      setTool('move');
+      // A click with the connector tool is not a connector.
+      if (Math.hypot(e.clientX - d.startX, e.clientY - d.startY) < DRAG_THRESHOLD) return;
+      const end = endpointAt(page, e.clientX, e.clientY, d.from.kind === 'shape' ? d.from.id : undefined);
+      const connector = makeConnector({ from: d.from, to: end.endpoint });
+      dispatch([{ t: 'board', pageId: page.id, changes: [{ action: 'add', item: connector }] }]);
+      useCanvas.getState().selectBoard([connector.id]);
+      return;
+    }
+
+    if (d.kind === 'board-end') {
+      setConnectPreview(null);
+      const end = endpointAt(page, e.clientX, e.clientY);
+      dispatch([{ t: 'board', pageId: page.id, changes: [{ action: 'update', id: d.id, patch: { [d.end]: end.endpoint } }] }]);
+      return;
+    }
+  }, [dispatch, page, selection, setTool]);
 
   /**
    * Files dropped onto the canvas.
@@ -804,6 +960,20 @@ export function Canvas({ onContextMenu }: CanvasProps) {
     const height = Math.max(h, tool === 'text' ? 0 : 24);
 
     if (!d.artboardId) {
+      // Out here a shape tool draws on the board. It used to answer "draw
+      // inside an artboard" with a toast; drawing a box on empty canvas is the
+      // most obvious thing a whiteboard does, so now it does it.
+      const kind = boardKindFor(tool);
+      if (kind) {
+        const shape = drawnShape(kind, toCanvasSpace(d.startX, d.startY, vp), toCanvasSpace(e.clientX, e.clientY, vp), vp.zoom);
+        dispatch([{ t: 'board', pageId: page.id, changes: [{ action: 'add', item: shape }] }]);
+        useCanvas.getState().selectBoard([shape.id]);
+        // Straight into typing, the way a sticky or a shape works in FigJam.
+        useCanvas.getState().setEditingBoard(shape.id);
+        setTool('move');
+        return;
+      }
+
       // Only the frame tool means "new artboard" out here. Every other tool
       // drew on empty canvas by mistake, and silently producing an artboard is
       // a confusing answer to that.
@@ -862,6 +1032,13 @@ export function Canvas({ onContextMenu }: CanvasProps) {
   // --- Double click enters text editing ----------------------------------
 
   const onDoubleClick = useCallback((e: React.PointerEvent) => {
+    // A shape's text, or a connector's label.
+    const boardId = boardIdAt(e.target);
+    if (boardId) {
+      useCanvas.getState().selectBoard([boardId]);
+      useCanvas.getState().setEditingBoard(boardId);
+      return;
+    }
     const hit = hitTest(e.clientX, e.clientY);
     if (!hit) return;
     // The hit id may be a composite key pointing inside a component instance,
@@ -920,9 +1097,12 @@ export function Canvas({ onContextMenu }: CanvasProps) {
         className="canvas-world"
         style={{ transform: `translate(${viewport.x - origin.x}px, ${viewport.y - origin.y}px)` }}
       >
+        {/* Sections under the artboards, so one can gather screens into a flow. */}
+        <BoardLayer part="under" />
         {page.artboards.map((id) => (
           <Artboard key={id} id={id} live={visibleArtboards.has(id)} />
         ))}
+        <BoardLayer part="over" preview={connectPreview} dragging={dragging} />
         {notesOf(page).map((note) => <NoteCard key={note.id} note={note} />)}
       </div>
 

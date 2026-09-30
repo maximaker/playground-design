@@ -161,6 +161,9 @@ function buildEntries({
   tool('ellipse', 'Ellipse tool', 'circle', 'O');
   tool('image', 'Image tool', 'image', 'I');
   tool('note', 'Prompt card', 'note', 'N');
+  tool('diamond', 'Diamond — for a diagram', 'diamond', 'D');
+  tool('connector', 'Connector', 'connector', 'X');
+  tool('section', 'Section', 'section', '⇧S');
 
   const action = (id: string, label: string, icon: IconName, run: () => void, shortcut?: string, hint?: string) =>
     entries.push({ id: `action:${id}`, label, icon, run, shortcut, hint, group: 'Actions' });

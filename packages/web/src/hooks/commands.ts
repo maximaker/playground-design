@@ -9,6 +9,7 @@ import {
   type NodeId, type Op, type StyleMap,
   artboardOf, cloneSubtree, makeNode, defaultStylesFor, detachedNodes,
   getArtboardPosition, getArtboardSize, newId,
+  boardBounds, boardOf, isShape, routeConnector,
 } from '@playground/shared';
 import { useCanvas, getDoc, currentPage, topLevelSelection } from '../state/store.ts';
 import { nodeInnerRect, nodeRect } from '../canvas/registry.ts';
@@ -154,9 +155,16 @@ export function zoomTo(zoom: number): void {
 export function zoomToFit(): void {
   const page = currentPage();
   const doc = getDoc();
-  if (!page || !doc || !page.artboards.length) return;
+  if (!page || !doc || (!page.artboards.length && !boardOf(page).length)) return;
 
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  // "Everything" includes the board. A page that is a diagram and nothing
+  // else — or a flow drawn beside the screens — has to come into view too.
+  const board = boardBounds(doc, page);
+  if (board) {
+    minX = board.x; minY = board.y;
+    maxX = board.x + board.width; maxY = board.y + board.height;
+  }
   for (const id of page.artboards) {
     const node = doc.nodes[id];
     if (!node) continue;
@@ -205,6 +213,22 @@ export function zoomToSelection(): void {
   if (selectedNote) {
     const note = currentPage()?.notes?.find((n) => n.id === selectedNote);
     if (note) return fitBox(note.x, note.y, note.width, note.height);
+  }
+
+  // The board's selection is in canvas space already.
+  const board = useCanvas.getState().boardSelection;
+  const page = currentPage();
+  const doc = getDoc();
+  if (board.length && page && doc) {
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const item of boardOf(page)) {
+      if (!board.includes(item.id)) continue;
+      const pts = isShape(item)
+        ? [{ x: item.x, y: item.y }, { x: item.x + item.width, y: item.y + item.height }]
+        : routeConnector(doc, page, item)?.points ?? [];
+      for (const p of pts) { x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y); x1 = Math.max(x1, p.x); y1 = Math.max(y1, p.y); }
+    }
+    if (Number.isFinite(x0)) return fitBox(x0, y0, Math.max(1, x1 - x0), Math.max(1, y1 - y0));
   }
 
   if (!selection.length) return zoomToFit();

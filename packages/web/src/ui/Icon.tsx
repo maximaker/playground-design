@@ -23,6 +23,17 @@ const PATHS = {
   image: 'M2.6 3.4h10.8v9.2H2.6zM2.6 10.4 5.8 7.6l2.6 2.3 2-1.7 3 2.6M6 6.2a.7.7 0 1 1-1.4 0 .7.7 0 0 1 1.4 0Z',
   note: 'M3 2.6h10v7.2l-3.2 3.6H3zM13 9.6H9.8v3.8',
   pen: 'M11.2 2.3 13.7 4.8 5.6 12.9 2.3 13.7l.8-3.3z',
+  // --- Board ---------------------------------------------------------------
+  diamond: 'M8 2.2 13.8 8 8 13.8 2.2 8z',
+  // An elbow with an arrowhead: a connector, which turns corners.
+  connector: 'M2.6 3.6h5.2v8.8h5M10.8 10.4l2 2-2 2',
+  // A region with its title tab: a section, not a frame.
+  section: 'M2.2 5.2h11.6v8.6H2.2zM2.2 5.2V2.6h5l1 2.6',
+  lineStraight: 'M2.6 13.4 13.4 2.6M9.6 2.6h3.8v3.8',
+  lineElbow: 'M2.6 13.4V8h10.8M10.6 5.2 13.4 8l-2.8 2.8',
+  arrowBoth: 'M2.4 8h11.2M5 5.4 2.4 8 5 10.6M11 5.4 13.6 8 11 10.6',
+  arrowNone: 'M2.4 8h11.2',
+  dashed: 'M2.2 8h2.4M6.8 8h2.4M11.4 8h2.4',
 
   // --- Structure ---------------------------------------------------------
   artboard: 'M2.2 3.4h11.6v9.2H2.2zM2.2 6h11.6',

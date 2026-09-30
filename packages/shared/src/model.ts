@@ -8,6 +8,7 @@
  */
 
 import type { CodeComponent } from './code-components.ts';
+import type { BoardItem } from './board.ts';
 
 export type NodeId = string;
 
@@ -149,6 +150,11 @@ export interface Page {
   artboards: NodeId[];
   /** Canvas annotations. Not part of the design tree, so they never export. */
   notes?: Note[];
+  /**
+   * Diagrams drawn on the canvas between artboards, in stacking order. Like
+   * notes, not part of the design tree — see board.ts and DIAGRAMS.md.
+   */
+  board?: BoardItem[];
 }
 
 /**

@@ -81,6 +81,43 @@ export async function renderNode(
   }
 }
 
+/**
+ * A picture of an SVG, for an agent looking at the board.
+ *
+ * Board diagrams are SVG already, so there is nothing to lay out: the SVG is
+ * put in a page that has the board's typeface, and that page is photographed.
+ * Returns null without Playwright — the SVG itself is still available, and an
+ * agent can read coordinates from `get_board` without a picture.
+ */
+export async function rasterizeSvg(svg: string, scale = 1): Promise<Buffer | null> {
+  const pw = await tryLoadPlaywright();
+  if (!pw) return null;
+  const size = /width="(\d+)" height="(\d+)"/.exec(svg);
+  // Large boards are shrunk to a readable picture rather than rendered at a
+  // size no model can take in: 1600px across is plenty to see a diagram by.
+  const width = Math.min(8000, Number(size?.[1] ?? 800));
+  const height = Math.min(8000, Number(size?.[2] ?? 600));
+  const fit = Math.min(1, 1600 / Math.max(width, height));
+  const browser = await getBrowser(pw);
+  const context = await browser.newContext({
+    viewport: { width: Math.ceil(width * fit), height: Math.ceil(height * fit) },
+    deviceScaleFactor: clampScale(scale),
+  });
+  const page = await context.newPage();
+  try {
+    await page.setContent(
+      '<!doctype html><html><head><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap">'
+      + '<style>html,body{margin:0}svg{display:block;width:100vw;height:100vh}</style></head>'
+      + `<body>${svg}</body></html>`,
+      { waitUntil: 'networkidle' },
+    );
+    await page.evaluate(() => (document as unknown as { fonts: FontFaceSet }).fonts.ready);
+    return Buffer.from(await page.screenshot({ type: 'png' }));
+  } finally {
+    await context.close();
+  }
+}
+
 function sizeOf(doc: CanvasDocument, nodeId: NodeId): { width: number; height: number } {
   const node = getNode(doc, nodeId)!;
   if (node.type === 'artboard') return getArtboardSize(node);

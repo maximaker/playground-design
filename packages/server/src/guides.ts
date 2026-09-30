@@ -23,6 +23,34 @@ Wrap multi-step work in \`start_working_on_nodes\` / \`finish_working_on_nodes\`
 so the human sees which artboards you are touching.
 `.trim(),
 
+  diagrams: `
+# Diagrams on the board
+
+Diagrams do not go inside artboards. An artboard is real HTML; a flowchart
+written into one is absolutely-positioned soup. They go on the *board* — the
+canvas between the artboards — where boxes are placed by hand and arrows are
+geometry, and where none of it exports as part of the design.
+
+1. \`write_diagram\` with Mermaid for anything bigger than a few boxes. It
+   lays the graph out for you. Subgraphs become sections; lines it cannot read
+   come back in \`skipped\` — check that list.
+2. \`get_board\` with \`image: true\` to look at it. Always. The layout is
+   good, not psychic.
+3. Adjust with \`edit_board\`: one call, many changes, one undo step.
+4. To redraw, call \`write_diagram\` again with \`replace\` set to the ids the
+   first call returned, so the old one goes in the same step.
+
+Connecting to real screens is the reason to draw here: a node can be an
+artboard (\`artboard: "Checkout"\` in the structured form, or
+\`{ artboard: ... }\` as a connector end in \`edit_board\`). Artboards stay
+where the person put them; only pass \`arrangeArtboards: true\` when you were
+asked to lay the screens out as a flow.
+
+Colours are six names, not hex: neutral, blue, green, yellow, red, purple.
+Use them for meaning — green for the happy path, red for failure — and leave
+most of a diagram neutral.
+`.trim(),
+
   layout: `
 # Layout that a designer will accept
 

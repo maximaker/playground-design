@@ -15,7 +15,9 @@ import {
 import { styleOps, textOps, treeNodeId } from './keys.ts';
 import { type CanvasPrefs, loadCanvasPrefs, saveCanvasPrefs } from './canvasPrefs.ts';
 
-export type Tool = 'move' | 'frame' | 'text' | 'rect' | 'ellipse' | 'image' | 'hand' | 'note' | 'comment';
+export type Tool = 'move' | 'frame' | 'text' | 'rect' | 'ellipse' | 'image' | 'hand' | 'note' | 'comment'
+  /** Board-only tools: these always draw on the board, even over an artboard. */
+  | 'diamond' | 'connector' | 'section';
 
 export interface Viewport { x: number; y: number; zoom: number }
 
@@ -152,6 +154,14 @@ interface CanvasState {
   measureTo: NodeId | null;
   /** Prompt cards are selected separately from design nodes. */
   selectedNote: string | null;
+  /**
+   * Board items selected on the canvas. Separate from `selection`, which holds
+   * design layers, the way a selected prompt card is: the two answer to
+   * different commands, and a delete must never reach across.
+   */
+  boardSelection: string[];
+  /** A board shape or connector whose text is being edited in place. */
+  editingBoard: string | null;
   editingText: NodeId | null;
   /** Which style variant the properties panel is editing (`null` = base). */
   activeVariant: string | null;
@@ -287,6 +297,8 @@ interface CanvasActions {
   setHovered(id: NodeId | null): void;
   setMeasureTo(id: NodeId | null): void;
   selectNote(id: string | null): void;
+  selectBoard(ids: string[], additive?: boolean): void;
+  setEditingBoard(id: string | null): void;
   setEditingText(id: NodeId | null): void;
   setActiveVariant(v: string | null): void;
   setEditingVariant(v: { componentId: string; match: Record<string, string> } | null): void;
@@ -419,6 +431,8 @@ export const useCanvas = create<CanvasState & CanvasActions>((set, get) => ({
   hovered: null,
   measureTo: null,
   selectedNote: null,
+  boardSelection: [],
+  editingBoard: null,
   editingText: null,
   activeVariant: null,
   editingVariant: null,
@@ -674,7 +688,10 @@ export const useCanvas = create<CanvasState & CanvasActions>((set, get) => ({
     const current = get().selection;
     const next = additive ? [...new Set([...current, ...ids])] : ids;
     if (next.length === current.length && next.every((id, i) => id === current[i])) return;
-    set({ selection: next, editingText: null, activeVariant: null, selectedNote: null });
+    set({
+      selection: next, editingText: null, activeVariant: null, selectedNote: null,
+      ...(next.length ? { boardSelection: [], editingBoard: null } : {}),
+    });
   },
 
   toggleSelect(id) {
@@ -684,7 +701,24 @@ export const useCanvas = create<CanvasState & CanvasActions>((set, get) => ({
 
   setHovered(hovered) { if (get().hovered !== hovered) set({ hovered }); },
   setMeasureTo(measureTo) { if (get().measureTo !== measureTo) set({ measureTo }); },
-  selectNote(selectedNote) { set({ selectedNote, selection: selectedNote ? [] : get().selection }); },
+  selectNote(selectedNote) {
+    set({
+      selectedNote,
+      selection: selectedNote ? [] : get().selection,
+      boardSelection: selectedNote ? [] : get().boardSelection,
+    });
+  },
+  selectBoard(ids, additive) {
+    const current = get().boardSelection;
+    const next = additive ? [...new Set([...current, ...ids])] : ids;
+    if (next.length === current.length && next.every((id, i) => id === current[i]) && !additive) return;
+    set({
+      boardSelection: next,
+      editingBoard: null,
+      ...(next.length ? { selection: [], selectedNote: null, editingText: null } : {}),
+    });
+  },
+  setEditingBoard(editingBoard) { set({ editingBoard }); },
   setEditingText(editingText) { set({ editingText }); },
   setActiveVariant(activeVariant) { set({ activeVariant }); },
   setEditingVariant(editingVariant) { set({ editingVariant }); },

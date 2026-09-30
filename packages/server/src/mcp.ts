@@ -28,6 +28,9 @@ import {
   codeElementJsx, explicitCodeProps, MOUNT_CONTRACT,
   type Comment, commentsOf, newId as newIdOf,
   NOTE_KINDS, NOTE_KIND_HINTS, specFor, changesWithin, diffDocuments, describeComponent,
+  type BoardChange, type BoardColor, type Endpoint, type DiagramGraph,
+  BOARD_COLOR_NAMES, boardBounds, boardOf, danglingConnectors, deleteBoardItems, emitBoardSvg, isShape,
+  layoutDiagram, makeBoardShape, makeConnector, parseMermaid, routeConnector,
 } from '@playground/shared';
 import {
   applyOps, getDocument, getSnapshot, listSnapshots, StoreError, createSnapshot,
@@ -36,7 +39,7 @@ import {
 import { persistence } from './persistence.ts';
 import { pageArtboard, slugify } from './publish.ts';
 import { callTab, notifyTabs, selectionOf, hasLiveTab, NoTabError } from './realtime.ts';
-import { renderNode, measureSubtree } from './render.ts';
+import { renderNode, measureSubtree, rasterizeSvg } from './render.ts';
 import { storeAsset } from './assets.ts';
 import { GUIDES, guideList } from './guides.ts';
 import { importUrl, ImportError } from './import.ts';
@@ -80,6 +83,7 @@ const TOOLSETS: Record<string, readonly string[]> = {
     'publish_page', 'unpublish_page', 'get_publication'],
   collab: ['list_notes', 'claim_note', 'respond_to_note', 'create_note', 'list_comments',
     'reply_to_comment', 'resolve_comment', 'start_working_on_nodes', 'finish_working_on_nodes'],
+  diagrams: ['get_board', 'edit_board', 'write_diagram'],
 };
 
 const setOf = (tool: string): string =>
@@ -2102,6 +2106,327 @@ function registerNoteTools(server: McpServer, ctx: McpContext): void {
 
     commit(ctx, [{ t: 'note', action: 'add', pageId: page.id, note }]);
     return json({ id: note.id, x: note.x, y: note.y });
+  }));
+
+  // --- The board: diagrams on the canvas between artboards -------------------
+
+  /** Artboards on the page, by id or by name, for connectors that end on a screen. */
+  const artboardRef = (doc: CanvasDocument, page: Page, ref: string): CanvasNode | null => {
+    const byId = page.artboards.includes(ref) ? getNode(doc, ref) : undefined;
+    if (byId) return byId;
+    const wanted = ref.trim().toLowerCase();
+    const id = page.artboards.find((a) => getNode(doc, a)?.name.trim().toLowerCase() === wanted);
+    return id ? getNode(doc, id) ?? null : null;
+  };
+
+  const EndpointInput = z.object({
+    shape: z.string().optional().describe('Id of a board shape.'),
+    artboard: z.string().optional().describe('Id or name of an artboard on this page.'),
+    x: z.number().optional(),
+    y: z.number().optional(),
+  }).describe('One of: { shape }, { artboard }, or a free point { x, y }.');
+
+  const toEndpoint = (doc: CanvasDocument, page: Page, e: z.infer<typeof EndpointInput>, known: Set<string>): Endpoint => {
+    if (e.shape) {
+      if (!known.has(e.shape)) throw new Error(`No board shape "${e.shape}". Call get_board for current ids.`);
+      return { kind: 'shape', id: e.shape };
+    }
+    if (e.artboard) {
+      const found = artboardRef(doc, page, e.artboard);
+      if (!found) throw new Error(`No artboard "${e.artboard}" on this page. get_board lists the ones you can connect to.`);
+      return { kind: 'artboard', id: found.id };
+    }
+    if (e.x !== undefined && e.y !== undefined) return { kind: 'point', x: e.x, y: e.y };
+    throw new Error('An endpoint needs a shape, an artboard, or both x and y.');
+  };
+
+  const Color = z.enum(BOARD_COLOR_NAMES as [BoardColor, ...BoardColor[]]);
+
+  /** What an agent reads back: every item, with connectors' real paths. */
+  const describeBoard = (doc: CanvasDocument, page: Page) => {
+    const items = boardOf(page).map((item) => {
+      if (isShape(item)) return item;
+      const route = routeConnector(doc, page, item);
+      return { ...item, path: route?.points.map((p) => [Math.round(p.x), Math.round(p.y)]) ?? null };
+    });
+    return {
+      page: { id: page.id, name: page.name },
+      items,
+      artboards: page.artboards.map((id) => {
+        const n = getNode(doc, id)!;
+        return { id, name: n.name, ...getArtboardPosition(n), ...getArtboardSize(n) };
+      }),
+      dangling: danglingConnectors(doc, page),
+      bounds: boardBounds(doc, page),
+    };
+  };
+
+  server.registerTool('get_board', {
+    title: 'Read the board',
+    description:
+      'The diagrams on this page: every shape and connector on the canvas between the artboards, with ' +
+      'positions, text, colours, what each connector is attached to and the path it takes, plus the ' +
+      'artboards a connector can end on. Pass image: true to see it — do that after every write_diagram ' +
+      'or edit_board, the same way you would screenshot a design.',
+    inputSchema: {
+      pageId: z.string().optional(),
+      image: z.boolean().optional().default(false).describe('Also return a picture of the board.'),
+      svg: z.boolean().optional().default(false).describe('Also return the board as SVG source.'),
+    },
+    annotations: { readOnlyHint: true },
+  }, async ({ pageId, image, svg }) => guard(async () => {
+    const doc = requireDoc(ctx);
+    const page = pageOf(ctx, doc, pageId);
+    const content: ({ type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string })[] = [
+      { type: 'text', text: JSON.stringify(describeBoard(doc, page), null, 2) },
+    ];
+    if (image || svg) {
+      const source = emitBoardSvg(doc, page);
+      if (svg) content.push({ type: 'text', text: source });
+      if (image) {
+        const png = boardOf(page).length ? await rasterizeSvg(source) : null;
+        if (png) content.push({ type: 'image', data: png.toString('base64'), mimeType: 'image/png' });
+        else content.push({ type: 'text', text: boardOf(page).length
+          ? 'No picture: headless rendering is not installed on this server. Coordinates above are exact.'
+          : 'The board is empty.' });
+      }
+    }
+    return { content };
+  }));
+
+  server.registerTool('edit_board', {
+    title: 'Change the board',
+    description:
+      'Adds, changes and removes shapes and connectors on the board, in one undoable step. Shapes are ' +
+      'rect, ellipse, diamond, text and section (a titled region drawn under everything). Connectors ' +
+      'attach to a shape, to an artboard (by id or name), or to a point, and stay attached when either ' +
+      'end moves. Removing a shape keeps connectors to it, ending where it was. For anything bigger ' +
+      'than a few boxes, write_diagram lays it out for you.',
+    inputSchema: {
+      pageId: z.string().optional(),
+      changes: z.array(z.union([
+        z.object({
+          action: z.literal('add'),
+          shape: z.object({
+            kind: z.enum(['rect', 'ellipse', 'diamond', 'text', 'section']),
+            x: z.number(), y: z.number(),
+            width: z.number().positive().optional(), height: z.number().positive().optional(),
+            text: z.string().max(2000).optional(),
+            color: Color.optional(),
+            rounded: z.boolean().optional(),
+            id: z.string().optional().describe('Your own id, to connect to it later in the same call.'),
+          }).optional(),
+          connector: z.object({
+            from: EndpointInput, to: EndpointInput,
+            route: z.enum(['straight', 'elbow']).optional(),
+            arrow: z.enum(['end', 'both', 'none']).optional(),
+            label: z.string().max(200).optional(),
+            color: Color.optional(),
+            dashed: z.boolean().optional(),
+            id: z.string().optional(),
+          }).optional(),
+        }),
+        z.object({
+          action: z.literal('update'),
+          id: z.string(),
+          patch: z.object({
+            x: z.number().optional(), y: z.number().optional(),
+            width: z.number().positive().optional(), height: z.number().positive().optional(),
+            text: z.string().max(2000).optional(),
+            color: Color.optional(),
+            rounded: z.boolean().optional(),
+            kind: z.enum(['rect', 'ellipse', 'diamond', 'text', 'section']).optional(),
+            from: EndpointInput.optional(), to: EndpointInput.optional(),
+            route: z.enum(['straight', 'elbow']).optional(),
+            arrow: z.enum(['end', 'both', 'none']).optional(),
+            label: z.string().max(200).nullable().optional().describe('null removes the label.'),
+            dashed: z.boolean().optional(),
+          }),
+        }),
+        z.object({ action: z.literal('remove'), id: z.string() }),
+      ])).min(1).max(200),
+    },
+  }, async ({ pageId, changes }) => guard(() => {
+    const doc = requireDoc(ctx);
+    const page = pageOf(ctx, doc, pageId);
+    const known = new Set(boardOf(page).map((i) => i.id));
+    const out: BoardChange[] = [];
+    const added: string[] = [];
+    const removing: string[] = [];
+
+    for (const c of changes) {
+      if (c.action === 'add') {
+        if (!!c.shape === !!c.connector) throw new Error('An add needs exactly one of shape or connector.');
+        if (c.shape) {
+          if (c.shape.id && known.has(c.shape.id)) throw new Error(`There is already a board item "${c.shape.id}".`);
+          const shape = makeBoardShape({ ...c.shape, ...(c.shape.id ? { id: c.shape.id } : {}) });
+          known.add(shape.id);
+          added.push(shape.id);
+          out.push({ action: 'add', item: shape });
+        } else {
+          const k = c.connector!;
+          const connector = makeConnector({
+            ...(k.id ? { id: k.id } : {}),
+            from: toEndpoint(doc, page, k.from, known), to: toEndpoint(doc, page, k.to, known),
+            route: k.route, arrow: k.arrow, label: k.label, color: k.color, dashed: k.dashed,
+          });
+          known.add(connector.id);
+          added.push(connector.id);
+          out.push({ action: 'add', item: connector });
+        }
+        continue;
+      }
+      if (!known.has(c.id)) throw new Error(`No board item "${c.id}". Call get_board for current ids.`);
+      if (c.action === 'remove') { removing.push(c.id); continue; }
+      const { from, to, ...rest } = c.patch;
+      const patch: Record<string, unknown> = { ...rest };
+      if (from) patch.from = toEndpoint(doc, page, from, known);
+      if (to) patch.to = toEndpoint(doc, page, to, known);
+      out.push({ action: 'update', id: c.id, patch });
+    }
+
+    // Removals last, and through the same path the canvas uses, so connectors
+    // attached to a removed shape keep their other end.
+    if (removing.length) {
+      const draft = structuredClone(page);
+      applyOp({ ...doc, pages: doc.pages.map((p) => (p.id === page.id ? draft : p)) }, { t: 'board', pageId: page.id, changes: out });
+      out.push(...deleteBoardItems(doc, draft, removing));
+    }
+
+    commit(ctx, [{ t: 'board', pageId: page.id, changes: out }]);
+    const after = pageOf(ctx, requireDoc(ctx), page.id);
+    return json({
+      added, updated: changes.filter((c) => c.action === 'update').length, removed: removing,
+      dangling: danglingConnectors(requireDoc(ctx), after),
+      next: 'get_board with image: true to see the result.',
+    });
+  }));
+
+  server.registerTool('write_diagram', {
+    title: 'Write a diagram',
+    description:
+      'Draws a laid-out diagram on the board from Mermaid flowchart syntax, or from nodes and edges. ' +
+      'Supports the four directions, [rect] (rounded) ([stadium]) ((circle)) {diamond}, --> --- -.-> ==>, ' +
+      'labels as -->|label| or -- label -->, chains, & and subgraph … end (drawn as sections). A node can ' +
+      'be a real artboard — "artboard" in the structured form — so a user flow runs between the actual ' +
+      'screens. Placed to the right of everything on the page unless you give x and y. Lines it cannot ' +
+      'read are reported, never silently dropped.',
+    inputSchema: {
+      mermaid: z.string().max(20000).optional(),
+      direction: z.enum(['TB', 'BT', 'LR', 'RL']).optional().describe('For the structured form; Mermaid says its own.'),
+      nodes: z.array(z.object({
+        id: z.string(), label: z.string().max(500),
+        kind: z.enum(['rect', 'ellipse', 'diamond', 'text']).optional(),
+        rounded: z.boolean().optional(),
+        color: Color.optional(),
+        artboard: z.string().optional().describe('Id or name of an artboard to use instead of a new shape.'),
+      })).max(300).optional(),
+      edges: z.array(z.object({
+        from: z.string(), to: z.string(), label: z.string().max(200).optional(),
+        dashed: z.boolean().optional(), arrow: z.enum(['end', 'both', 'none']).optional(),
+      })).max(600).optional(),
+      groups: z.array(z.object({
+        label: z.string().max(200), members: z.array(z.string()), color: Color.optional(),
+      })).max(50).optional(),
+      colors: z.record(z.string(), Color).optional().describe('Mermaid node id → colour, to mark meaning.'),
+      x: z.number().optional(),
+      y: z.number().optional(),
+      replace: z.array(z.string()).optional().describe('Board items to remove first — the ids a previous write_diagram returned.'),
+      arrangeArtboards: z.boolean().optional().default(false).describe(
+        'Move the artboards the diagram names into its layout. Off by default: an artboard is the ' +
+        'person\'s work, and it stays where they put it unless you are asked to arrange the flow.'),
+      pageId: z.string().optional(),
+    },
+  }, async (args) => guard(() => {
+    const doc = requireDoc(ctx);
+    const page = pageOf(ctx, doc, args.pageId);
+    if (!args.mermaid && !args.nodes?.length) throw new Error('Give either mermaid or nodes.');
+
+    let graph: DiagramGraph;
+    let skipped: { line: number; text: string }[] = [];
+    if (args.mermaid) {
+      const parsed = parseMermaid(args.mermaid);
+      graph = parsed.graph;
+      skipped = parsed.skipped;
+      if (!graph.nodes.length) throw new Error(`Nothing in that Mermaid could be read. ${skipped.length} line(s) were not understood — this reads flowchart / graph syntax only.`);
+    } else {
+      graph = {
+        direction: args.direction ?? 'TB',
+        nodes: args.nodes!,
+        edges: args.edges ?? [],
+        groups: (args.groups ?? []).map((g, i) => ({ id: `group${i + 1}`, ...g })),
+      };
+    }
+    for (const n of graph.nodes) {
+      const colour = args.colors?.[n.id];
+      if (colour) n.color = colour;
+    }
+
+    // Out of the way of everything already on the page, unless told where.
+    const replaced = new Set(args.replace ?? []);
+    let origin = args.x !== undefined && args.y !== undefined ? { x: args.x, y: args.y } : null;
+    if (!origin) {
+      let right = -Infinity;
+      let top = Infinity;
+      for (const id of page.artboards) {
+        const n = getNode(doc, id);
+        if (!n) continue;
+        const pos = getArtboardPosition(n);
+        right = Math.max(right, pos.x + getArtboardSize(n).width);
+        top = Math.min(top, pos.y);
+      }
+      for (const item of boardOf(page)) {
+        if (!isShape(item) || replaced.has(item.id)) continue;
+        right = Math.max(right, item.x + item.width);
+        top = Math.min(top, item.y);
+      }
+      origin = Number.isFinite(right) ? { x: Math.round(right + 160), y: Math.round(top) } : { x: 0, y: 0 };
+    }
+
+    const layout = layoutDiagram(graph, {
+      origin,
+      placeArtboards: args.arrangeArtboards,
+      artboards: (ref) => {
+        const found = artboardRef(doc, page, ref);
+        return found ? { id: found.id, ...getArtboardSize(found) } : null;
+      },
+    });
+
+    const existing = new Set(boardOf(page).map((i) => i.id));
+    for (const id of replaced) if (!existing.has(id)) throw new Error(`No board item "${id}" to replace.`);
+    const changes: BoardChange[] = [
+      ...deleteBoardItems(doc, page, [...replaced]),
+      ...layout.items.map((item) => ({ action: 'add' as const, item })),
+    ];
+    const ops: Op[] = [{ t: 'board', pageId: page.id, changes }];
+    // Artboards keep their place unless asked: connectors run to wherever they
+    // are. Arranging them is one more op in the same commit, so it undoes with
+    // the diagram rather than separately.
+    const arranged: string[] = [];
+    if (args.arrangeArtboards) {
+      const updates = Object.entries(layout.placed)
+        .filter(([, end]) => end.kind === 'artboard')
+        .map(([nodeId, end]) => {
+          const box = layout.boxes[nodeId]!;
+          arranged.push((end as { id: string }).id);
+          return { id: (end as { id: string }).id, attrs: { 'data-x': String(box.x), 'data-y': String(box.y) } };
+        });
+      if (updates.length) ops.push({ t: 'attrs', updates });
+    }
+    commit(ctx, ops);
+
+    const usesArtboards = Object.values(layout.placed).some((e) => e.kind === 'artboard');
+    return json({
+      ids: layout.items.map((i) => i.id),
+      ...(arranged.length ? { arranged } : usesArtboards
+        ? { note: 'The artboards stayed where they are and the connectors run to them. Pass arrangeArtboards: true to lay them out as the flow.' }
+        : {}),
+      shapes: Object.fromEntries(Object.entries(layout.placed).map(([k, v]) => [k, v.kind === 'point' ? null : v.id])),
+      bounds: layout.bounds,
+      ...(skipped.length ? { skipped } : {}),
+      ...(layout.problems.length ? { problems: layout.problems } : {}),
+      next: 'get_board with image: true to look at it. To redraw, call write_diagram again with replace: ids.',
+    });
   }));
 }
 

@@ -19,3 +19,5 @@ export * from './align.ts';
 export * from './bundle.ts';
 export * from './spec.ts';
 export * from './diff.ts';
+export * from './board.ts';
+export * from './diagram.ts';

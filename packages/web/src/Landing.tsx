@@ -23,7 +23,7 @@ const POINTS = [
   {
     icon: 'sparkle' as const,
     title: 'Agents edit it over MCP',
-    body: 'Eighty tools — read the tree, write HTML, set tokens, measure the rendered layout, take a screenshot — plus the document itself as resources your agent can read and subscribe to. Claude Code, Codex and Cursor connect with one command.',
+    body: 'Eighty-three tools — read the tree, write HTML, set tokens, measure the rendered layout, take a screenshot, draw a diagram from Mermaid — plus the document itself as resources your agent can read and subscribe to. Claude Code, Codex and Cursor connect with one command.',
   },
   {
     icon: 'component' as const,

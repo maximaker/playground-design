@@ -12,6 +12,11 @@ const TOOLS: { tool: Tool; icon: IconName; key: string; title: string }[] = [
   { tool: 'rect', icon: 'square', key: 'R', title: 'Rectangle' },
   { tool: 'ellipse', icon: 'circle', key: 'O', title: 'Ellipse' },
   { tool: 'image', icon: 'image', key: 'I', title: 'Image' },
+  // The board. Rectangle, ellipse and text above also draw on it when they
+  // are used on empty canvas; these three only ever draw there.
+  { tool: 'diamond', icon: 'diamond', key: 'D', title: 'Diamond — a decision in a diagram' },
+  { tool: 'connector', icon: 'connector', key: 'X', title: 'Connector — drag from one thing to another' },
+  { tool: 'section', icon: 'section', key: '⇧S', title: 'Section — gather part of a diagram, or a set of screens' },
   { tool: 'note', icon: 'note', key: 'N', title: 'Prompt card — leave a note or ask an agent' },
   { tool: 'comment', icon: 'comment', key: 'C', title: 'Comment — say something about the design' },
 ];

@@ -18,6 +18,7 @@ import {
   descendants, isAncestorOf, makeNote, newId, variantKey,
 } from './model.ts';
 import type { CodeComponent } from './code-components.ts';
+import { type BoardChange, applyBoardChanges, BoardError } from './board.ts';
 
 export type Op =
   | { t: 'insert'; nodes: CanvasNode[]; parent: NodeId | null; index: number; page?: string }
@@ -33,6 +34,8 @@ export type Op =
   | { t: 'tokens'; tokens: Token[] }
   | { t: 'page'; action: 'add' | 'remove' | 'rename'; page: Page }
   | { t: 'note'; action: 'add' | 'update' | 'remove'; pageId: string; note: Partial<Note> & { id: string } }
+  /** Diagram items on a page's board; one op per gesture, however many items it moves. */
+  | { t: 'board'; pageId: string; changes: BoardChange[] }
   | { t: 'component'; action: 'add' | 'update' | 'remove'; component: Partial<ComponentDef> & { id: string } }
   | {
       t: 'variant';
@@ -100,6 +103,7 @@ export function applyOp(doc: CanvasDocument, op: Op): Op {
     case 'tokens': return applyTokens(doc, op);
     case 'page': return applyPage(doc, op);
     case 'note': return applyNote(doc, op);
+    case 'board': return applyBoard(doc, op);
     case 'component': return applyComponent(doc, op);
     case 'override': return applyOverride(doc, op);
     case 'variant': return applyVariant(doc, op);
@@ -333,6 +337,22 @@ function applyPage(doc: CanvasDocument, op: Extract<Op, { t: 'page' }>): Op {
   const before = { ...page };
   page.name = op.page.name;
   return { t: 'page', action: 'rename', page: before };
+}
+
+function applyBoard(doc: CanvasDocument, op: Extract<Op, { t: 'board' }>): Op {
+  const page = doc.pages.find((p) => p.id === op.pageId);
+  if (!page) throw new OpError(`page ${op.pageId} not found`);
+  // Applied to a copy first, so a batch that fails halfway leaves the board as
+  // it was rather than half-moved: an op is all or nothing everywhere else.
+  const draft = { ...page, board: structuredClone(page.board ?? []) };
+  try {
+    const inverse = applyBoardChanges(draft, op.changes);
+    page.board = draft.board;
+    return { t: 'board', pageId: op.pageId, changes: inverse };
+  } catch (err) {
+    if (err instanceof BoardError) throw new OpError(err.message);
+    throw err;
+  }
 }
 
 function applyNote(doc: CanvasDocument, op: Extract<Op, { t: 'note' }>): Op {
@@ -707,6 +727,9 @@ export function touchedNodes(op: Op): TouchedNodes {
     // Comments are chrome, not content: they change nothing about how a node
     // renders, so nothing needs re-measuring or re-laying out for them.
     case 'comment':
+    // The board is the same: nothing on it is inside an artboard, so a shape
+    // dragged at sixty frames a second must not restyle every iframe.
+    case 'board':
       return { ...empty };
   }
 }
