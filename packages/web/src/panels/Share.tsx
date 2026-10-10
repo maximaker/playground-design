@@ -16,7 +16,6 @@ import { useCanvas } from '../state/store.ts';
 import { Icon } from '../ui/Icon.tsx';
 import { Modal } from '../ui/Modal.tsx';
 import { People } from './People.tsx';
-import { Publish } from './Publish.tsx';
 
 interface ShareRow {
   token: string;
@@ -99,7 +98,7 @@ export function Share({ onClose }: { onClose: () => void }) {
           )}
 
           <h3 className="share-heading">Publish to the web</h3>
-          <Publish canPublish={myRole === 'owner'} />
+          <p className="panel-hint" style={{ padding: 0 }}>To put the page online for everyone, use <strong>Publish</strong> in the top bar.</p>
 
           <h3 className="share-heading">Anyone with a link</h3>
           <p className="modal-lede">

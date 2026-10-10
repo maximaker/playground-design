@@ -18,6 +18,7 @@ import { HistoryBar } from './ui/HistoryBar.tsx';
 import { Crumbs } from './ui/Crumbs.tsx';
 import { ConnectAgent } from './panels/ConnectAgent.tsx';
 import { Share } from './panels/Share.tsx';
+import { PublishDialog } from './panels/Publish.tsx';
 import { Present } from './Present.tsx';
 import { artboardOf } from '@playground/shared';
 import { Export } from './panels/Export.tsx';
@@ -285,7 +286,17 @@ function Editor({ source, onHome, appearance, onAppearance, session }: {
   // Someone holding a view-only link is there to read the design, not to look at
   // controls they cannot use: the inspector opens on the spec for them.
   const [rightTab, setRightTab] = useState<RightTab>(source.kind === 'share' ? 'spec' : 'properties');
-  const [modal, setModal] = useState<'connect' | 'share' | 'export' | 'import' | 'shortcuts' | null>(null);
+  const [modal, setModal] = useState<'connect' | 'share' | 'publish' | 'export' | 'import' | 'shortcuts' | null>(null);
+  // Whether this document has a live public page, for the dot on Publish.
+  const [isLive, setIsLive] = useState(false);
+  const liveDocId = useCanvas((s) => s.docId);
+  useEffect(() => {
+    if (!liveDocId) return;
+    void fetch(`/api/documents/${liveDocId}/publish`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((b: { publication?: unknown } | null) => setIsLive(!!b?.publication))
+      .catch(() => setIsLive(false));
+  }, [liveDocId]);
   const contextMenu = useCanvas((s) => s.contextMenu) as ContextMenuState | null;
   const setContextMenu = useCanvas((s) => s.openContextMenu);
   const [showSettings, setShowSettings] = useState(false);
@@ -437,6 +448,7 @@ function Editor({ source, onHome, appearance, onAppearance, session }: {
                     { label: 'Redo', icon: 'redo' as IconName, run: () => useCanvas.getState().redo(), disabled: !canRedo },
                     { label: 'Import a webpage', icon: 'download' as IconName, run: () => setModal('import') },
                     { label: 'Share a link', icon: 'share' as IconName, run: () => setModal('share') },
+                    { label: 'Publish', icon: 'link' as IconName, run: () => setModal('publish') },
                   ]),
                   { label: 'Export', icon: 'upload', run: () => setModal('export') },
                   { label: 'Keyboard shortcuts', icon: 'keyboard', run: () => setModal('shortcuts') },
@@ -494,9 +506,17 @@ function Editor({ source, onHome, appearance, onAppearance, session }: {
               <Icon name="share" size={14} />
               <span className="button-label">Share</span>
             </button>
-            <button className="button primary" onClick={() => setModal('connect')} title="Connect an agent">
+            <button className="button" onClick={() => setModal('connect')} title="Let an AI agent such as Claude work on this page">
               <Icon name="sparkle" size={14} />
               <span className="button-label">Connect agent</span>
+            </button>
+            <button
+              className="button primary"
+              onClick={() => setModal('publish')}
+              title={isLive ? 'Your page is online — see the link' : 'Put this page online'}
+            >
+              {isLive ? <span className="live-dot" aria-hidden /> : <Icon name="link" size={14} />}
+              <span className="button-label">{isLive ? 'Live' : 'Publish'}</span>
             </button>
           </>
         )}
@@ -682,6 +702,7 @@ function Editor({ source, onHome, appearance, onAppearance, session }: {
 
       {modal === 'connect' && <ConnectAgent onClose={() => setModal(null)} />}
       {modal === 'share' && <Share onClose={() => setModal(null)} />}
+      {modal === 'publish' && <PublishDialog onClose={() => setModal(null)} onChange={(p) => setIsLive(!!p)} />}
 
       {/* Over everything, including the modals: presenting is the whole window. */}
       <Present />
