@@ -10,6 +10,10 @@ export default defineConfig({
     proxy: {
       '/api': { target: API, changeOrigin: true },
       '/assets': { target: API, changeOrigin: true },
+      // Published pages and the MCP endpoint are served by the API server; the
+      // links it hands out point here in dev, so they must pass through too.
+      '^/p/': { target: API, changeOrigin: true },
+      '^/mcp/': { target: API, changeOrigin: true },
       '/ws': { target: API.replace('http', 'ws'), ws: true },
     },
   },
