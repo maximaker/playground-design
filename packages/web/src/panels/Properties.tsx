@@ -6,7 +6,7 @@
  * anything else silently loses edits.
  */
 
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import {
   type Breakpoint, type CanvasNode, type ComponentDef, type NodeId, type StyleMap,
   breakpointSelector, breakpointsOf, maxWidthOf, resolvedProps,
@@ -58,6 +58,7 @@ export function Properties() {
   // there was no way back to the component from the thing it made.
   const isInstance = nodes.length === 1 && nodes[0]?.type === 'instance';
   const readOnly = useCanvas((s) => s.readOnly);
+  const [simple, setSimple] = useSimpleMode();
   const boardSelected = useCanvas((s) => s.boardSelection.length > 0);
 
   // A single selected instance gets its variant switcher.
@@ -164,6 +165,13 @@ export function Properties() {
           <span className="prop-type">{nodes.length === 1 ? `${first.type} · ${first.tag}` : 'multiple'}</span>
         </div>
       </div>
+
+      <div className="segmented panel-mode" role="radiogroup" aria-label="How many controls to show">
+        <button role="radio" aria-checked={simple} className={simple ? 'is-active' : ''} onClick={() => setSimple(true)}>Simple</button>
+        <button role="radio" aria-checked={!simple} className={!simple ? 'is-active' : ''} onClick={() => setSimple(false)}>All controls</button>
+      </div>
+
+      {simple ? <SimpleEdit read={read} set={set} isText={allText} tokens={tokens} /> : <>
 
       {(insideInstance || isInstance) && (
         <div className="instance-banner">
@@ -675,6 +683,7 @@ export function Properties() {
       </Section>
 
       <RawCss nodes={nodes} keys={selection} activeVariant={activeVariant} />
+      </>}
     </div>
   );
 }
@@ -886,3 +895,88 @@ const TAG_OPTIONS = [
   'p', 'span', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
   'a', 'button', 'ul', 'ol', 'li', 'label', 'strong', 'em', 'code', 'blockquote', 'img',
 ].map((v) => ({ value: v, label: v }));
+
+/**
+ * Simple or all controls, remembered per browser. Simple is the default: most
+ * people want to change words, colours and sizes, and forty fields of CSS
+ * between them and that is the main thing that makes the tool feel technical.
+ */
+function useSimpleMode(): [boolean, (v: boolean) => void] {
+  const [simple, setState] = useState(() => {
+    try { return localStorage.getItem('playground.panel') !== 'all'; } catch { return true; }
+  });
+  const set = (v: boolean) => {
+    setState(v);
+    try { localStorage.setItem('playground.panel', v ? 'simple' : 'all'); } catch { /* private window */ }
+  };
+  return [simple, set];
+}
+
+const px = (v: string) => (v === MIXED ? MIXED : String(parseFloat(v) || 0));
+
+/** The handful of controls people reach for, in plain words. */
+function SimpleEdit({ read, set, isText, tokens }: {
+  read: (prop: string) => string;
+  set: (prop: string) => (value: string, opts?: { coalesce?: string }) => void;
+  isText: boolean;
+  tokens: Parameters<typeof ColorInput>[0]['tokens'];
+}) {
+  return (
+    <div className="simple-edit">
+      {isText && (
+        <Section title="Text">
+          <Row>
+            <Field label="Size" prop="font-size">
+              <NumberInput value={read('font-size')} onCommit={set('font-size')} min={1} />
+            </Field>
+            <Field label="Weight" prop="font-weight">
+              <Select
+                value={read('font-weight') || '400'}
+                options={[['300', 'Light'], ['400', 'Regular'], ['500', 'Medium'], ['600', 'Semibold'], ['700', 'Bold'], ['800', 'Extra bold']]
+                  .map(([value, label]) => ({ value: value!, label: label! }))}
+                onCommit={set('font-weight')}
+              />
+            </Field>
+          </Row>
+          <Row>
+            <Field label="Colour" prop="color" wide>
+              <ColorInput value={read('color')} onCommit={set('color')} tokens={tokens} />
+            </Field>
+          </Row>
+          <Row>
+            <Field label="Align" prop="text-align" wide>
+              <SegmentedControl
+                value={read('text-align') || 'left'}
+                options={[
+                  { value: 'left', label: <Icon name="textLeft" size={13} />, title: 'Left' },
+                  { value: 'center', label: <Icon name="textCenter" size={13} />, title: 'Centre' },
+                  { value: 'right', label: <Icon name="textRight" size={13} />, title: 'Right' },
+                ]}
+                onCommit={set('text-align')}
+              />
+            </Field>
+          </Row>
+          <p className="panel-hint simple-tip">Double-click the text on the page to change the words.</p>
+        </Section>
+      )}
+      <Section title={isText ? 'Box' : 'Look'}>
+        <Row>
+          <Field label="Background" prop="background-color" wide>
+            <ColorInput value={read('background-color')} onCommit={set('background-color')} tokens={tokens} />
+          </Field>
+        </Row>
+        <Row>
+          <Field label="Rounded corners" prop="border-radius" wide>
+            <NumberInput value={px(read('border-radius'))} onCommit={set('border-radius')} min={0} />
+          </Field>
+        </Row>
+        <Row>
+          <Field label="Space inside" prop="padding" wide>
+            <NumberInput value={px(read('padding'))} onCommit={set('padding')} min={0} />
+          </Field>
+        </Row>
+      </Section>
+      <p className="panel-hint simple-tip">Need layout, sizes or hover effects? Switch to <strong>All controls</strong>.</p>
+    </div>
+  );
+}

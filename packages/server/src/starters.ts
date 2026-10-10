@@ -33,7 +33,7 @@ const KIT_FONTS: Record<string, Fonts> = {
 export const DEFAULT_STYLE = 'clean';
 
 const base = (f: Fonts) => `
-  .pg { display:flex; flex-direction:column; width:100%; flex:1 1 auto; min-height:100%; background:var(--color-bg);
+  .page { display:flex; flex-direction:column; width:100%; flex:1 1 auto; min-height:100%; background:var(--color-bg);
         color:var(--color-fg); font-family:${f.body}; }
   .wrap { display:flex; flex-direction:column; gap:24px; padding:96px 120px; }
   .nav { display:flex; flex-direction:row; justify-content:space-between; align-items:center; padding:28px 120px; }
@@ -76,7 +76,7 @@ export const STARTERS: Starter[] = [
           background:var(--color-surface); text-align:center; }
   @media (max-width: 760px) { .hero { flex-direction:column; padding:32px 24px 56px; } .hero .img { width:100%; height:240px; } .band { padding:56px 24px; } }
 </style>
-<div class="pg">
+<div class="page">
   <nav class="nav"><span class="brand">Northwind</span><div class="links"><span>Features</span><span>Pricing</span><span>About</span></div></nav>
   <section class="hero">
     <div class="hero-text">
@@ -117,7 +117,7 @@ export const STARTERS: Starter[] = [
   .about .img { width:320px; height:320px; flex:0 0 auto; border-radius:999px; }
   @media (max-width: 760px) { .about { flex-direction:column; align-items:flex-start; } .about .img { width:180px; height:180px; } .piece .img { height:220px; } }
 </style>
-<div class="pg">
+<div class="page">
   <nav class="nav"><span class="brand">Ana Popescu</span><div class="links"><span>Work</span><span>About</span><span>Contact</span></div></nav>
   <section class="wrap">
     <span class="eyebrow">Illustrator &amp; designer</span>
@@ -160,7 +160,7 @@ export const STARTERS: Starter[] = [
   .slot { display:flex; flex-direction:row; gap:32px; padding:20px 0; border-bottom:1px solid var(--color-border); }
   .slot .time { width:96px; flex:0 0 auto; font-weight:600; color:var(--color-brand); }
 </style>
-<div class="pg">
+<div class="page">
   <section class="wrap">
     <span class="eyebrow">Saturday · 14 March</span>
     <h1 class="h1">Spring Pottery Workshop</h1>
@@ -200,7 +200,7 @@ export const STARTERS: Starter[] = [
           font-size:16px; font-weight:600; text-decoration:none; }
   .link-main { background:var(--color-brand); color:var(--color-on-brand); border-color:transparent; }
 </style>
-<div class="pg">
+<div class="page">
   <section class="bio">
     <div class="avatar"></div>
     <h1 class="h2">Mara Ionescu</h1>
