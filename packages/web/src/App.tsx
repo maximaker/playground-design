@@ -58,17 +58,17 @@ type LeftTab = 'layers' | 'pages' | 'components' | 'tokens';
 type RightTab = 'properties' | 'spec' | 'comments' | 'review';
 
 const RIGHT_TABS: { id: RightTab; icon: IconName; label: string; hint: string }[] = [
-  { id: 'properties', icon: 'sliders', label: 'Design', hint: 'Edit the selected layer' },
+  { id: 'properties', icon: 'sliders', label: 'Design', hint: 'Change what you selected' },
   { id: 'spec', icon: 'ruler', label: 'Spec', hint: 'Measured size, tokens, notes and code to paste' },
   { id: 'comments', icon: 'comment', label: 'Comments', hint: 'The conversation about this design' },
-  { id: 'review', icon: 'check', label: 'Review', hint: 'Contrast, tap targets, tokens and layout' },
+  { id: 'review', icon: 'check', label: 'Check', hint: 'Find readability, tap-size and layout problems' },
 ];
 
 const LEFT_TABS: { id: LeftTab; icon: IconName; label: string; hint: string }[] = [
   { id: 'layers', icon: 'layers', label: 'Layers', hint: 'The structure of this page' },
   { id: 'pages', icon: 'page', label: 'Pages', hint: 'Pages in this document' },
   { id: 'components', icon: 'component', label: 'Components', hint: 'Reusable components and their variants' },
-  { id: 'tokens', icon: 'palette', label: 'Tokens', hint: 'Design tokens and themes' },
+  { id: 'tokens', icon: 'palette', label: 'Styles', hint: 'Colours, sizes and themes the whole page shares (design tokens)' },
 ];
 
 export function App() {
@@ -568,6 +568,7 @@ function Editor({ source, onHome, appearance, onAppearance, session }: {
                 aria-pressed={leftTab === t.id}
               >
                 <Icon name={t.icon} size={15} />
+                <span className="rail-tab-label">{t.label}</span>
               </button>
             ))}
           </nav>
@@ -640,6 +641,7 @@ function Editor({ source, onHome, appearance, onAppearance, session }: {
                 aria-pressed={rightTab === t.id}
               >
                 <Icon name={t.icon} size={15} />
+                <span className="rail-tab-label">{t.label}</span>
               </button>
             ))}
           </nav>

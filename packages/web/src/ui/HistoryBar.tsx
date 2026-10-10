@@ -238,7 +238,7 @@ export function HistoryBar() {
                   {' · '}{relative(latest.ts)}
                 </span>
               </>
-            : <span className="dim">No changes yet</span>}
+            : <span className="dim">Nothing changed yet — everything is saved as you go</span>}
         </span>
         {changes && !changes.same && (
           <span className="history-bar-badge">

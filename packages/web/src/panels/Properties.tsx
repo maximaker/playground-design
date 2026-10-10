@@ -82,12 +82,12 @@ export function Properties() {
     return (
       <div className="properties">
         <p className="panel-empty">
-          Select something on the canvas.<br />
+          Click anything on the page to change it.<br />
           <span className="dim">
             {readOnly
               // Telling a viewer to press F would be an invitation to a refusal.
               ? 'You have a view-only link: everything here is readable, nothing is editable.'
-              : <>Or press <kbd>F</kbd> to draw a frame, <kbd>T</kbd> for text.</>}
+              : <>Double-click text to rewrite it. To add something new, press <kbd>T</kbd> for text or <kbd>F</kbd> for a box.</>}
           </span>
         </p>
       </div>
