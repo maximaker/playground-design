@@ -19,6 +19,7 @@ import { Crumbs } from './ui/Crumbs.tsx';
 import { ConnectAgent } from './panels/ConnectAgent.tsx';
 import { Share } from './panels/Share.tsx';
 import { PublishDialog } from './panels/Publish.tsx';
+import { FirstRunTips } from './ui/FirstRunTips.tsx';
 import { Present } from './Present.tsx';
 import { artboardOf } from '@playground/shared';
 import { Export } from './panels/Export.tsx';
@@ -613,6 +614,7 @@ function Editor({ source, onHome, appearance, onAppearance, session }: {
 
         <main className="stage">
           <Canvas onContextMenu={setContextMenu} />
+          {!readOnly && <FirstRunTips />}
 
           {/*
             * One stack along the bottom, rather than three things each pinned at

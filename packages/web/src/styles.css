@@ -3273,3 +3273,15 @@ code { font-family: var(--mono); font-size: 0.92em; }
 .save-state { display: inline-flex; align-items: center; gap: 0.25rem; margin-left: auto; margin-right: var(--s2); font-size: 0.75rem; color: var(--fg-muted); white-space: nowrap; }
 .save-state.is-open { color: var(--accent); }
 .save-state.is-closed { color: var(--warning, #d97706); }
+
+/* --- First-run tips ------------------------------------------------------------ */
+.first-run {
+  position: absolute; top: var(--s4); left: 50%; transform: translateX(-50%); z-index: 30;
+  width: min(22rem, calc(100% - 2rem)); display: flex; flex-direction: column; gap: var(--s2);
+  padding: var(--s4); border-radius: var(--radius-lg);
+  background: var(--bg-panel); border: 1px solid var(--border); box-shadow: 0 16px 40px rgba(0,0,0,.28);
+}
+.first-run-head { display: flex; justify-content: space-between; align-items: center; font-size: 0.75rem; }
+.first-run strong { font-size: 0.98rem; }
+.first-run p { margin: 0; font-size: 0.86rem; line-height: 1.5; color: var(--fg-muted); }
+.first-run-actions { display: flex; justify-content: flex-end; gap: var(--s2); margin-top: var(--s2); }
