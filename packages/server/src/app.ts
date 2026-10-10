@@ -38,6 +38,7 @@ import {
 import { importUrl, ImportError } from './import.ts';
 import { freeSlug, pageArtboard, publishedHtml, slugify } from './publish.ts';
 import { getTemplate, templateSummaries, type Template } from './templates.ts';
+import { DEFAULT_STYLE, getStarter, starterHtml, starterSummaries, STARTERS } from './starters.ts';
 import { RENDERER_VERSION, renderNode, renderThumbnail } from './render.ts';
 import { persistence, type MemberRole } from './persistence.ts';
 import {
@@ -381,9 +382,10 @@ api.get('/documents', async (c) => {
 });
 
 api.get('/templates', (c) => c.json({ templates: templateSummaries() }));
+api.get('/starters', (c) => c.json({ starters: starterSummaries(c.req.query('style') || DEFAULT_STYLE) }));
 
 api.post('/documents', async (c) => {
-  type NewDoc = { name?: string; html?: string; template?: string; projectId?: string; width?: number; height?: number };
+  type NewDoc = { name?: string; html?: string; template?: string; starter?: string; projectId?: string; width?: number; height?: number };
   const body = await c.req.json<NewDoc>().catch(() => ({} as NewDoc));
 
   const template = body.template ? getTemplate(body.template) : undefined;
@@ -391,7 +393,12 @@ api.post('/documents', async (c) => {
     return c.json({ error: `No template "${body.template}". Available: ${templateSummaries().map((t) => t.id).join(', ')}` }, 400);
   }
 
-  const doc = await createDocument(body.name?.trim() || template?.name || 'Untitled');
+  const starter = body.starter ? getStarter(body.starter) : undefined;
+  if (body.starter && !starter) {
+    return c.json({ error: `No starter "${body.starter}". Available: ${STARTERS.map((s) => s.id).join(', ')}` }, 400);
+  }
+
+  const doc = await createDocument(body.name?.trim() || starter?.name || template?.name || 'Untitled');
   // Whoever creates it owns it. Without this the creator is a member of nothing
   // and the document is one of the "unowned" ones any signed-in user can open.
   await grant(doc.id, c.get('user')!.id, 'owner');
@@ -405,7 +412,19 @@ api.post('/documents', async (c) => {
   // A brand new document has only the seeded defaults, and the kit is the whole
   // point of choosing it — so it replaces them outright rather than losing every
   // colour to a name collision.
-  if (template) applyTemplate(doc.id, template, { replaceTokens: true });
+  // A starter is a page, so it fills the document's first frame — opening on
+  // an empty frame is the thing it exists to avoid. Its kit brings tokens only;
+  // the foundations sheet is for people who asked for a design system.
+  if (starter) {
+    const kit = template ?? getTemplate(DEFAULT_STYLE)!;
+    applyTemplate(doc.id, kit, { replaceTokens: true, tokensOnly: true });
+    const artboard = doc.pages[0]!.artboards[0]!;
+    applyOps(doc.id, [
+      { op: { t: 'rename', updates: [{ id: artboard, name: starter.name }] }, origin: { kind: 'system', id: 'starter' } },
+      { op: { t: 'styles', updates: [{ id: artboard, styles: { width: '1440px', height: `${starter.height}px` } }] }, origin: { kind: 'system', id: 'starter' } },
+      { op: { t: 'insert', nodes: parseHtml(starterHtml(starter, kit.id)).nodes, parent: artboard, index: 0 }, origin: { kind: 'system', id: 'starter', label: starter.name } },
+    ]);
+  } else if (template) applyTemplate(doc.id, template, { replaceTokens: true });
 
   // Seeding from HTML at creation time is what makes fully headless agent
   // sessions practical: create a document with content in one call.
@@ -451,7 +470,7 @@ api.post('/documents/:id/template', async (c) => {
 function applyTemplate(
   docId: string,
   template: Template,
-  opts: { replaceTokens?: boolean } = {},
+  opts: { replaceTokens?: boolean; tokensOnly?: boolean } = {},
 ): { artboards: string[]; tokensAdded: string[]; tokensSkipped: string[] } {
   const doc = getDocument(docId)!;
   const page = doc.pages[0]!;
@@ -469,7 +488,7 @@ function applyTemplate(
   applyOps(docId, [{ op: { t: 'tokens', tokens: [...existing.values()] }, origin: { kind: 'system', id: 'template' } }]);
 
   const created: string[] = [];
-  for (const spec of template.artboards) {
+  for (const spec of opts.tokensOnly ? [] : template.artboards) {
     const artboard = makeNode({
       type: 'artboard',
       name: `${template.name} — ${spec.name}`,

@@ -11,7 +11,7 @@
  * until you try it, and impossible with a keyboard.
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Logo } from './ui/Logo.tsx';
 import { Icon } from './ui/Icon.tsx';
 import { Settings } from './ui/Settings.tsx';
@@ -36,6 +36,7 @@ const SORTS: { id: Sort; label: string }[] = [
 ];
 interface Project { id: string; name: string; createdAt: number; documentCount: number }
 interface TemplateSummary { id: string; name: string; description: string; tokenCount: number }
+interface StarterSummary { id: string; name: string; description: string; preview: string }
 
 /** `null` is everything; `'unfiled'` is everything with no project. */
 type Filter = string | null | 'unfiled';
@@ -50,6 +51,8 @@ export function Home({ onOpen, appearance, onAppearance, session }: {
   const [docs, setDocs] = useState<DocSummary[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [templates, setTemplates] = useState<TemplateSummary[]>([]);
+  const [starters, setStarters] = useState<StarterSummary[]>([]);
+  const [style, setStyle] = useState('clean');
   const [filter, setFilter] = useState<Filter>(null);
   const [creating, setCreating] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -112,6 +115,14 @@ export function Home({ onOpen, appearance, onAppearance, session }: {
       .catch(() => setTemplates([]));
   }, []);
 
+  // Previews follow the chosen style, so what you click is what opens.
+  useEffect(() => {
+    void fetch(`/api/starters?style=${encodeURIComponent(style)}`)
+      .then((r) => r.json() as Promise<{ starters: StarterSummary[] }>)
+      .then((b) => setStarters(b.starters))
+      .catch(() => setStarters([]));
+  }, [style]);
+
   const shown = useMemo(() => {
     const inScope = filter === null ? docs
       : filter === 'unfiled' ? docs.filter((d) => !d.projectId)
@@ -127,7 +138,7 @@ export function Home({ onOpen, appearance, onAppearance, session }: {
 
   const unfiled = docs.filter((d) => !d.projectId).length;
 
-  const create = async (template?: string) => {
+  const create = async (template?: string, starter?: string) => {
     setCreating(true);
     try {
       const res = await fetch('/api/documents', {
@@ -135,6 +146,7 @@ export function Home({ onOpen, appearance, onAppearance, session }: {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
           ...(template ? { template } : { name: 'Untitled' }),
+          ...(starter ? { starter } : {}),
           // A document made while a project is open belongs in it.
           ...(typeof filter === 'string' && filter !== 'unfiled' ? { projectId: filter } : {}),
         }),
@@ -254,11 +266,11 @@ export function Home({ onOpen, appearance, onAppearance, session }: {
       <header className="home-head">
         <div className="home-identity">
           <h1><Logo size={30} /></h1>
-          <p>Documents that are real HTML and CSS — and that agents can edit with you.</p>
+          <p>Design a page and put it online — on your own, or with an AI agent helping.</p>
         </div>
         <div className="home-actions">
-          <button className="button primary" onClick={() => void create()} disabled={creating}>
-            <Icon name="plus" size={14} /> Blank document
+          <button className="button" onClick={() => void create()} disabled={creating}>
+            <Icon name="plus" size={14} /> Blank page
           </button>
 
           {/*
@@ -298,34 +310,74 @@ export function Home({ onOpen, appearance, onAppearance, session }: {
         </div>
       </header>
 
-      {templates.length > 0 && (
-        <section className="starters">
-          <div className="starters-head">
-            <h2>Start from a design system</h2>
+      <section className="makers" aria-labelledby="makers-title">
+        <div className="makers-head">
+          <div>
+            <h2 id="makers-title">What are you making?</h2>
+            <p className="dim">Pick a starting point. Every word, picture and colour can be changed.</p>
+          </div>
+          {templates.length > 0 && (
+            <div className="style-picker" role="radiogroup" aria-label="Style">
+              <span className="dim">Style</span>
+              {templates.map((t) => (
+                <button
+                  key={t.id}
+                  role="radio"
+                  aria-checked={style === t.id}
+                  className={`style-chip starter-${t.id}${style === t.id ? ' is-active' : ''}`}
+                  onClick={() => setStyle(t.id)}
+                  title={t.description}
+                >
+                  <span className="starter-swatches" aria-hidden />
+                  {t.name}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+        <div className="maker-grid">
+          {starters.map((s) => (
+            <button
+              key={s.id}
+              className="maker"
+              onClick={() => void create(style, s.id)}
+              disabled={creating}
+            >
+              <MakerPreview html={s.preview} />
+              <span className="maker-text">
+                <strong>{s.name}</strong>
+                <span className="dim">{s.description}</span>
+              </span>
+            </button>
+          ))}
+        </div>
+        {templates.length > 0 && (
+          <details className="makers-more">
+            <summary>For designers: start from a design system instead</summary>
             <p className="dim">
               Each kit sets up tokens and a foundations sheet, so you — and any agent you
               connect — have real variables to reference instead of inventing hex codes.
             </p>
-          </div>
-          <div className="starter-row">
-            {templates.map((t) => (
-              <button
-                key={t.id}
-                className={`starter starter-${t.id}`}
-                onClick={() => void create(t.id)}
-                disabled={creating}
-                title={t.description}
-              >
-                <span className="starter-swatches" aria-hidden />
-                <span className="starter-text">
-                  <strong>{t.name}</strong>
-                  <span className="dim">{t.description}</span>
-                </span>
-              </button>
-            ))}
-          </div>
-        </section>
-      )}
+            <div className="starter-row">
+              {templates.map((t) => (
+                <button
+                  key={t.id}
+                  className={`starter starter-${t.id}`}
+                  onClick={() => void create(t.id)}
+                  disabled={creating}
+                  title={t.description}
+                >
+                  <span className="starter-swatches" aria-hidden />
+                  <span className="starter-text">
+                    <strong>{t.name}</strong>
+                    <span className="dim">{t.description}</span>
+                  </span>
+                </button>
+              ))}
+            </div>
+          </details>
+        )}
+      </section>
 
       {error && (
         <p className="home-error">
@@ -580,4 +632,25 @@ function relativeTime(ts: number): string {
   if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)} h ago`;
   if (diff < 7 * 86_400_000) return `${Math.floor(diff / 86_400_000)} d ago`;
   return new Date(ts).toLocaleDateString();
+}
+
+/**
+ * A starter, drawn at the 1440px it was written for and scaled to the card —
+ * a real render of the page rather than an illustration of one.
+ */
+function MakerPreview({ html }: { html: string }) {
+  const box = useRef<HTMLSpanElement>(null);
+  const [scale, setScale] = useState(0.2);
+  useEffect(() => {
+    const el = box.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => setScale(el.clientWidth / 1440));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  return (
+    <span className="maker-preview" ref={box} aria-hidden>
+      <iframe title="" srcDoc={html} tabIndex={-1} sandbox="" style={{ transform: `scale(${scale})` }} />
+    </span>
+  );
 }

@@ -1296,6 +1296,56 @@ code { font-family: var(--mono); font-size: 0.92em; }
 .starter-brutal .starter-swatches { background: linear-gradient(90deg,#dc2626 0 30%,#000 30% 55%,#3f3f46 55% 75%,#fefce8 75% 100%); }
 .starter-soft .starter-swatches { background: linear-gradient(90deg,#9333ea 0 30%,#3b0764 30% 55%,#7e5a95 55% 75%,#fdf4ff 75% 100%); }
 
+/* --- What are you making? ---------------------------------------------------
+ *
+ * The first thing on the home screen: finished pages to start from, drawn for
+ * real in the chosen style. The design-system kits sit behind a disclosure —
+ * they are a designer's starting point, not everyone's.
+ */
+.makers {
+  grid-column: 1 / -1; display: flex; flex-direction: column; gap: var(--s5);
+  padding-bottom: 2.4rem; border-bottom: 1px solid var(--border);
+}
+.makers-head { display: flex; justify-content: space-between; align-items: flex-end; gap: var(--s5); flex-wrap: wrap; }
+.makers-head h2 { margin: 0 0 0.25rem; font-size: 1.25rem; font-weight: 600; letter-spacing: -0.01em; }
+.makers-head p { margin: 0; font-size: 0.9rem; }
+.style-picker { display: flex; align-items: center; gap: var(--s2); flex-wrap: wrap; }
+.style-picker > .dim { font-size: 0.8rem; margin-right: var(--s1); }
+.style-chip {
+  display: inline-flex; align-items: center; gap: var(--s2);
+  padding: 0.3rem 0.7rem 0.3rem 0.35rem; border-radius: var(--radius-pill);
+  background: var(--bg-raised); border: 1px solid var(--border); color: var(--fg);
+  font-size: 0.82rem; cursor: pointer;
+}
+.style-chip .starter-swatches { width: 1.3rem; height: 1.3rem; border-radius: var(--radius-pill); }
+.style-chip:hover { border-color: var(--border-strong); }
+.style-chip.is-active { border-color: var(--fg); box-shadow: 0 0 0 1px var(--fg); }
+.maker-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr)); gap: var(--s4); }
+.maker {
+  display: flex; flex-direction: column; text-align: left; padding: 0; overflow: hidden;
+  border-radius: var(--radius-lg); background: var(--bg-raised); border: 1px solid var(--border);
+  color: var(--fg); cursor: pointer;
+  transition: transform 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
+}
+.maker:hover:not(:disabled) { transform: translateY(-2px); border-color: var(--border-strong); box-shadow: 0 10px 28px rgba(0,0,0,.14); }
+.maker:disabled { opacity: .5; }
+.maker-preview {
+  display: block; position: relative; aspect-ratio: 4 / 3; overflow: hidden;
+  border-bottom: 1px solid var(--border); background: var(--bg-plate);
+}
+.maker-preview iframe {
+  position: absolute; top: 0; left: 0; width: 1440px; height: 1080px; border: 0;
+  transform-origin: 0 0; pointer-events: none;
+}
+.maker-text { display: flex; flex-direction: column; gap: 0.2rem; padding: var(--s4); }
+.maker-text strong { font-size: 0.95rem; }
+.maker-text .dim { font-size: 0.82rem; line-height: 1.45; }
+.makers-more summary { cursor: pointer; font-size: 0.85rem; color: var(--fg-muted); width: fit-content; }
+.makers-more[open] summary { margin-bottom: var(--s3); }
+.makers-more > p { margin: 0 0 var(--s4); font-size: 0.85rem; max-width: 46rem; line-height: 1.55; }
+.makers-more .starter-row { display: grid; grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr)); gap: var(--s3); }
+.makers-more .starter { grid-column: auto; }
+
 /* --- Documents -------------------------------------------------------------- */
 .home-section-title { margin: 0; font-size: 1.25rem; font-weight: 600; letter-spacing: -0.01em; }
 .home-grid { display: grid; grid-template-columns: subgrid; grid-column: 1 / -1; row-gap: var(--s4); }
