@@ -509,7 +509,7 @@ function Editor({ source, onHome, appearance, onAppearance, session }: {
             </button>
             <button className="button" onClick={() => setModal('connect')} title="Let an AI agent such as Claude work on this page">
               <Icon name="sparkle" size={14} />
-              <span className="button-label">Connect agent</span>
+              <span className="button-label">AI assistant</span>
             </button>
             <button
               className="button primary"
