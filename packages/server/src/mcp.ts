@@ -31,6 +31,7 @@ import {
   type BoardChange, type BoardColor, type Endpoint, type DiagramGraph,
   BOARD_COLOR_NAMES, boardBounds, boardOf, danglingConnectors, deleteBoardItems, emitBoardSvg, isShape,
   layoutDiagram, makeBoardShape, makeConnector, parseMermaid, routeConnector,
+  artifactoryEmbedUrl,
 } from '@playground/shared';
 import {
   applyOps, getDocument, getSnapshot, listSnapshots, StoreError, createSnapshot,
@@ -1342,6 +1343,63 @@ function registerWriteTools(server: McpServer, ctx: McpContext): void {
         'No browser on this host, so this is a static fetch: utility classes and anything a script draws are missing.'],
     });
   }
+
+  server.registerTool('embed_artifact', {
+    title: 'Embed an Artifactory artifact',
+    description:
+      'Places a live, read-only Artifactory artifact (persona, journey map, …) on the canvas from its share link (https://…/#/s/<slug>). By default it gets its own artboard to the right of the existing ones, so research sits beside the screens it informs; pass targetId to put it inside an existing frame instead. The embed always shows the current published version.',
+    inputSchema: {
+      url: z.string().describe('Artifactory share link, e.g. https://artifactory.example.com/#/s/abc123. A bare slug works when ARTIFACTORY_URL is set on the server.'),
+      targetId: z.string().optional().describe('Frame or artboard to insert into. Omit for a new artboard.'),
+      name: z.string().optional(),
+      width: z.number().min(160).max(4000).optional().default(1200),
+      height: z.number().min(120).max(8000).optional().default(900),
+      pageId: z.string().optional(),
+    },
+    annotations: { destructiveHint: false },
+  }, async ({ url, targetId, name, width, height, pageId }) => guard(() => {
+    const doc = requireDoc(ctx);
+    const src = artifactoryEmbedUrl(url, process.env.ARTIFACTORY_URL);
+    if (!src) return fail(`"${url}" is not an Artifactory share link. Copy it from Share in Artifactory — it looks like https://…/#/s/<slug>.`);
+
+    // The frame is read-only, and an iframe swallows pointer events — without
+    // this the canvas could never select or move it.
+    const embed = makeNode({
+      type: 'embed',
+      name: name ?? 'Artifact',
+      attrs: { src, title: name ?? 'Artifactory artifact', loading: 'lazy', 'data-artifactory': 'true' },
+      styles: { width: '100%', height: '100%', border: '0', display: 'block', 'pointer-events': 'none' },
+    });
+
+    if (targetId) {
+      const target = node(doc, targetId);
+      embed.styles = { ...embed.styles, width: `${width}px`, height: `${height}px` };
+      commit(ctx, [{ t: 'insert', nodes: [embed], parent: target.id, index: target.children.length }]);
+      return json({ id: embed.id, parent: target.id, src });
+    }
+
+    const page = pageOf(ctx, doc, pageId);
+    let maxRight = 0, topY = 0;
+    for (const id of page.artboards) {
+      const n = doc.nodes[id];
+      if (!n) continue;
+      const pos = getArtboardPosition(n);
+      const size = getArtboardSize(n);
+      maxRight = Math.max(maxRight, pos.x + size.width);
+      topY = Math.min(topY, pos.y);
+    }
+    const x = page.artboards.length ? maxRight + 120 : 0;
+    const artboard = makeNode({
+      type: 'artboard',
+      name: name ?? 'Artifact',
+      styles: { ...DEFAULT_ARTBOARD_STYLES, width: `${width}px`, height: `${height}px`, padding: '0' },
+      attrs: { 'data-x': String(x), 'data-y': String(topY) },
+      children: [embed.id],
+    });
+    embed.parent = artboard.id;
+    commit(ctx, [{ t: 'insert', nodes: [artboard, embed], parent: null, index: page.artboards.length, page: page.id }]);
+    return json({ id: embed.id, artboardId: artboard.id, src, x, y: topY, width, height });
+  }));
 
   server.registerTool('write_html', {
     title: 'Write HTML into the document',

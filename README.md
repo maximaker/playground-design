@@ -120,6 +120,18 @@ Most tools run against the server's copy of the document, so they work with **no
 — an agent can create a document, build in it, render it, and hand back a URL. Only the tools that
 need a real layout engine reach into a connected tab, and they say so plainly when there isn't one.
 
+**Artifactory**
+
+| Tool | What it does |
+|---|---|
+| `embed_artifact` | Places a live, read-only [Artifactory](https://github.com/maximaker/ux-artifact-studio) artifact (persona, journey map, …) from its share link, on its own artboard beside the screens or inside a given frame. The link is rewritten to Artifactory's chrome-less `#/e/<slug>` view; set `ARTIFACTORY_URL` to accept bare slugs |
+
+The other direction is Artifactory's **Open in Playground**, which posts a static
+HTML render of an artifact to `POST /api/documents`. That endpoint also takes
+`width` and `height` to size the first artboard to the content. In dev, the Vite
+server leaves CORS to the API (`cors: false`) so the credentialed preflight from
+Artifactory's origin gets an answer that allows the session cookie.
+
 **Prompt cards**
 
 | Tool | What it does |

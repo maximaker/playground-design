@@ -7,6 +7,9 @@ export default defineConfig({
   plugins: [react()],
   server: {
     port: 5173,
+    // The API answers CORS itself, with credentials, for Artifactory's "Open in
+    // Playground". Vite's own handler would answer the preflight first, without.
+    cors: false,
     proxy: {
       '/api': { target: API, changeOrigin: true },
       '/assets': { target: API, changeOrigin: true },

@@ -617,3 +617,36 @@ test('unregistering refuses while instances are still placed', async () => {
   assert.ok(forced.instancesRemoved >= 1);
   assert.equal(getDocument(docId)!.codeComponents!.Button, undefined);
 });
+
+test('embed_artifact places an Artifactory share link on its own artboard', async () => {
+  const placed = jsonOf<{ id: string; artboardId: string; src: string }>(await client.callTool({
+    name: 'embed_artifact', arguments: { url: 'https://art.example.com/#/s/abc123', name: 'Persona', width: 900, height: 700 },
+  }));
+  assert.equal(placed.src, 'https://art.example.com/#/e/abc123');
+  const doc = getDocument(docId)!;
+  const embed = doc.nodes[placed.id]!;
+  assert.equal(embed.type, 'embed');
+  assert.equal(embed.tag, 'iframe');
+  assert.equal(embed.attrs.src, placed.src);
+  assert.equal(embed.parent, placed.artboardId);
+  assert.equal(doc.nodes[placed.artboardId]!.styles.width, '900px');
+  assert.ok(doc.pages.some((p) => p.artboards.includes(placed.artboardId)));
+});
+
+test('embed_artifact refuses a link that is not a share link', async () => {
+  const res = await client.callTool({ name: 'embed_artifact', arguments: { url: 'https://example.com/page' } });
+  assert.ok(isError(res));
+});
+
+test('a new document can be seeded with HTML at a given artboard size', async () => {
+  const res = await api('/api/documents', {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ name: 'From Artifactory', html: '<div style="width:1800px">Hi</div>', width: 1840, height: 1200 }),
+  });
+  assert.equal(res.status, 201);
+  const { document } = await res.json() as { document: { nodes: Record<string, { styles: Record<string, string>; children: string[] }>; pages: { artboards: string[] }[] } };
+  const board = document.nodes[document.pages[0]!.artboards[0]!]!;
+  assert.equal(board.styles.width, '1840px');
+  assert.equal(board.styles.height, '1200px');
+  assert.equal(board.children.length, 1);
+});

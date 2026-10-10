@@ -21,3 +21,4 @@ export * from './spec.ts';
 export * from './diff.ts';
 export * from './board.ts';
 export * from './diagram.ts';
+export * from './artifactory.ts';

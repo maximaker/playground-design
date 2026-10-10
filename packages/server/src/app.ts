@@ -383,7 +383,7 @@ api.get('/documents', async (c) => {
 api.get('/templates', (c) => c.json({ templates: templateSummaries() }));
 
 api.post('/documents', async (c) => {
-  type NewDoc = { name?: string; html?: string; template?: string; projectId?: string };
+  type NewDoc = { name?: string; html?: string; template?: string; projectId?: string; width?: number; height?: number };
   const body = await c.req.json<NewDoc>().catch(() => ({} as NewDoc));
 
   const template = body.template ? getTemplate(body.template) : undefined;
@@ -409,6 +409,15 @@ api.post('/documents', async (c) => {
 
   // Seeding from HTML at creation time is what makes fully headless agent
   // sessions practical: create a document with content in one call.
+  // Sized to the content when the caller knows it — Artifactory's "Open in
+  // Playground" sends an artifact that is often far wider than a laptop screen.
+  const size = (v: unknown) => (typeof v === 'number' && v >= 16 && v <= 20000 ? `${Math.round(v)}px` : undefined);
+  const width = size(body.width), height = size(body.height);
+  if (width || height) {
+    const artboardId = doc.pages[0]!.artboards[0]!;
+    const styles = { ...(width && { width }), ...(height && { height }) };
+    applyOps(doc.id, [{ op: { t: 'styles', updates: [{ id: artboardId, styles }] }, origin: { kind: 'system', id: 'seed' } }]);
+  }
   if (body.html) {
     const parsed = parseHtml(body.html);
     if (parsed.nodes.length) {
