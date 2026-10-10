@@ -39,6 +39,7 @@ export function HistoryBar() {
   const select = useCanvas((s) => s.select);
   const readOnly = useCanvas((s) => s.readOnly);
   const setHighlight = useCanvas((s) => s.setHighlight);
+  const connection = useCanvas((s) => s.connection);
 
   const [open, setOpen] = useState(false);
   const [entries, setEntries] = useState<Entry[]>([]);
@@ -126,11 +127,11 @@ export function HistoryBar() {
   const restore = async (snapshot: Snapshot) => {
     if (!docId) return;
     const ok = window.confirm(
-      `Restore "${snapshot.label ?? 'this version'}"? Current work is kept in history and this restore is itself undoable.`,
+      `Go back to "${snapshot.label ?? 'this version'}"? Nothing is lost — what you have now stays in history, and you can undo this.`,
     );
     if (!ok) return;
     await fetch(`/api/documents/${docId}/snapshots/${snapshot.id}/restore`, { method: 'POST' });
-    toast('Version restored', 'success');
+    toast('Back to that version', 'success');
   };
 
   return (
@@ -153,11 +154,11 @@ export function HistoryBar() {
                 <div key={s.id} className="history-row">
                   <div>
                     <strong>{s.label ?? 'Untitled'}</strong>
-                    <span className="dim">rev {s.rev} · {relative(s.ts)}</span>
+                    <span className="dim">{relative(s.ts)}</span>
                   </div>
                   <button className="button subtle" onClick={() => void compare(s)}>Compare</button>
                   {!readOnly && (
-                    <button className="button subtle" onClick={() => void restore(s)}>Restore</button>
+                    <button className="button subtle" onClick={() => void restore(s)}>Go back to this</button>
                   )}
                 </div>
               ))}
@@ -208,7 +209,7 @@ export function HistoryBar() {
                       </span>
                       <div>
                         <strong>{e.label}</strong>
-                        {e.opCount > 1 && <span className="dim"> ({e.opCount} ops)</span>}
+                        {e.opCount > 1 && <span className="dim"> ({e.opCount} changes)</span>}
                         <span className="dim">
                           {e.origin.label ?? (e.origin.kind === 'human' ? 'You' : e.origin.kind)} · {relative(e.ts)}
                         </span>
@@ -226,7 +227,7 @@ export function HistoryBar() {
         className="history-bar-strip"
         onClick={() => setOpen(!open)}
         aria-expanded={open}
-        title={open ? 'Hide history' : 'Show history and versions'}
+        title={open ? 'Hide history' : 'See earlier versions and go back to one'}
       >
         <Icon name="history" size={13} />
         <span className="history-bar-latest">
@@ -238,11 +239,20 @@ export function HistoryBar() {
                   {' · '}{relative(latest.ts)}
                 </span>
               </>
-            : <span className="dim">Nothing changed yet — everything is saved as you go</span>}
+            : <span className="dim">Nothing changed yet</span>}
         </span>
         {changes && !changes.same && (
           <span className="history-bar-badge">
             {changes.counts.changed + changes.counts.added + changes.counts.removed} since “{changes.since.label ?? 'a version'}”
+          </span>
+        )}
+        {!readOnly && (
+          // Edits stream to the server as they happen; the connection is what
+          // decides whether "saved" is true right now.
+          <span className={`save-state is-${connection}`}>
+            {connection === 'open' && <><Icon name="check" size={12} /> Saved</>}
+            {connection === 'connecting' && 'Connecting…'}
+            {connection === 'closed' && 'Offline — reconnecting…'}
           </span>
         )}
         <Icon name={open ? 'chevronDown' : 'chevronUp'} size={12} />
