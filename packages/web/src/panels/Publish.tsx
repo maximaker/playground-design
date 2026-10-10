@@ -39,7 +39,7 @@ export function Publish({ canPublish }: { canPublish: boolean }) {
   const [busy, setBusy] = useState(false);
 
   const artboards = (doc?.pages ?? []).flatMap((p) =>
-    p.artboards.map((id) => ({ id, name: doc?.nodes[id]?.name ?? id, page: p.name })));
+    p.artboards.map((id) => ({ id, name: doc?.nodes[id]?.name ?? id, page: p.name, empty: !doc?.nodes[id]?.children.length })));
 
   const refresh = useCallback(async () => {
     if (!docId) return;
@@ -61,7 +61,7 @@ export function Publish({ canPublish }: { canPublish: boolean }) {
   useEffect(() => {
     if (pub?.artboardId || artboardId) return;
     const selected = selection[0] && doc ? artboardOf(doc, selection[0].split('::')[0]!) : null;
-    setArtboardId(selected ?? artboards[0]?.id ?? '');
+    setArtboardId(selected ?? (artboards.find((a) => !a.empty) ?? artboards[0])?.id ?? '');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selection, version, pub]);
 
@@ -123,7 +123,7 @@ export function Publish({ canPublish }: { canPublish: boolean }) {
           <select className="input" value={artboardId} onChange={(e) => setArtboardId(e.target.value)}>
             {artboards.map((a) => (
               <option key={a.id} value={a.id}>
-                {doc && doc.pages.length > 1 ? `${a.page} / ${a.name}` : a.name}
+                {doc && doc.pages.length > 1 ? `${a.page} / ${a.name}` : a.name}{a.empty ? ' (empty)' : ''}
               </option>
             ))}
           </select>

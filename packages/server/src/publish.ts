@@ -56,10 +56,10 @@ export async function freeSlug(wanted: string, docId: string): Promise<string> {
  */
 export function pageArtboard(doc: CanvasDocument, chosen: string | null): NodeId | null {
   if (chosen && doc.nodes[chosen]) return chosen;
-  for (const page of doc.pages) {
-    if (page.artboards.length) return page.artboards[0]!;
-  }
-  return null;
+  // An empty frame is never the page anyone meant — a fresh document starts
+  // with one, and publishing it served a blank white screen.
+  const all = doc.pages.flatMap((p) => p.artboards);
+  return all.find((id) => doc.nodes[id]?.children.length) ?? all[0] ?? null;
 }
 
 /**

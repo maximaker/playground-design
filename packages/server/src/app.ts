@@ -809,6 +809,9 @@ api.post('/documents/:id/publish', async (c) => {
   if (body.artboardId && !doc.nodes[body.artboardId]) {
     return c.json({ error: `No artboard ${body.artboardId} in this document.` }, 400);
   }
+  if (body.artboardId && !doc.nodes[body.artboardId]!.children.length) {
+    return c.json({ error: 'That screen is empty — publishing it would serve a blank page.' }, 400);
+  }
   if (!pageArtboard(doc, body.artboardId ?? null)) {
     return c.json({ error: 'This document has no artboards to publish yet.' }, 400);
   }
