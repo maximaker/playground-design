@@ -11,7 +11,10 @@ import { useEffect, useRef, useState } from 'react';
 import { useCanvas, type Tool } from '../state/store.ts';
 import { Icon } from './Icon.tsx';
 import { MOD, TOOLS } from './tools.ts';
-import { zoomBy, zoomTo } from '../hooks/commands.ts';
+import { zoomBy, zoomTo, zoomToFit } from '../hooks/commands.ts';
+import { getArtboardSize } from '@playground/shared';
+import { getDoc } from '../state/store.ts';
+import { getFrame } from '../canvas/registry.ts';
 
 const GROUPS: { id: string; label: string; tools: Tool[] }[] = [
   { id: 'move', label: 'Move and pan', tools: ['move', 'hand'] },
@@ -160,6 +163,8 @@ export function Toolbar({ compact }: { compact?: boolean }) {
       )}
 
       {GROUPS.map((g) => <ToolGroup key={g.id} group={g} faces={faces} readOnly={readOnly} />)}
+      {!compact && !readOnly && <span className="toolbar-divider" />}
+      {!compact && !readOnly && <DeviceToggle />}
       {!compact && <span className="toolbar-divider" />}
       {!compact && (
       <button className="tip is-top" data-tip="Zoom out  −" aria-label="Zoom out" onClick={() => zoomBy(1 / 1.25)}>
@@ -187,5 +192,71 @@ export function Toolbar({ compact }: { compact?: boolean }) {
       >{Math.round(zoom * 100)}%</button>
     )}
     </>
+  );
+}
+
+const DESKTOP = 1440;
+const PHONE = 390;
+
+/**
+ * See the page as a laptop or a phone shows it.
+ *
+ * Not a preview mode: the frame really changes width, the media queries
+ * respond, and the height then follows the content so nothing is cut off at
+ * the bottom. Undo puts it back. Applies to the selected frame, or to every
+ * frame on the page when none is selected.
+ */
+function DeviceToggle() {
+  useCanvas((s) => s.structureVersion);
+  const version = useCanvas((s) => s.version);
+  const pageId = useCanvas((s) => s.pageId);
+  const selection = useCanvas((s) => s.selection);
+  const dispatch = useCanvas((s) => s.dispatch);
+  const doc = getDoc();
+  const page = doc?.pages.find((p) => p.id === pageId);
+  if (!doc || !page || !page.artboards.length) return null;
+
+  const selected = page.artboards.filter((id) => selection.includes(id));
+  const targets = selected.length ? selected : page.artboards;
+  const width = getArtboardSize(doc.nodes[targets[0]!]!).width;
+  void version;
+  const isPhone = width <= 600;
+
+  const setDevice = (w: number) => {
+    dispatch([{ t: 'styles', updates: targets.map((id) => ({ id, styles: { width: `${w}px` } })) }]);
+    // Once the frame has reflowed at its new width, fit the height to what is
+    // now in it — a phone layout is much taller, and a fixed height clips it.
+    const fit = (tries: number) => requestAnimationFrame(() => {
+      const updates = targets.flatMap((id) => {
+        const body = getFrame(id)?.contentDocument?.body;
+        const content = body?.firstElementChild as HTMLElement | null | undefined;
+        // The bottom of the last thing in it, not scrollHeight: a page that
+        // fills its frame (min-height: 100%) would never measure shorter. Single
+        // wrappers are stepped through so it is the content that is measured.
+        let el = content ?? null;
+        while (el && el.children.length === 1) el = el.firstElementChild as HTMLElement;
+        const h = el && el.children.length
+          ? Math.ceil(Math.max(...[...el.children].map((c) => c.getBoundingClientRect().bottom))
+            + parseFloat(getComputedStyle(el).paddingBottom || '0'))
+          : 0;
+        return h > 100 ? [{ id, styles: { height: `${h}px` } }] : [];
+      });
+      if (updates.length) {
+        dispatch([{ t: 'styles', updates }]);
+        zoomToFit();
+      } else if (tries > 0) fit(tries - 1);
+    });
+    setTimeout(() => fit(10), 120);
+  };
+
+  return (
+    <div className="segmented device-toggle" role="radiogroup" aria-label="Screen size">
+      <button role="radio" aria-checked={!isPhone} className={`tip is-top${!isPhone ? ' is-active' : ''}`} data-tip="See it on a laptop" onClick={() => setDevice(DESKTOP)}>
+        <Icon name="desktop" size={15} />
+      </button>
+      <button role="radio" aria-checked={isPhone} className={`tip is-top${isPhone ? ' is-active' : ''}`} data-tip="See it on a phone" onClick={() => setDevice(PHONE)}>
+        <Icon name="phone" size={15} />
+      </button>
+    </div>
   );
 }
