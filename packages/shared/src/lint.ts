@@ -631,6 +631,9 @@ function effectiveBackground(
     if (current.styles['background-image']) return null;
     const raw = current.styles['background-color'] ?? current.styles.background;
     if (!raw) continue;
+    // A gradient or image in the shorthand is still a painted background — not
+    // something to look through to the page behind it.
+    if (/gradient\(|url\(/i.test(raw)) return null;
     const parsed = parseColor(raw, resolve);
     if (!parsed || parsed.a === 0) continue;
     if (parsed.a < 1) return null;

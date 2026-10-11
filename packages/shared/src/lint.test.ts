@@ -321,3 +321,8 @@ test('contrast: frames are checked in their own theme unless allThemes is set', 
   applyOp(doc, { t: 'attrs', updates: [{ id: ab, attrs: { 'data-theme': 'dark' } }] });
   assert.equal(lintDocument(doc, { rules: ['contrast'] }).length, 1);
 });
+
+test('contrast: text over a gradient set with the background shorthand is not measured against the page', () => {
+  const { doc } = docWith(`<div style="background:#ffffff"><div style="background:linear-gradient(160deg,#2346F5,#1630C9)"><p style="color:#ffffff;font-size:16px">On cobalt</p></div></div>`);
+  assert.equal(only(doc, 'contrast').length, 0);
+});
