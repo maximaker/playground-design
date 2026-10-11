@@ -1487,6 +1487,11 @@ function registerWriteTools(server: McpServer, ctx: McpContext): void {
     const doc = requireDoc(ctx);
     const board = node(doc, id);
     if (board.type !== 'artboard') return fail(`${id} is a ${board.type}; fit_artboard takes an artboard.`);
+    // A frame whose content fills it (height: 100%) has no natural height: it
+    // would collapse to whatever its contents need, shrinking a phone screen
+    // or a full-bleed cover. Leave those alone and say so.
+    const fills = board.children.some((c) => /^100(%|vh)$/.test(String(doc.nodes[c]?.styles.height ?? '').trim()));
+    if (fills) return json({ id, skipped: 'Its content is set to fill the frame (height: 100%), so it has no natural height to fit to. Set the height directly instead.' });
     const boxes = await measureSubtree(doc, id, ctx.baseUrl, { unbounded: true }).catch(() => null);
     if (!boxes) return fail('No renderer is available on this server, so the content cannot be measured.');
     let bottom = 0;
