@@ -3425,19 +3425,21 @@ code { font-family: var(--mono); font-size: 0.92em; }
 .token-tabs button { flex: 1 0 auto; padding-left: 0.55rem; padding-right: 0.55rem; font-size: 0.78rem; white-space: nowrap; }
 
 /* --- Sections: titled regions behind runs of screens ------------------------- */
+:root, :root[data-theme='light'] { --section-mix: 62%; --section-line: 100%; }
+:root[data-theme='dark'] { --section-mix: 11%; --section-line: 45%; }
 .section-region {
   position: absolute; border: 1px solid; box-sizing: border-box; pointer-events: none;
   box-shadow: 0 1px 2px rgba(22, 34, 61, 0.04);
 }
 .section-header {
   position: absolute; left: 0; right: 0; top: 0; display: flex; align-items: baseline; box-sizing: border-box; gap: 0.6em;
-  font-family: var(--font); color: #16223d; pointer-events: auto; cursor: grab; white-space: nowrap; overflow: hidden;
+  font-family: var(--font); color: var(--fg); pointer-events: auto; cursor: grab; white-space: nowrap; overflow: hidden;
 }
 .section-header:active { cursor: grabbing; }
 .section-title { font-weight: 600; letter-spacing: -0.01em; }
 .section-pill { font-weight: 600; padding: 0.2em 0.75em; border-radius: var(--radius-pill); }
-.section-count { color: #4b5873; }
-.section-desc { color: #4b5873; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.section-count { color: var(--fg-muted); }
+.section-desc { color: var(--fg-muted); overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .section-desc::before { content: '·'; margin-right: 0.6em; }
 
 .section-list { margin-top: var(--s5); padding-top: var(--s4); border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 0.15rem; }

@@ -16,11 +16,19 @@ import type { Op } from './ops.ts';
 
 export const SECTION_LAYOUT = {
   /** Space between the members' box and the region edge. */
-  padding: 64,
+  padding: 80,
   /** Height of the header strip above the members. */
   header: 120,
   /** Gap between screens when a section is arranged in a row. */
-  gap: 80,
+  gap: 120,
+  /** Clear space between one section's region and the next when arranging. */
+  sectionGap: 240,
+  /**
+   * Screen pixels kept free between the header text and the frames, for the
+   * artboard name labels and presence avatars that sit above every frame at a
+   * fixed on-screen size. The header grows upward when zoom alone cannot give it.
+   */
+  labelReserve: 52,
 };
 
 export const SECTION_STATUS_META: Record<SectionStatus, { label: string; bg: string; fg: string }> = {
@@ -72,7 +80,7 @@ export function sectionTint(color: string | undefined): { bg: string; border: st
   const named = color && NOTE_COLORS[color as NoteColor];
   if (named) return { bg: named.bg, border: named.border };
   if (color) return { bg: color, border: color };
-  return { bg: 'rgba(255, 255, 255, 0.72)', border: '#d5dde8' };
+  return { bg: '#ffffff', border: '#c3cedb' };
 }
 
 /**
@@ -86,8 +94,22 @@ export function arrangeSectionOps(
   if (!ids.length) return [];
   const box = membersBox(doc, ids)!;
   let x = opts.origin?.x ?? box.x;
-  const y = opts.origin?.y ?? box.y;
+  let y = opts.origin?.y ?? box.y;
   const gap = opts.gap ?? SECTION_LAYOUT.gap;
+  // The row's region must keep sectionGap clear of every other section; if it
+  // would not, it moves down below the ones it would hit.
+  const width = ids.reduce((w, id) => w + getArtboardSize(doc.nodes[id]!).width, 0) + gap * (ids.length - 1);
+  const height = Math.max(...ids.map((id) => getArtboardSize(doc.nodes[id]!).height));
+  const { padding, header, sectionGap } = SECTION_LAYOUT;
+  const others = sectionsOf(page).filter((s) => s.id !== section.id)
+    .map((s) => sectionRect(doc, page, { ...s, artboards: s.artboards.filter((a) => !ids.includes(a)) }))
+    .filter((r): r is SectionRect => !!r);
+  for (let guard = 0; guard < others.length + 1; guard++) {
+    const region = { x: x - padding - sectionGap, y: y - padding - header - sectionGap, width: width + 2 * (padding + sectionGap), height: height + 2 * padding + header + 2 * sectionGap };
+    const hit = others.filter((r) => r.x < region.x + region.width && r.x + r.width > region.x && r.y < region.y + region.height && r.y + r.height > region.y);
+    if (!hit.length) break;
+    y = Math.max(...hit.map((r) => r.y + r.height)) + sectionGap + padding + header;
+  }
   const updates = ids.map((id) => {
     const update = { id, attrs: { 'data-x': String(Math.round(x)), 'data-y': String(Math.round(y)) } };
     x += getArtboardSize(doc.nodes[id]!).width + gap;

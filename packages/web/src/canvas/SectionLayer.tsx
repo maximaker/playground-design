@@ -44,10 +44,15 @@ function SectionRegion({ section, zoom }: { section: Section; zoom: number }) {
   const font = Math.min(30, Math.max(11, 26 * zoom));
   const tiny = zoom < 0.04;
   const top = Math.max(4, 28 * zoom);
-  // Artboard name labels are a fixed ~24px tall above each screen. Zoomed out,
-  // the header grows upward in screen pixels so the title never sits on them.
-  const needed = top + font * 1.4 + 28;
-  const extra = Math.max(0, needed - (SECTION_LAYOUT.header + SECTION_LAYOUT.padding) * zoom);
+  // Artboard name labels and presence avatars sit a fixed height above each
+  // screen. Zoomed out, the header grows upward in screen pixels so its text
+  // never reaches them.
+  const needed = top + font * 1.4 + SECTION_LAYOUT.labelReserve;
+  // Capped at half the gap between sections, so neighbours never touch.
+  const extra = Math.min(SECTION_LAYOUT.sectionGap * zoom * 0.5,
+    Math.max(0, needed - (SECTION_LAYOUT.header + SECTION_LAYOUT.padding) * zoom));
+  // Far out, only the title and status are worth the space.
+  const brief = zoom < 0.2;
   const header = SECTION_LAYOUT.header * zoom + extra;
 
   return (
@@ -55,7 +60,10 @@ function SectionRegion({ section, zoom }: { section: Section; zoom: number }) {
       className="section-region"
       style={{
         left: rect.x * zoom, top: rect.y * zoom - extra, width: rect.width * zoom, height: rect.height * zoom + extra,
-        background: tint.bg, borderColor: tint.border, borderRadius: Math.max(6, 28 * zoom),
+        // Mixed per theme (--section-mix) so the canvas's own labels stay legible
+        // on the region in light and dark alike.
+        background: `color-mix(in srgb, ${tint.bg} var(--section-mix), transparent)`,
+        borderColor: `color-mix(in srgb, ${tint.border} var(--section-line), transparent)`, borderRadius: Math.max(6, 28 * zoom),
       }}
     >
       <div
@@ -70,10 +78,10 @@ function SectionRegion({ section, zoom }: { section: Section; zoom: number }) {
             <span className="section-pill" style={{ background: status.bg, color: status.fg, fontSize: Math.max(10, font * 0.6) }}>
               {status.label}
             </span>
-            <span className="section-count" style={{ fontSize: Math.max(10, font * 0.6) }}>
+            {!brief && <span className="section-count" style={{ fontSize: Math.max(10, font * 0.6) }}>
               {count} screen{count === 1 ? '' : 's'}
-            </span>
-            {section.description && (
+            </span>}
+            {!brief && section.description && (
               <span className="section-desc" style={{ fontSize: Math.max(10, font * 0.6) }}>{section.description}</span>
             )}
           </>

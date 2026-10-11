@@ -63,3 +63,15 @@ test('sections: spec carries section status', () => {
     assert.deepEqual(specFor(doc, 'a2').section, { id: 's1', title: 'Pay', status: 'ready' });
   });
 
+
+test('sections: arranging keeps sectionGap clear of other sections', () => {
+  const doc = doc3();
+  const page = doc.pages[0]!;
+  applyOp(doc, { t: 'section', action: 'add', pageId: page.id, section: { id: 's1', artboards: ['a1'] } });
+  applyOp(doc, { t: 'section', action: 'add', pageId: page.id, section: { id: 's2', artboards: ['a2', 'a3'] } });
+  for (const op of arrangeSectionOps(doc, page, page.sections![1]!)) applyOp(doc, op as Op);
+  const r1 = sectionRect(doc, page, page.sections![0]!)!;
+  const r2 = sectionRect(doc, page, page.sections![1]!)!;
+  assert.ok(r2.y - (r1.y + r1.height) >= SECTION_LAYOUT.sectionGap, 'sections stay apart');
+  assert.equal(Number(doc.nodes.a3!.attrs['data-x']) - Number(doc.nodes.a2!.attrs['data-x']), 390 + SECTION_LAYOUT.gap);
+});

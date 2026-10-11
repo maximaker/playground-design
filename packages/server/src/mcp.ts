@@ -2462,7 +2462,7 @@ function registerNoteTools(server: McpServer, ctx: McpContext): void {
       'Creates a titled section on the canvas around a set of artboards (e.g. "A - Onboarding") with a ' +
       'status (draft, in-review, ready, changed) developers can read. The region auto-grows to wrap its ' +
       'artboards, so do not fake headers with extra artboards. Artboards already in another section move here. ' +
-      'arrange: true lays the members out in one row with standard gaps.',
+      'arrange: true lays the members out in one row (120px gaps), kept 240px clear of other sections.',
     inputSchema: {
       title: z.string().min(1).max(200),
       artboards: z.array(z.string()).max(200).optional().default([]).describe('Artboard ids, in reading order.'),
@@ -2471,7 +2471,7 @@ function registerNoteTools(server: McpServer, ctx: McpContext): void {
       color: z.string().max(40).optional().describe('yellow, blue, green, pink, purple or a CSS colour.'),
       flows: z.array(z.string()).max(50).optional().describe('Board item ids (diagrams, connectors) describing this flow.'),
       arrange: z.boolean().optional().default(false),
-      gap: z.number().min(0).max(2000).optional(),
+      gap: z.number().min(0).max(2000).optional().describe('Space between screens; default 120.'),
       pageId: z.string().optional(),
     },
   }, async ({ title, artboards, description, status, color, flows, arrange, gap, pageId }) => guard(() => {
@@ -2507,7 +2507,7 @@ function registerNoteTools(server: McpServer, ctx: McpContext): void {
       add: z.array(z.string()).max(200).optional(),
       remove: z.array(z.string()).max(200).optional(),
       arrange: z.boolean().optional().default(false),
-      gap: z.number().min(0).max(2000).optional(),
+      gap: z.number().min(0).max(2000).optional().describe('Space between screens; default 120.'),
     },
   }, async ({ id, arrange, gap, artboards, add, remove, ...fields }) => guard(() => {
     const doc = requireDoc(ctx);
