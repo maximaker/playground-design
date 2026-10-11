@@ -66,8 +66,9 @@ const RIGHT_TABS: { id: RightTab; icon: IconName; label: string; hint: string }[
 ];
 
 const LEFT_TABS: { id: LeftTab; icon: IconName; label: string; hint: string }[] = [
-  { id: 'layers', icon: 'layers', label: 'Layers', hint: 'The structure of this page' },
+  // Outermost first: a document has pages, a page has layers.
   { id: 'pages', icon: 'page', label: 'Pages', hint: 'Pages in this document' },
+  { id: 'layers', icon: 'layers', label: 'Layers', hint: 'The structure of this page' },
   { id: 'components', icon: 'component', label: 'Components', hint: 'Reusable components and their variants' },
   { id: 'tokens', icon: 'palette', label: 'Styles', hint: 'Colours, sizes and themes the whole page shares (design tokens)' },
 ];
