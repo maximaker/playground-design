@@ -33,6 +33,7 @@ import {
   layoutDiagram, makeBoardShape, resolveScreen, screenCardSize, makeConnector, parseMermaid, routeConnector,
   artifactoryEmbedUrl, treeEntries, nodeEntry, type InstanceOverride,
   type Section, SECTION_STATUSES, makeSection, sectionsOf, sectionMembers, sectionRect, arrangeSectionOps, sectionFlows, findFlow,
+  decisionsOf, addDecisionOps, resolveWithOutcomeOps, describeDecision, decisionsMarkdown,
   sectionOfArtboard, findVersionTarget, versionOps, describeVersion, versionOf, targetTitle, VERSION_KINDS,
   GOOGLE_FONT_WEIGHTS,
 } from '@playground/shared';
@@ -4226,8 +4227,10 @@ function registerCommentTools(server: McpServer, ctx: McpContext): void {
     inputSchema: {
       id: z.string(),
       resolved: z.boolean().optional().default(true),
+      outcome: z.string().max(500).optional()
+        .describe('What was decided, in one line. Recorded in the decisions log (list_decisions) with the thread linked.'),
     },
-  }, async ({ id, resolved }) => guard(() => {
+  }, async ({ id, resolved, outcome }) => guard(() => {
     const doc = requireDoc(ctx);
     const comment = (doc.comments ?? []).find((c) => c.id === id);
     if (!comment) return fail(`No comment "${id}". Call list_comments for current ids.`);
@@ -4237,8 +4240,54 @@ function registerCommentTools(server: McpServer, ctx: McpContext): void {
         `resolving silently leaves the person who raised it with no idea whether it was understood.`,
       );
     }
+    if (resolved) {
+      commit(ctx, resolveWithOutcomeOps(doc, comment, outcome, ctx.connection.label ?? 'Agent'));
+      const logged = outcome?.trim() ? decisionsOf(requireDoc(ctx)).find((d) => d.commentId === id) : undefined;
+      return json({ id, resolved, ...(logged ? { decision: describeDecision(requireDoc(ctx), logged) } : {}) });
+    }
     commit(ctx, [{ t: 'comment', action: 'update', comment: { id, resolved } }]);
     return json({ id, resolved });
+  }));
+
+  server.registerTool('list_decisions', {
+    title: 'Read the decisions log',
+    description:
+      'What has been decided in this document, oldest first: the decision, who, the date, and the comment thread ' +
+      'and layer it came from. Read it before changing something that was settled. format "markdown" returns the ' +
+      'log ready to paste into handoff notes.',
+    inputSchema: { format: z.enum(['json', 'markdown']).optional().default('json') },
+    annotations: { readOnlyHint: true },
+  }, async ({ format }) => guard(() => {
+    const doc = requireDoc(ctx);
+    if (format === 'markdown') return text(decisionsMarkdown(doc));
+    const decisions = decisionsOf(doc).map((d) => describeDecision(doc, d));
+    return json({ count: decisions.length, decisions });
+  }));
+
+  server.registerTool('add_decision', {
+    title: 'Record a decision',
+    description:
+      'Adds a line to the decisions log — something agreed outside a comment thread (a call, a brief). To settle ' +
+      'a thread, use resolve_comment with outcome instead, so the thread is linked.',
+    inputSchema: {
+      text: z.string().min(1).max(500),
+      nodeId: z.string().optional().describe('The layer it is about.'),
+      commentId: z.string().optional().describe('A thread it relates to.'),
+      by: z.string().max(80).optional().describe('Who decided, when it was not you — e.g. the client.'),
+    },
+  }, async ({ text: body, nodeId, commentId, by }) => guard(() => {
+    const doc = requireDoc(ctx);
+    if (nodeId) node(doc, nodeId);
+    const comment = commentId ? (doc.comments ?? []).find((c) => c.id === commentId) : undefined;
+    if (commentId && !comment) return fail(`No comment "${commentId}". Call list_comments for current ids.`);
+    const pageId = nodeId
+      ? doc.pages.find((p) => p.artboards.includes(artboardOf(doc, nodeId) ?? ''))?.id
+      : comment?.pageId;
+    const ops = addDecisionOps({ text: body, by: by ?? ctx.connection.label ?? 'Agent', nodeId: nodeId ?? comment?.nodeId, commentId, pageId });
+    commit(ctx, ops);
+    const added = (ops[0] as { decision: { id: string } }).decision.id;
+    const after = requireDoc(ctx);
+    return json(describeDecision(after, after.decisions!.find((d) => d.id === added)!));
   }));
 }
 

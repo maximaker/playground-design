@@ -363,6 +363,7 @@ function describeOp(op: Op): string {
       if (removes && !adds) return `Removed ${removes} ${removes === 1 ? 'thing' : 'things'} from the board`;
       return 'Changed the board';
     }
+    case 'decision': return op.action === 'add' ? 'Logged a decision' : 'Removed a decision';
     case 'comment': return op.action === 'add' ? 'Left a comment'
       : op.action === 'reply' ? 'Replied to a comment'
       : op.action === 'remove' ? 'Deleted a comment'

@@ -244,6 +244,24 @@ export interface Comment {
   replies: CommentReply[];
 }
 
+/**
+ * One line in the document's decisions log: what was settled, by whom, when,
+ * and the thread or layer it came from. Most come from resolving a comment
+ * with an outcome; the rest are added directly.
+ */
+export interface Decision {
+  id: string;
+  text: string;
+  by: string;
+  /** Epoch ms. */
+  at: number;
+  /** The comment thread it settled, when it came from one. */
+  commentId?: string;
+  /** The layer it is about. */
+  nodeId?: NodeId;
+  pageId?: string;
+}
+
 export interface CommentReply {
   id: string;
   author: string;
@@ -420,6 +438,8 @@ export interface CanvasDocument {
   codeComponents?: Record<string, CodeComponent>;
   /** Comment threads, across all pages. */
   comments?: Comment[];
+  /** What was decided, in order — see decisions.ts. */
+  decisions?: Decision[];
   /**
    * The project this document is filed under, or undefined for unfiled.
    *

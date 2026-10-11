@@ -1066,3 +1066,25 @@ test('set_version_state marks pages and sections; get_basic_info and list_sectio
   await client.callTool({ name: 'set_version_state', arguments: { id: pageId, state: null } });
   await client.callTool({ name: 'delete_section', arguments: { id: sec.id } }).catch(() => {});
 });
+
+test('resolve_comment with an outcome feeds list_decisions; add_decision adds directly', async () => {
+  const info = jsonOf<{ artboards: { id: string }[] }>(await client.callTool({ name: 'get_basic_info', arguments: {} }));
+  const artboard = info.artboards[0]!.id;
+  const doc = getDocument(docId)!;
+  const comment = { id: `cm_dec_${Date.now()}`, pageId: doc.pages[0]!.id, nodeId: artboard, x: 0, y: 0, author: 'Ana', text: 'Which CTA?', resolved: false, createdAt: Date.now(), replies: [] };
+  const { applyOps } = await import('./store.ts');
+  applyOps(docId, [{ op: { t: 'comment', action: 'add', comment }, origin: { kind: 'system', id: 'test' } }]);
+  await client.callTool({ name: 'reply_to_comment', arguments: { id: comment.id, text: 'Went with lime.' } });
+  const resolved = jsonOf<{ decision: { decision: string; thread: { id: string } } }>(await client.callTool({
+    name: 'resolve_comment', arguments: { id: comment.id, outcome: 'Keep the lime CTA' },
+  }));
+  assert.equal(resolved.decision.decision, 'Keep the lime CTA');
+  assert.equal(resolved.decision.thread.id, comment.id);
+
+  await client.callTool({ name: 'add_decision', arguments: { text: 'Ship on Friday', by: 'Client' } });
+  const log = jsonOf<{ count: number; decisions: { decision: string; by: string }[] }>(await client.callTool({ name: 'list_decisions', arguments: {} }));
+  assert.ok(log.count >= 2);
+  assert.ok(log.decisions.some((d) => d.decision === 'Ship on Friday' && d.by === 'Client'));
+  const md = await client.callTool({ name: 'list_decisions', arguments: { format: 'markdown' } });
+  assert.match((md as { content: { text: string }[] }).content[0]!.text, /# Decisions/);
+});

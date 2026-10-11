@@ -6,8 +6,8 @@
  * are scattered across three artboards and half of them are off screen.
  */
 
-import { useEffect, useMemo } from 'react';
-import { NOTE_KIND_LABELS, commentsOf } from '@playground/shared';
+import { useEffect, useMemo, useState } from 'react';
+import { NOTE_KIND_LABELS, commentsOf, decisionsOf, describeDecision, decisionsMarkdown } from '@playground/shared';
 import { useCanvas, getDoc, currentPage } from '../state/store.ts';
 import { Icon } from '../ui/Icon.tsx';
 
@@ -50,6 +50,8 @@ export function Comments() {
   const open = comments.filter((c) => !c.resolved);
   const resolved = comments.filter((c) => c.resolved);
   const shown = showResolved ? comments : open;
+  const [view, setView] = useState<'threads' | 'decisions'>('threads');
+  const setPage = useCanvas((s) => s.setPage);
 
   /** Centre the canvas on a pin and open it, so the list is a way to navigate. */
   const focus = (id: string, x: number, y: number, nodeId?: string) => {
@@ -61,6 +63,20 @@ export function Comments() {
 
   return (
     <div className="comments-panel">
+      <div className="review-scope">
+        <button className={view === 'threads' ? 'is-active' : ''} onClick={() => setView('threads')}>Threads</button>
+        <button className={view === 'decisions' ? 'is-active' : ''} onClick={() => setView('decisions')}>
+          Decisions{doc?.decisions?.length ? ` · ${doc.decisions.length}` : ''}
+        </button>
+      </div>
+      {view === 'decisions' && doc ? <Decisions doc={doc} onGo={(pageId, commentId, nodeId) => {
+        if (pageId && pageId !== page?.id) setPage(pageId);
+        const c = commentId ? (doc.comments ?? []).find((x) => x.id === commentId) : undefined;
+        requestAnimationFrame(() => {
+          if (c) focus(c.id, c.x, c.y, c.nodeId);
+          else if (nodeId && doc.nodes[nodeId]) { select([nodeId]); void import('../hooks/commands.ts').then((m) => m.zoomToSelection()); }
+        });
+      }} /> : <>
       <div className="comments-head">
         <span className="dim">
           {open.length} open{resolved.length ? ` · ${resolved.length} resolved` : ''}
@@ -112,6 +128,49 @@ export function Comments() {
           </button>
         );
       })}
+      </>}
+    </div>
+  );
+}
+
+/** The document's decisions log: newest first here, since this is where you look for what just changed. */
+function Decisions({ doc, onGo }: {
+  doc: NonNullable<ReturnType<typeof getDoc>>;
+  onGo: (pageId?: string, commentId?: string, nodeId?: string) => void;
+}) {
+  const rows = decisionsOf(doc).reverse();
+  const download = () => {
+    const blob = new Blob([decisionsMarkdown(doc)], { type: 'text/markdown' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `${doc.name.replace(/[^\w -]+/g, '').trim() || 'document'} — decisions.md`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
+  if (!rows.length) {
+    return (
+      <p className="panel-empty">
+        No decisions yet.<br />
+        <span className="dim">
+          Resolve a comment thread with an outcome and it is logged here — what was decided, by whom,
+          and when, linked back to the thread. Agents read it with <code>list_decisions</code>.
+        </span>
+      </p>
+    );
+  }
+  return (
+    <div className="decisions">
+      {rows.map((d) => {
+        const info = describeDecision(doc, d);
+        const where = info.node && !('deleted' in info.node) ? info.node.name : info.page?.name;
+        return (
+          <button key={d.id} className="decision-row" onClick={() => onGo(d.pageId, d.commentId, d.nodeId)} title="Go to the thread">
+            <p className="decision-text">{d.text}</p>
+            <span className="dim">{info.by} · {info.date}{where ? ` · ${where}` : ''}{d.commentId ? ' · from a thread' : ''}</span>
+          </button>
+        );
+      })}
+      <button className="button subtle full" onClick={download}>Download as Markdown</button>
     </div>
   );
 }

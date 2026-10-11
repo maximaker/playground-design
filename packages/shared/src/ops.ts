@@ -14,7 +14,7 @@ import {
   type CanvasDocument, type CanvasNode, type NodeId, type StyleMap, type Page,
   type Token, type Note, type ComponentDef, type ComponentVariant, type InstanceOverride,
   type Breakpoint, breakpointsOf,
-  type Comment, type CommentReply, type Section,
+  type Comment, type CommentReply, type Decision, type Section,
   descendants, isAncestorOf, makeNote, newId, variantKey,
 } from './model.ts';
 import type { CodeComponent } from './code-components.ts';
@@ -49,6 +49,7 @@ export type Op =
   | { t: 'props'; updates: { id: NodeId; props: Record<string, string | null> }[] }
   | { t: 'breakpoints'; breakpoints: Breakpoint[] }
   | { t: 'code-component'; action: 'add' | 'update' | 'remove'; component: Partial<CodeComponent> & { id: string } }
+  | { t: 'decision'; action: 'add' | 'remove'; decision: Decision }
   | {
       t: 'comment';
       action: 'add' | 'update' | 'remove' | 'reply' | 'unreply';
@@ -113,6 +114,7 @@ export function applyOp(doc: CanvasDocument, op: Op): Op {
     case 'breakpoints': return applyBreakpoints(doc, op);
     case 'code-component': return applyCodeComponent(doc, op);
     case 'comment': return applyComment(doc, op);
+    case 'decision': return applyDecision(doc, op);
   }
 }
 
@@ -628,6 +630,19 @@ function applyCodeComponent(doc: CanvasDocument, op: Extract<Op, { t: 'code-comp
   return { t: 'code-component', action: 'update', component: before };
 }
 
+function applyDecision(doc: CanvasDocument, op: Extract<Op, { t: 'decision' }>): Op {
+  if (!doc.decisions) doc.decisions = [];
+  const index = doc.decisions.findIndex((d) => d.id === op.decision.id);
+  if (op.action === 'add') {
+    if (index >= 0) throw new OpError(`decision ${op.decision.id} already exists`);
+    doc.decisions.push({ ...op.decision });
+    return { t: 'decision', action: 'remove', decision: op.decision };
+  }
+  if (index < 0) throw new OpError(`decision ${op.decision.id} not found`);
+  const [removed] = doc.decisions.splice(index, 1);
+  return { t: 'decision', action: 'add', decision: removed! };
+}
+
 function applyComment(doc: CanvasDocument, op: Extract<Op, { t: 'comment' }>): Op {
   if (!doc.comments) doc.comments = [];
   const index = doc.comments.findIndex((c) => c.id === op.comment.id);
@@ -788,6 +803,7 @@ export function touchedNodes(op: Op): TouchedNodes {
     // Comments are chrome, not content: they change nothing about how a node
     // renders, so nothing needs re-measuring or re-laying out for them.
     case 'comment':
+    case 'decision':
     // The board is the same: nothing on it is inside an artboard, so a shape
     // dragged at sixty frames a second must not restyle every iframe.
     case 'board':

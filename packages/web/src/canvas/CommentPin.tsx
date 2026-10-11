@@ -12,8 +12,8 @@
  */
 
 import { memo, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
-import { type Comment, type CommentReply, newId } from '@playground/shared';
-import { useCanvas } from '../state/store.ts';
+import { type Comment, type CommentReply, newId, decisionForComment, resolveWithOutcomeOps } from '@playground/shared';
+import { useCanvas, getDoc } from '../state/store.ts';
 import { Icon } from '../ui/Icon.tsx';
 
 /**
@@ -35,6 +35,9 @@ export const CommentPin = memo(function CommentPin({ comment, scale }: {
 
   const open = openComment === comment.id;
   const [draft, setDraft] = useState('');
+  // Resolving asks for the outcome in one line; it goes into the decisions log.
+  const [closing, setClosing] = useState(false);
+  const [outcome, setOutcome] = useState('');
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
 
   useEffect(() => { if (open) inputRef.current?.focus(); }, [open]);
@@ -52,9 +55,14 @@ export const CommentPin = memo(function CommentPin({ comment, scale }: {
   };
 
   const setResolved = (resolved: boolean) => {
-    dispatch([{ t: 'comment', action: 'update', comment: { id: comment.id, resolved } }]);
+    const doc = getDoc();
+    if (resolved && doc) dispatch(resolveWithOutcomeOps(doc, comment, outcome, authorName()));
+    else dispatch([{ t: 'comment', action: 'update', comment: { id: comment.id, resolved } }]);
+    setClosing(false);
+    setOutcome('');
     if (resolved) setOpenComment(null);
   };
+  const decided = open ? decisionForComment(getDoc() ?? ({} as never), comment.id) : undefined;
 
   return (
     <div
@@ -96,12 +104,39 @@ export const CommentPin = memo(function CommentPin({ comment, scale }: {
             }}
           />
 
-          <footer className="comment-actions">
-            <button className="button subtle" onClick={() => setResolved(!comment.resolved)}>
-              {comment.resolved ? 'Reopen' : 'Resolve'}
-            </button>
-            <button className="button" onClick={reply} disabled={!draft.trim()}>Reply</button>
-          </footer>
+          {decided && (
+            <p className="comment-outcome"><strong>Decided:</strong> {decided.text}</p>
+          )}
+
+          {closing ? (
+            <div className="comment-resolve">
+              <input
+                className="input"
+                autoFocus
+                placeholder="Outcome — what was decided (optional)"
+                value={outcome}
+                onChange={(e) => setOutcome(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') setResolved(true);
+                  if (e.key === 'Escape') setClosing(false);
+                  e.stopPropagation();
+                }}
+              />
+              <footer className="comment-actions">
+                <button className="button subtle" onClick={() => setClosing(false)}>Cancel</button>
+                <button className="button" onClick={() => setResolved(true)}>
+                  {outcome.trim() ? 'Resolve and log' : 'Resolve'}
+                </button>
+              </footer>
+            </div>
+          ) : (
+            <footer className="comment-actions">
+              <button className="button subtle" onClick={() => (comment.resolved ? setResolved(false) : setClosing(true))}>
+                {comment.resolved ? 'Reopen' : 'Resolve…'}
+              </button>
+              <button className="button" onClick={reply} disabled={!draft.trim()}>Reply</button>
+            </footer>
+          )}
         </Thread>
       )}
     </div>
