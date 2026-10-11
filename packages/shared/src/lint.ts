@@ -101,6 +101,13 @@ export interface LintOptions {
   /** Theme to resolve token values against. */
   theme?: string;
   /**
+   * Check contrast in every document theme for artboards that do not pin one.
+   * Off by default: an artboard is shown in its own theme (data-theme, else
+   * default), and checking light-only screens and documentation sheets in dark
+   * buried the real dark-mode problems under hundreds of findings.
+   */
+  allThemes?: boolean;
+  /**
    * Measured boxes by node id, when a browser is available. Without them the
    * tap-target rule falls back to authored sizes and stays quiet where it
    * cannot tell.
@@ -143,7 +150,9 @@ export function lintDocument(doc: CanvasDocument, options: LintOptions = {}): Fi
 
     if (enabled.has('contrast')) {
       const pinned = artboard ? doc.nodes[artboard]?.attrs['data-theme'] : undefined;
-      const relevant = pinned && themes.includes(pinned) ? resolvers.filter((r) => r.theme === pinned) : resolvers;
+      const relevant = pinned && themes.includes(pinned)
+        ? resolvers.filter((r) => r.theme === pinned)
+        : options.allThemes || options.theme ? resolvers : resolvers.filter((r) => r.theme === 'default');
       findings.push(...checkContrast(doc, node, artboard, relevant, themes.length > 1));
     }
     if (enabled.has('empty-artboard')) findings.push(...checkEmptyArtboard(doc, node));

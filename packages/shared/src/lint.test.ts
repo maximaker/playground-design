@@ -227,10 +227,11 @@ test('a control that is not rendered is not a tap target', () => {
 // Health check
 // ---------------------------------------------------------------------------
 
-test('contrast is judged in every theme: literal ink on a token that inverts fails only in dark', () => {
+test('contrast with allThemes: literal ink on a token that inverts fails only in dark', () => {
   const { doc } = docWith(`<div style="background-color:var(--color-surface)"><p style="color:#111111;font-size:16px">Ink</p></div>`);
   doc.tokens.push({ name: 'color.surface', group: 'color', values: { default: '#c6f432', dark: '#0b1e3f' } } as never);
-  const findings = only(doc, 'contrast');
+  assert.equal(only(doc, 'contrast').length, 0, 'unpinned frames are judged in their own (default) theme');
+  const findings = lintDocument(doc, { rules: ['contrast'], allThemes: true });
   assert.equal(findings.length, 1);
   assert.match(findings[0]!.message, /in the dark theme/);
   assert.match(findings[0]!.fix!, /tokens for both/);
@@ -298,4 +299,25 @@ test('flags a section title too long for its one-screen region', async () => {
   const findings = only(doc, 'section-header');
   assert.equal(findings.length, 1);
   assert.match(findings[0]!.message, /too long/);
+});
+
+test('contrast: frames are checked in their own theme unless allThemes is set', async () => {
+  const { createEmptyDocument, makeNode } = await import('./model.ts');
+  const { applyOp } = await import('./ops.ts');
+  const doc = createEmptyDocument('t');
+  doc.themes = ['default', 'dark'];
+  doc.tokens = [
+    { name: 'color.ink', group: 'color', values: { default: '#111111', dark: '#f5f5f5' } },
+    { name: 'color.bg', group: 'color', values: { default: '#ffffff', dark: '#ffffff' } },
+  ];
+  const ab = doc.pages[0]!.artboards[0]!;
+  applyOp(doc, { t: 'styles', updates: [{ id: ab, styles: { 'background-color': 'var(--color-bg)' } }] });
+  const text = makeNode({ type: 'text', tag: 'p', text: 'Hello', styles: { color: 'var(--color-ink)', 'font-size': '14px' }, parent: ab });
+  applyOp(doc, { t: 'insert', nodes: [text], parent: ab, index: 0 });
+  // Light-only frame: light text on white only happens in dark, which this frame never shows.
+  assert.equal(lintDocument(doc, { rules: ['contrast'] }).length, 0);
+  assert.equal(lintDocument(doc, { rules: ['contrast'], allThemes: true }).length, 1);
+  // Pinned to dark: now it is a real finding.
+  applyOp(doc, { t: 'attrs', updates: [{ id: ab, attrs: { 'data-theme': 'dark' } }] });
+  assert.equal(lintDocument(doc, { rules: ['contrast'] }).length, 1);
 });
