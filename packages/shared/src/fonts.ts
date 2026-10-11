@@ -49,13 +49,19 @@ export function fontFamiliesIn(doc: CanvasDocument, rootId: NodeId): string[] {
   return [...families];
 }
 
+export const GOOGLE_FONT_WEIGHTS = 'ital,wght@0,100;0,200;0,300;0,400;0,500;0,600;0,700;0,800;0,900;1,400;1,700';
+
 export function googleFontsHref(families: readonly string[]): string | null {
   // Anything that is not a plain family name is dropped rather than sent: one
   // bad entry invalidates the request for all of them.
   const usable = families.filter((f) => /^[\w][\w .'-]*$/.test(f));
   if (!usable.length) return null;
   const params = usable
-    .map((f) => `family=${encodeURIComponent(f).replace(/%20/g, '+')}:ital,wght@0,100..900;1,100..900`)
+    // A discrete weight list, not a range: Google rejects a range wider than the
+    // family's own axis (Plus Jakarta Sans is 200–800, so "100..900" returned
+    // 400 and the font silently fell back), but it tolerates listed weights or
+    // italics a family does not have. One request still serves every family.
+    .map((f) => `family=${encodeURIComponent(f).replace(/%20/g, '+')}:${GOOGLE_FONT_WEIGHTS}`)
     .join('&');
   return `https://fonts.googleapis.com/css2?${params}&display=swap`;
 }

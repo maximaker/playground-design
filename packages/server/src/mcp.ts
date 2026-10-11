@@ -34,6 +34,7 @@ import {
   artifactoryEmbedUrl, treeEntries, nodeEntry, type InstanceOverride,
   type Section, SECTION_STATUSES, makeSection, sectionsOf, sectionMembers, sectionRect, arrangeSectionOps, sectionFlows, findFlow,
   sectionOfArtboard,
+  GOOGLE_FONT_WEIGHTS,
 } from '@playground/shared';
 import {
   applyOps, getDocument, getSnapshot, listSnapshots, StoreError, createSnapshot,
@@ -1105,7 +1106,7 @@ async function lookupGoogleFont(family: string): Promise<GoogleFontInfo | null> 
   if (googleFontCache.has(key)) return googleFontCache.get(key)!;
   try {
     // The CSS2 endpoint 400s for unknown families, which is all we need to know.
-    const url = `https://fonts.googleapis.com/css2?family=${encodeURIComponent(family)}:ital,wght@0,100..900;1,100..900&display=swap`;
+    const url = `https://fonts.googleapis.com/css2?family=${encodeURIComponent(family)}:${GOOGLE_FONT_WEIGHTS}&display=swap`;
     const res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
     if (!res.ok) { googleFontCache.set(key, null); return null; }
     const css = await res.text();
