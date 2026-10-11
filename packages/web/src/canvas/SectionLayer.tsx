@@ -15,6 +15,8 @@ import {
 import { useCanvas, currentPage, getDoc } from '../state/store.ts';
 import { fitBox } from '../hooks/commands.ts';
 
+const MIN_SECTION_WIDTH = 900;
+
 export function SectionLayer() {
   useCanvas((s) => s.version);
   const zoom = useCanvas((s) => s.viewport.zoom);
@@ -59,7 +61,10 @@ function SectionRegion({ section, zoom }: { section: Section; zoom: number }) {
     <div
       className="section-region"
       style={{
-        left: rect.x * zoom, top: rect.y * zoom - extra, width: rect.width * zoom, height: rect.height * zoom + extra,
+        left: rect.x * zoom, top: rect.y * zoom - extra,
+        // A one-screen section is narrower than its own title, status and
+        // count; the region keeps a minimum width so the header never clips.
+        width: Math.max(rect.width, MIN_SECTION_WIDTH) * zoom, height: rect.height * zoom + extra,
         // Mixed per theme (--section-mix) so the canvas's own labels stay legible
         // on the region in light and dark alike.
         background: `color-mix(in srgb, ${tint.bg} var(--section-mix), transparent)`,

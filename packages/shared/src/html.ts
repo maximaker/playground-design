@@ -361,12 +361,28 @@ export function parseHtml(html: string, opts: ParseOptions = {}): ParseResult {
       node.text = el.innerHTML;
       node.children = [];
     } else {
-      for (const child of el.childNodes) {
+      const kids = el.childNodes;
+      const layout = String(styles.display ?? '');
+      const collapses = /flex|grid/.test(layout);
+      for (const [i, child] of kids.entries()) {
         if (isElement(child)) {
           const cid = walk(child as ParsedElement, node.id);
           if (cid) node.children.push(cid);
         } else {
-          const raw = decodeEntities(String(child.rawText ?? '')).trim();
+          // Collapse whitespace like HTML does, but keep one space at an edge
+          // that touches an element: "<strong>Ana</strong> Popescu" must not
+          // become "AnaPopescu". In flex and grid containers CSS drops those
+          // edge spaces anyway, so only plain text there is kept.
+          const collapsed = decodeEntities(String(child.rawText ?? '')).replace(/\s+/g, ' ');
+          const prevEl = i > 0 && isElement(kids[i - 1]!);
+          const nextEl = i < kids.length - 1 && isElement(kids[i + 1]!);
+          let raw = collapsed.trim();
+          if (!raw && !(prevEl && nextEl && !collapses)) continue;
+          if (!collapses) {
+            if (prevEl && collapsed.startsWith(' ')) raw = ` ${raw}`;
+            if (nextEl && collapsed.endsWith(' ') && raw !== ' ') raw = `${raw} `;
+            if (!raw.trim()) raw = ' ';
+          }
           if (raw) {
             // A bare text run inside a container becomes its own text node so it
             // remains selectable and stylable on the canvas — but with no styles

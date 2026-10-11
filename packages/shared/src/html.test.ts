@@ -61,3 +61,12 @@ test('parsed elements keep their authored class list as data-class', () => {
   assert.equal(button.attrs['data-class'], 'btn primary');
   assert.equal(button.styles.padding, '8px');
 });
+
+test('parseHtml keeps the space between an inline element and the text after it', () => {
+  const { nodes } = parseHtml('<span><strong>Ana</strong> Popescu</span>');
+  const texts = nodes.filter((n) => n.type === 'text').map((n) => n.text);
+  assert.deepEqual(texts, ['Ana', ' Popescu']);
+  // In a flex container CSS drops edge spaces anyway, so nothing extra is kept.
+  const flex = parseHtml('<div style="display:flex"><b>A</b> <b>B</b></div>');
+  assert.equal(flex.nodes.filter((n) => n.type === 'text' && !n.text?.trim()).length, 0);
+});
