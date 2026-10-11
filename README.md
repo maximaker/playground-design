@@ -182,6 +182,7 @@ Artifactory's origin gets an answer that allows the session cookie.
 | `get_selection` | What the human has selected right now |
 | `get_computed_styles` | Authored styles, plus browser-resolved values and measured boxes — from the person's tab when it shows the page, otherwise rendered headlessly (`source` says which) |
 | `get_screenshot` | PNG of any node, so the agent can see its own work |
+| `get_screenshots` | `{ ids, columns, scale, labels }` — one PNG contact sheet of many nodes (a whole flow at a glance), composed on the server |
 | `get_html` / `get_jsx` | HTML+CSS, or JSX in Tailwind or inline-style form |
 | `get_fill_image` | The bytes behind an image node |
 | `get_font_family_info` | Whether a family and weight are actually available |

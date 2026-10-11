@@ -46,7 +46,7 @@ import { pageArtboard, slugify } from './publish.ts';
 import {
   callTab, notifyTabs, selectionOf, hasLiveTab, NoTabError, setAgentPresence, clearAgentPresence, hasTabOnPage,
 } from './realtime.ts';
-import { renderNode, measureSubtree, rasterizeSvg, computeStyles } from './render.ts';
+import { renderNode, measureSubtree, rasterizeSvg, computeStyles, composeContactSheet } from './render.ts';
 import { storeAsset } from './assets.ts';
 import { gatherHealthFacts, recordStyleRules } from './health.ts';
 import { GUIDES, guideList } from './guides.ts';
@@ -1223,6 +1223,40 @@ function registerReadTools(server: McpServer, ctx: McpContext): void {
         { type: 'image' as const, data: data.toString('base64'), mimeType: mime },
       ],
     };
+  }));
+
+  server.registerTool('get_screenshots', {
+    title: 'Screenshot several nodes on one sheet',
+    description:
+      'Renders many nodes (usually artboards) and lays them out as ONE PNG contact sheet — a grid with '
+      + 'optional captions — so you can review a whole flow in one look. Composed on the server; no external tools.',
+    inputSchema: {
+      ids: z.array(z.string()).min(1).max(60).describe('Nodes to include, in reading order. Omit nothing: pass the artboards of a page from get_basic_info.'),
+      columns: z.number().int().min(1).max(12).optional().default(4),
+      scale: z.number().min(0.1).max(2).optional().default(0.5).describe('Size of each shot relative to its real size.'),
+      labels: z.union([z.boolean(), z.array(z.string())]).optional().default(true)
+        .describe('true captions each shot with its layer name; an array gives your own captions; false for none.'),
+    },
+    annotations: { readOnlyHint: true },
+  }, async ({ ids, columns, scale, labels }) => guard(async () => {
+    const doc = requireDoc(ctx);
+    for (const id of ids) node(doc, id);
+    const cells: { png: Buffer; label?: string }[] = [];
+    for (const [i, id] of ids.entries()) {
+      const { data } = await renderNode(doc, id, { format: 'png', scale: 1, baseUrl: ctx.baseUrl });
+      const label = labels === true ? doc.nodes[id]!.name : Array.isArray(labels) ? labels[i] : undefined;
+      cells.push({ png: data, ...(label ? { label } : {}) });
+    }
+    const sheet = await composeContactSheet(cells, { columns: Math.min(columns, ids.length), scale });
+    if (!sheet) {
+      return {
+        content: [
+          { type: 'text' as const, text: 'Headless rendering is unavailable, so these are separate images in order.' },
+          ...cells.map((c) => ({ type: 'image' as const, data: c.png.toString('base64'), mimeType: 'image/png' })),
+        ],
+      };
+    }
+    return { content: [{ type: 'image' as const, data: sheet.toString('base64'), mimeType: 'image/png' }] };
   }));
 
   server.registerTool('get_fill_image', {

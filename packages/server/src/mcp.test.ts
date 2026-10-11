@@ -1317,3 +1317,23 @@ test('artboards move and copy across pages with { ids, map }', async () => {
   assert.ok(Number(doc.nodes[board]!.attrs['data-x']) > Number(doc.nodes[copy]!.attrs['data-x']), 'placed clear of the copy');
   await agent.close();
 });
+
+test('get_screenshots returns one contact sheet', async () => {
+  const { id, agent, raw, call } = await freshAgent('Sheet');
+  const board = getDocument(id)!.pages[0]!.artboards[0]!;
+  const second = await call<{ id: string }>('create_artboard', { name: 'Second', width: 300, height: 200 });
+  const res = await raw('get_screenshots', { ids: [board, second.id], columns: 2, scale: 0.25 });
+  if (isError(res)) {
+    assert.match(textOf(res), /Playwright|browser tab/);
+  } else {
+    const content = (res as { content: { type: string; data?: string }[] }).content;
+    const images = content.filter((c) => c.type === 'image');
+    assert.ok(images.length >= 1);
+    if (images.length === 1) {
+      const png = Buffer.from(images[0]!.data!, 'base64');
+      const w = png.readUInt32BE(16);
+      assert.ok(w > 300 * 0.25 * 2, `sheet is wider than two shots (${w})`);
+    }
+  }
+  await agent.close();
+});

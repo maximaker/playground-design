@@ -118,6 +118,45 @@ export async function rasterizeSvg(svg: string, scale = 1): Promise<Buffer | nul
   }
 }
 
+/**
+ * Lays PNGs out on one sheet — a grid with optional captions — and photographs
+ * it. Returns null without Playwright; the caller then falls back to separate
+ * images.
+ */
+export async function composeContactSheet(
+  cells: { png: Buffer; label?: string }[],
+  opts: { columns: number; scale: number; background?: string },
+): Promise<Buffer | null> {
+  const pw = await tryLoadPlaywright();
+  if (!pw) return null;
+  const esc = (t: string) => t.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!));
+  const dims = cells.map((c) => ({ w: c.png.readUInt32BE(16), h: c.png.readUInt32BE(20) }));
+  const colWidth = Math.max(...dims.map((d) => d.w)) * opts.scale;
+  const width = Math.min(6000, Math.ceil(opts.columns * colWidth + (opts.columns + 1) * 24));
+  const browser = await getBrowser(pw);
+  const context = await browser.newContext({ viewport: { width, height: 400 }, deviceScaleFactor: 1 });
+  const page = await context.newPage();
+  try {
+    const items = cells.map((c, i) => `<figure><img src="data:image/png;base64,${c.png.toString('base64')}" `
+      + `style="width:${Math.round(dims[i]!.w * opts.scale)}px;height:${Math.round(dims[i]!.h * opts.scale)}px">`
+      + `${c.label ? `<figcaption>${esc(c.label)}</figcaption>` : ''}</figure>`).join('');
+    await page.setContent(
+      '<!doctype html><html><head><style>'
+      + `html,body{margin:0;background:${opts.background ?? '#f4f4f5'}}`
+      + `main{display:grid;grid-template-columns:repeat(${opts.columns},max-content);gap:24px;padding:24px;align-items:start;width:max-content}`
+      + 'figure{margin:0}img{display:block;box-shadow:0 0 0 1px rgba(0,0,0,.08);max-width:none}'
+      + 'figcaption{font:500 13px/1.3 system-ui,-apple-system,Segoe UI,sans-serif;color:#3f3f46;margin-top:8px;max-width:100%}'
+      + `</style></head><body><main>${items}</main></body></html>`,
+      { waitUntil: 'load' },
+    );
+    const main = await page.$('main');
+    if (!main) return null;
+    return Buffer.from(await main.screenshot({ type: 'png' }));
+  } finally {
+    await context.close();
+  }
+}
+
 function sizeOf(doc: CanvasDocument, nodeId: NodeId): { width: number; height: number } {
   const node = getNode(doc, nodeId)!;
   if (node.type === 'artboard') return getArtboardSize(node);
