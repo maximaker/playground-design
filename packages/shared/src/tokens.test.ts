@@ -146,3 +146,21 @@ test('merge can be told to remove what is missing', () => {
   const merged = mergeTokens(current, [{ name: 'a', group: 'color', values: { default: '#111' } }], { removeMissing: true });
   assert.deepEqual(merged.map((t) => t.name), ['a']);
 });
+
+test('a token can alias another, and emitted CSS references the target', async () => {
+  const { tokenCss } = await import('./html.ts');
+  const { literalTokenValue } = await import('./css.ts');
+  const doc = createEmptyDocument('Alias');
+  doc.tokens = [
+    { name: 'color.lime', group: 'color', values: { default: '#a3e635' } },
+    { name: 'color.accent', group: 'color', values: { default: '{color.lime}' } },
+    { name: 'motion.fast', group: 'motion', values: { default: '120ms' } },
+  ];
+  const css = tokenCss(doc);
+  assert.match(css, /--color-accent: var\(--color-lime\);/);
+  assert.match(css, /--motion-fast: 120ms;/, 'free-form groups emit like any other');
+  assert.equal(literalTokenValue(doc.tokens, 'color.accent'), '#a3e635');
+  // Exporters do not choke on a group they have no section for.
+  assert.match(serializeTokens(doc, 'tailwind'), /motion/);
+  assert.match(serializeTokens(doc, 'json'), /"\$type": "motion"/);
+});

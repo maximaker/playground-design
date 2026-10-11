@@ -336,13 +336,24 @@ export function activeBreakpoints(doc: CanvasDocument, width: number): Breakpoin
   return breakpointsOf(doc).filter((bp) => width <= bp.maxWidth);
 }
 
-export type TokenGroup = 'color' | 'space' | 'radius' | 'font' | 'shadow' | 'duration';
+/** The groups the editor and exporters know how to file. */
+export const KNOWN_TOKEN_GROUPS = ['color', 'space', 'radius', 'font', 'shadow', 'duration'] as const;
+export type KnownTokenGroup = typeof KNOWN_TOKEN_GROUPS[number];
+/**
+ * A known group, or any free-form one (`motion`, `z`, `opacity`…). Free-form
+ * groups emit as CSS variables like any other; exporters file them generically.
+ */
+export type TokenGroup = KnownTokenGroup | (string & {});
 
 export interface Token {
   /** Dot path, e.g. `color.brand.500`. Emits as `--color-brand-500`. */
   name: string;
   group: TokenGroup;
-  /** Value per theme name. Every token must define the `default` theme. */
+  /**
+   * Value per theme name. Every token must define the `default` theme. A value
+   * may alias another token with `{color.lime}`; emitted CSS resolves it to
+   * `var(--color-lime)`, so retheming the target retheme the alias too.
+   */
   values: Record<string, string>;
 }
 

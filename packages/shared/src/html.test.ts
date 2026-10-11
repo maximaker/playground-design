@@ -54,3 +54,10 @@ test('a family held in a token is still a family', () => {
   assert.doesNotMatch(href, /var\(/);
   assert.match(html, /font-family: var\(--font-display\)/);
 });
+
+test('parsed elements keep their authored class list as data-class', () => {
+  const result = parseHtml('<style>.btn{padding:8px}</style><button class="btn  primary">Save</button>');
+  const button = result.nodes.find((n) => n.tag === 'button')!;
+  assert.equal(button.attrs['data-class'], 'btn primary');
+  assert.equal(button.styles.padding, '8px');
+});
