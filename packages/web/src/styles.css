@@ -3457,4 +3457,7 @@ code { font-family: var(--mono); font-size: 0.92em; }
 .section-row .icon-button:disabled { opacity: 0.4; cursor: default; }
 
 /* Title, status and count never shrink; only the description gives way. */
-.section-title, .section-pill, .section-count { flex: 0 0 auto; }
+.section-pill, .section-count { flex: 0 0 auto; }
+/* Zoomed far out, text keeps a readable minimum while the region shrinks: the
+   title gives way with an ellipsis so the status pill always stays whole. */
+.section-title { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
