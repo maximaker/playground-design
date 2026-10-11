@@ -222,3 +222,80 @@ test('a control that is not rendered is not a tap target', () => {
   const small = lintDocument(doc, { rules: ['tap-target'], measured: { [link.id]: { width: 40, height: 18 } } });
   assert.equal(small.length, 1, 'a small but visible one still is');
 });
+
+// ---------------------------------------------------------------------------
+// Health check
+// ---------------------------------------------------------------------------
+
+test('contrast is judged in every theme: literal ink on a token that inverts fails only in dark', () => {
+  const { doc } = docWith(`<div style="background-color:var(--color-surface)"><p style="color:#111111;font-size:16px">Ink</p></div>`);
+  doc.tokens.push({ name: 'color.surface', group: 'color', values: { default: '#c6f432', dark: '#0b1e3f' } } as never);
+  const findings = only(doc, 'contrast');
+  assert.equal(findings.length, 1);
+  assert.match(findings[0]!.message, /in the dark theme/);
+  assert.match(findings[0]!.fix!, /tokens for both/);
+  assert.equal(lintDocument(doc, { rules: ['contrast'], theme: 'default' }).length, 0, 'an explicit theme narrows it');
+});
+
+test('an artboard pinned to a theme is judged only in that theme', () => {
+  const { doc, artboard } = docWith(`<div style="background-color:var(--color-surface)"><p style="color:#111111;font-size:16px">Ink</p></div>`);
+  doc.tokens.push({ name: 'color.surface', group: 'color', values: { default: '#c6f432', dark: '#0b1e3f' } } as never);
+  doc.nodes[artboard]!.attrs['data-theme'] = 'default';
+  assert.equal(only(doc, 'contrast').length, 0);
+});
+
+test('flags empty artboards, but not the starter frame of a new document', () => {
+  const doc = createEmptyDocument('Empty');
+  assert.equal(only(doc, 'empty-artboard').length, 0);
+  const { doc: built, artboard } = docWith('<div>x</div>');
+  const blank = makeNode({ type: 'artboard', name: 'Blank', parent: null });
+  applyOp(built, { t: 'insert', nodes: [blank], parent: null, index: 1 });
+  const findings = only(built, 'empty-artboard');
+  assert.equal(findings.length, 1);
+  assert.equal(findings[0]!.nodeId, blank.id);
+  assert.notEqual(findings[0]!.nodeId, artboard);
+});
+
+test('reports clipped frames from measured overflow facts', () => {
+  const { doc, artboard } = docWith(`<div>x</div>`);
+  const findings = lintDocument(doc, { rules: ['overflow'], facts: { overflow: [{ id: artboard, x: 0, y: 140 }] } });
+  assert.equal(findings.length, 1);
+  assert.equal(findings[0]!.severity, 'error');
+  assert.match(findings[0]!.message, /140px at the bottom/);
+  assert.equal(only(doc, 'overflow').length, 0, 'silent without measurement');
+});
+
+test('reports fonts that will not load, pointing at a node that uses them', () => {
+  const { doc } = docWith(`<p style="font-family:'Satoshi Pro', sans-serif">Hi</p>`);
+  const findings = lintDocument(doc, { rules: ['font-load'], facts: { fonts: [{ family: 'Satoshi Pro', status: 'not-google' }] } });
+  assert.equal(findings.length, 1);
+  assert.match(findings[0]!.message, /not on Google Fonts/);
+  assert.equal(doc.nodes[findings[0]!.nodeId]!.styles['font-family'], "'Satoshi Pro', sans-serif");
+});
+
+test('parseHtml reports selector coverage; lint flags rules that missed or hit nearly everything', () => {
+  const spans = Array.from({ length: 12 }, (_, i) => `<span>${i}</span>`).join('');
+  const parsed = parseHtml(`<style>span { color: red } .nav span { color: blue } .missing { color: green } body { margin: 0 }</style><div>${spans}</div>`);
+  const stat = (sel: string) => parsed.styleRules.find((s) => s.selector === sel)!;
+  assert.equal(parsed.elements, 13);
+  assert.equal(stat('span').matched, 12);
+  assert.equal(stat('.nav span').matched, 0);
+  const doc = createEmptyDocument('Rules');
+  applyOp(doc, { t: 'insert', nodes: parsed.nodes, parent: doc.pages[0]!.artboards[0]!, index: 0 });
+  const messages = lintDocument(doc, { rules: ['style-rule'], facts: { styleRules: parsed.styleRules } }).map((f) => f.message);
+  assert.equal(messages.length, 3);
+  assert.ok(messages.some((m) => /"span" matched 12 of 13/.test(m)));
+  assert.ok(messages.some((m) => /"\.missing" matched nothing/.test(m)));
+  assert.ok(!messages.some((m) => /"body"/.test(m)), 'body is broad by design');
+});
+
+test('flags a section title too long for its one-screen region', async () => {
+  const { makeSection } = await import('./ops.ts');
+  const { doc, artboard } = docWith(`<div>x</div>`);
+  doc.nodes[artboard]!.styles.width = '390px';
+  const section = makeSection({ title: 'A very long section title that will never fit above a single phone screen', artboards: [artboard] } as never);
+  doc.pages[0]!.sections = [section];
+  const findings = only(doc, 'section-header');
+  assert.equal(findings.length, 1);
+  assert.match(findings[0]!.message, /too long/);
+});

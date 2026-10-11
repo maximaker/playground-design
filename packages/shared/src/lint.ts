@@ -16,6 +16,8 @@ import {
 } from './model.ts';
 import { expandNode } from './components.ts';
 import { literalTokenValue } from './css.ts';
+import type { StyleRuleStat } from './html.ts';
+import { sectionsOf, sectionRect, sectionMembers } from './sections.ts';
 import { contrastRatio, formatRatio, parseColor, requiredContrast, type Rgb } from './color.ts';
 
 export type Severity = 'error' | 'warning' | 'info';
@@ -40,7 +42,12 @@ export type RuleId =
   | 'absolute-soup'
   | 'empty-text'
   | 'repeated-subtree'
-  | 'off-scale-spacing';
+  | 'off-scale-spacing'
+  | 'font-load'
+  | 'style-rule'
+  | 'overflow'
+  | 'empty-artboard'
+  | 'section-header';
 
 export interface RuleInfo {
   id: RuleId;
@@ -58,7 +65,34 @@ export const RULES: RuleInfo[] = [
   { id: 'empty-text', title: 'Empty text layers', why: 'Empty text nodes render nothing and are usually leftovers.' },
   { id: 'repeated-subtree', title: 'Repetition', why: 'The same structure repeated several times will drift apart; a component keeps it together.' },
   { id: 'off-scale-spacing', title: 'Spacing scale', why: 'Spacing that sits off the scale reads as accidental.' },
+  { id: 'font-load', title: 'Fonts', why: 'A font that fails to load falls back silently, so the design you see is not the one you wrote.' },
+  { id: 'style-rule', title: 'Style rules', why: 'A rule that matched nothing, or nearly every element, almost always means the selector did not say what was meant.' },
+  { id: 'overflow', title: 'Clipped content', why: 'Content that overflows a frame that hides overflow is cut off without any visible sign.' },
+  { id: 'empty-artboard', title: 'Empty frames', why: 'A frame with nothing in it is usually a leftover, or a screen that failed to build.' },
+  { id: 'section-header', title: 'Section headers', why: 'A section header too long for its region, or covered by a neighbour, is cut off on the canvas.' },
 ];
+
+/** A font the environment could not get. */
+export interface FontIssue {
+  family: string;
+  /** `not-google`: Google Fonts rejected the request; `invalid`: not a usable family name; `failed`: the browser could not load it. */
+  status: 'not-google' | 'invalid' | 'failed';
+}
+
+/** A frame whose content is larger than its box while overflow is hidden. */
+export interface OverflowFact {
+  id: NodeId;
+  /** Pixels of content cut off on each axis. */
+  x: number;
+  y: number;
+}
+
+/** Facts only a browser or the network can supply. Each is optional; a missing one skips its rule. */
+export interface HealthFacts {
+  fonts?: FontIssue[];
+  overflow?: OverflowFact[];
+  styleRules?: StyleRuleStat[];
+}
 
 export interface LintOptions {
   /** Limit to one artboard or subtree. */
@@ -72,6 +106,8 @@ export interface LintOptions {
    * cannot tell.
    */
   measured?: Record<NodeId, { width: number; height: number }>;
+  /** Browser- and network-measured facts for the health rules. */
+  facts?: HealthFacts;
 }
 
 const TAP_TARGET_MIN = 44;
@@ -80,7 +116,11 @@ const REPEAT_THRESHOLD = 3;
 
 export function lintDocument(doc: CanvasDocument, options: LintOptions = {}): Finding[] {
   const enabled = new Set(options.rules ?? RULES.map((r) => r.id));
-  const resolve = tokenResolver(doc, options.theme);
+  // Contrast is judged in every theme the document defines — a token that
+  // inverts in dark mode leaves literal text unreadable there, and the default
+  // theme alone never shows it. An artboard pinned to a theme is judged in that one.
+  const themes = options.theme ? [options.theme] : (doc.themes?.length ? doc.themes : ['default']);
+  const resolvers = themes.map((t) => ({ theme: t, resolve: tokenResolver(doc, t) }));
   // Only tokens the document already uses somewhere. A literal that happens to
   // equal an unused token is a coincidence, not an inconsistency — and flagging
   // it fires on every new document, whose default artboard is token-white.
@@ -101,7 +141,13 @@ export function lintDocument(doc: CanvasDocument, options: LintOptions = {}): Fi
 
     const artboard = artboardOf(doc, id);
 
-    if (enabled.has('contrast')) findings.push(...checkContrast(doc, node, artboard, resolve));
+    if (enabled.has('contrast')) {
+      const pinned = artboard ? doc.nodes[artboard]?.attrs['data-theme'] : undefined;
+      const relevant = pinned && themes.includes(pinned) ? resolvers.filter((r) => r.theme === pinned) : resolvers;
+      findings.push(...checkContrast(doc, node, artboard, relevant, themes.length > 1));
+    }
+    if (enabled.has('empty-artboard')) findings.push(...checkEmptyArtboard(doc, node));
+    if (enabled.has('overflow')) findings.push(...checkOverflow(node, artboard, options.facts?.overflow));
     if (enabled.has('tap-target')) findings.push(...checkTapTarget(node, artboard, options.measured));
     if (enabled.has('missing-alt')) findings.push(...checkAlt(node, artboard));
     if (enabled.has('tiny-text')) findings.push(...checkTextSize(node, artboard));
@@ -112,6 +158,11 @@ export function lintDocument(doc: CanvasDocument, options: LintOptions = {}): Fi
   }
 
   if (enabled.has('repeated-subtree')) findings.push(...checkRepetition(doc, scope));
+  if (!options.within) {
+    if (enabled.has('font-load')) findings.push(...checkFonts(doc, options.facts?.fonts));
+    if (enabled.has('style-rule')) findings.push(...checkStyleRules(doc, options.facts?.styleRules));
+    if (enabled.has('section-header')) findings.push(...checkSectionHeaders(doc));
+  }
 
   // Errors first, then by artboard, so a reader works through one screen at a time.
   const weight: Record<Severity, number> = { error: 0, warning: 1, info: 2 };
@@ -126,31 +177,175 @@ function checkContrast(
   doc: CanvasDocument,
   node: CanvasNode,
   artboard: NodeId | null,
-  resolve: (name: string) => string | undefined,
+  resolvers: { theme: string; resolve: (name: string) => string | undefined }[],
+  nameTheme: boolean,
 ): Finding[] {
   if (node.type !== 'text' || !node.text?.trim()) return [];
-
-  const color = parseColor(inherited(doc, node, 'color') ?? '', resolve);
-  if (!color) return [];
-
-  const background = effectiveBackground(doc, node, resolve);
-  // Over a gradient or an image there is no single background to measure.
-  if (!background) return [];
-
   const size = parseFloat(inherited(doc, node, 'font-size') ?? '16') || 16;
   const weight = parseFloat(inherited(doc, node, 'font-weight') ?? '400') || 400;
-  const ratio = contrastRatio(color, background);
   const required = requiredContrast(size, weight);
-  if (ratio >= required) return [];
 
+  const failing: { theme: string; ratio: number }[] = [];
+  for (const { theme, resolve } of resolvers) {
+    const color = parseColor(inherited(doc, node, 'color') ?? '', resolve);
+    if (!color) continue;
+    const background = effectiveBackground(doc, node, resolve);
+    // Over a gradient or an image there is no single background to measure.
+    if (!background) continue;
+    const ratio = contrastRatio(color, background);
+    if (ratio < required) failing.push({ theme, ratio });
+  }
+  if (!failing.length) return [];
+
+  const worst = failing.reduce((a, b) => (b.ratio < a.ratio ? b : a));
+  const where = nameTheme
+    ? ` in the ${failing.map((f) => f.theme).join(' and ')} theme${failing.length > 1 ? 's' : ''}`
+    : '';
   return [{
     rule: 'contrast',
-    severity: ratio < required * 0.7 ? 'error' : 'warning',
+    severity: worst.ratio < required * 0.7 ? 'error' : 'warning',
     nodeId: node.id,
     artboard,
-    message: `Text contrast is ${formatRatio(ratio)}; WCAG AA needs ${required}:1 at ${Math.round(size)}px.`,
-    fix: 'Darken the text, lighten the background, or increase the size past 24px.',
+    message: `Text contrast is ${formatRatio(worst.ratio)}${where}; WCAG AA needs ${required}:1 at ${Math.round(size)}px.`,
+    fix: failing.length < resolvers.length
+      ? 'Use colour tokens for both the text and its background, so they change together between themes.'
+      : 'Darken the text, lighten the background, or increase the size past 24px.',
   }];
+}
+
+function checkEmptyArtboard(doc: CanvasDocument, node: CanvasNode): Finding[] {
+  if (node.type !== 'artboard' || node.parent !== null) return [];
+  if (node.children.some((c) => doc.nodes[c])) return [];
+  // A document with no content anywhere has not been started; that is not a defect.
+  if (!doc.pages.some((p) => p.artboards.some((a) => doc.nodes[a]?.children.length))) return [];
+  return [{
+    rule: 'empty-artboard',
+    severity: 'warning',
+    nodeId: node.id,
+    artboard: node.id,
+    message: `"${node.name}" is empty.`,
+    fix: 'Build the screen, or delete the frame.',
+  }];
+}
+
+function checkOverflow(node: CanvasNode, artboard: NodeId | null, facts?: OverflowFact[]): Finding[] {
+  const fact = facts?.find((f) => f.id === node.id);
+  if (!fact) return [];
+  const parts = [fact.y > 0 && `${Math.round(fact.y)}px at the bottom`, fact.x > 0 && `${Math.round(fact.x)}px at the side`].filter(Boolean);
+  return [{
+    rule: 'overflow',
+    severity: Math.max(fact.x, fact.y) > 24 ? 'error' : 'warning',
+    nodeId: node.id,
+    artboard,
+    message: `Content is cut off: ${parts.join(' and ')} does not fit in "${node.name}".`,
+    fix: node.type === 'artboard'
+      ? 'Make the frame taller (or let it hug its content), or tighten what is inside.'
+      : 'Let it grow (remove the fixed height), allow overflow, or shorten the content.',
+  }];
+}
+
+function checkFonts(doc: CanvasDocument, fonts?: FontIssue[]): Finding[] {
+  const out: Finding[] = [];
+  for (const issue of fonts ?? []) {
+    const user = firstNodeUsingFont(doc, issue.family);
+    if (!user) continue;
+    out.push({
+      rule: 'font-load',
+      severity: 'error',
+      nodeId: user,
+      artboard: artboardOf(doc, user),
+      message: issue.status === 'not-google'
+        ? `"${issue.family}" is not on Google Fonts, so it falls back to a system font.`
+        : issue.status === 'invalid'
+          ? `"${issue.family}" is not a usable font family name, so it was never requested.`
+          : `"${issue.family}" failed to load, so it falls back to a system font.`,
+      fix: 'Check the spelling against fonts.google.com, or pick a family that is there.',
+    });
+  }
+  return out;
+}
+
+function firstNodeUsingFont(doc: CanvasDocument, family: string): NodeId | null {
+  const needle = family.toLowerCase();
+  for (const page of doc.pages) {
+    for (const a of page.artboards) {
+      for (const id of [a, ...descendants(doc, a)]) {
+        const value = doc.nodes[id]?.styles['font-family'];
+        if (value && value.toLowerCase().includes(needle)) return id;
+      }
+    }
+  }
+  // Used only through a token: point at the first artboard.
+  return doc.pages[0]?.artboards[0] ?? null;
+}
+
+/** Selectors whose job is to match everything. */
+const BROAD_SELECTORS = /^(\*|html|body|:root)$/;
+/** Share of elements above which a rule counts as matching "everything". */
+export const STYLE_RULE_BROAD = 0.8;
+
+function checkStyleRules(doc: CanvasDocument, stats?: StyleRuleStat[]): Finding[] {
+  const out: Finding[] = [];
+  for (const s of stats ?? []) {
+    const at = s.root && doc.nodes[s.root] ? s.root : doc.pages[0]?.artboards[0];
+    if (!at) continue;
+    const bare = s.selector.replace(/::?[\w-]+(\([^)]*\))?/g, '').trim();
+    if (!bare || BROAD_SELECTORS.test(bare)) continue;
+    if (s.matched === 0) {
+      out.push({
+        rule: 'style-rule', severity: 'warning', nodeId: at, artboard: artboardOf(doc, at),
+        message: `The rule "${s.selector}" matched nothing, so its styles were never applied.`,
+        fix: 'Check the class names against the markup; the importer keeps them in data-class.',
+      });
+    } else if (s.total >= 10 && s.matched / s.total > STYLE_RULE_BROAD) {
+      out.push({
+        rule: 'style-rule', severity: 'warning', nodeId: at, artboard: artboardOf(doc, at),
+        message: `The rule "${s.selector}" matched ${s.matched} of ${s.total} elements — almost everything.`,
+        fix: 'Scope it (".nav span" rather than "span"), or put the shared styles on the root.',
+      });
+    }
+  }
+  return out;
+}
+
+/** Rough text width at a font size; good enough to say "this will not fit". */
+const textWidth = (text: string, px: number) => text.length * px * 0.56;
+
+function checkSectionHeaders(doc: CanvasDocument): Finding[] {
+  const out: Finding[] = [];
+  for (const page of doc.pages) {
+    const sections = sectionsOf(page);
+    for (const section of sections) {
+      const rect = sectionRect(doc, page, section);
+      const first = sectionMembers(doc, page, section)[0];
+      if (!rect || !first) continue;
+      // The canvas header at 100%: a 26px title between 80px side padding,
+      // with a status pill and screen count beside it.
+      const inner = Math.max(rect.width, 360) - 160;
+      const titleTooLong = textWidth(section.title, 26) > inner - 220;
+      const descTooLong = !!section.description && textWidth(section.description, 16) > inner * 2;
+      // A neighbour whose region reaches into this header covers it.
+      const covered = sections.some((other) => {
+        if (other.id === section.id) return false;
+        const r = sectionRect(doc, page, other);
+        return !!r && r.x < rect.x + rect.width && r.x + r.width > rect.x && r.y < rect.y + 120 && r.y + r.height > rect.y;
+      });
+      if (!titleTooLong && !descTooLong && !covered) continue;
+      out.push({
+        rule: 'section-header',
+        severity: 'warning',
+        nodeId: first,
+        artboard: first,
+        message: covered
+          ? `The header of section "${section.title}" is overlapped by another section.`
+          : titleTooLong
+            ? `Section title "${section.title}" is too long for its region and will be cut off.`
+            : `The description of section "${section.title}" is too long for its header.`,
+        fix: covered ? 'Arrange the sections so they do not overlap.' : 'Shorten it, or widen the region with more screens.',
+      });
+    }
+  }
+  return out;
 }
 
 function checkTapTarget(

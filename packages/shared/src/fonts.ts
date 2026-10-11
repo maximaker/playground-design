@@ -65,3 +65,40 @@ export function googleFontsHref(families: readonly string[]): string | null {
     .join('&');
   return `https://fonts.googleapis.com/css2?${params}&display=swap`;
 }
+
+/** Every web font family the document asks for, across all pages. */
+export function documentFontFamilies(doc: CanvasDocument): string[] {
+  const all = new Set<string>();
+  for (const page of doc.pages) for (const a of page.artboards) for (const f of fontFamiliesIn(doc, a)) all.add(f);
+  return [...all];
+}
+
+const probeCache = new Map<string, 'ok' | 'not-google'>();
+
+/**
+ * Families that will not load: names the request would drop, and names Google
+ * Fonts answers with an error. Each family is asked for on its own, with the
+ * same URL the canvas uses, so one bad name cannot hide another. A network
+ * failure is not a verdict — those families are left out rather than flagged.
+ */
+export async function probeFonts(
+  families: readonly string[],
+  fetcher: (url: string) => Promise<{ ok: boolean; status: number }> = (u) => fetch(u),
+): Promise<{ family: string; status: 'not-google' | 'invalid' }[]> {
+  const out: { family: string; status: 'not-google' | 'invalid' }[] = [];
+  await Promise.all(families.map(async (family) => {
+    const href = googleFontsHref([family]);
+    if (!href) { out.push({ family, status: 'invalid' }); return; }
+    let verdict = probeCache.get(family);
+    if (!verdict) {
+      try {
+        const res = await fetcher(href);
+        if (res.ok) verdict = 'ok';
+        else if (res.status === 400 || res.status === 404) verdict = 'not-google';
+      } catch { /* offline: no verdict */ }
+      if (verdict) probeCache.set(family, verdict);
+    }
+    if (verdict === 'not-google') out.push({ family, status: 'not-google' });
+  }));
+  return out.sort((a, b) => a.family.localeCompare(b.family));
+}

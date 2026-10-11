@@ -465,3 +465,49 @@ export async function computeStyles(
     await context.close();
   }
 }
+
+/**
+ * Elements on one artboard whose content does not fit and is cut off: the
+ * artboard itself (the canvas shows a frame at exactly its size), and anything
+ * inside with overflow hidden or clip. Rendered headlessly, so it works with
+ * nobody watching. Null when the renderer is unavailable.
+ */
+export async function probeOverflow(
+  doc: CanvasDocument,
+  artboardId: NodeId,
+  baseUrl?: string,
+): Promise<{ id: NodeId; x: number; y: number }[] | null> {
+  const pw = await tryLoadPlaywright();
+  if (!pw) return null;
+  const { width, height } = sizeOf(doc, artboardId);
+  const browser = await getBrowser(pw);
+  const context = await browser.newContext({
+    viewport: { width: Math.ceil(width), height: Math.ceil(height) },
+    deviceScaleFactor: 1,
+  });
+  const page = await context.newPage();
+  try {
+    await load(page, doc, artboardId, baseUrl, false, { includeNodeIds: true });
+    const script = `((rootId) => {
+      const out = [];
+      for (const el of document.querySelectorAll('[data-node-id]')) {
+        const id = el.getAttribute('data-node-id');
+        const cs = getComputedStyle(el);
+        const clips = (v) => v === 'hidden' || v === 'clip';
+        const isRoot = id === rootId;
+        const cx = isRoot || clips(cs.overflowX);
+        const cy = isRoot || clips(cs.overflowY);
+        if (!cx && !cy) continue;
+        // Text that is meant to be truncated is not a defect.
+        if (cs.textOverflow === 'ellipsis' || cs.webkitLineClamp && cs.webkitLineClamp !== 'none') continue;
+        const x = cx ? Math.max(0, el.scrollWidth - el.clientWidth) : 0;
+        const y = cy ? Math.max(0, el.scrollHeight - el.clientHeight) : 0;
+        if (x > 2 || y > 2) out.push({ id, x, y });
+      }
+      return out;
+    })(${JSON.stringify(artboardId)})`;
+    return (await page.evaluate(script as unknown as () => unknown)) as { id: NodeId; x: number; y: number }[];
+  } finally {
+    await context.close();
+  }
+}

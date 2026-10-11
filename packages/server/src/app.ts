@@ -5,6 +5,7 @@
  * starting a listener lives in index.ts.
  */
 
+import { gatherHealthFacts } from './health.ts';
 import { serveStatic } from '@hono/node-server/serve-static';
 import { Hono, type Context } from 'hono';
 import { cors } from 'hono/cors';
@@ -780,6 +781,18 @@ async function queued<T>(work: () => Promise<T>): Promise<T> {
     waiting.shift()?.();
   }
 }
+
+/**
+ * Health facts the Check tab cannot compute in the browser alone: whether each
+ * font family is really on Google Fonts, which frames clip their content
+ * (rendered headlessly at the frame's own size), and stylesheet coverage from
+ * recent HTML imports. The tab feeds these into the same lint the MCP runs.
+ */
+api.get('/documents/:id/health', async (c) => {
+  const doc = await requireDocument(c.req.param('id'));
+  const within = c.req.query('within') || undefined;
+  return c.json(await queued(() => gatherHealthFacts(doc, { within, baseUrl: PUBLIC_URL })));
+});
 
 api.get('/documents/:id/thumbnail', async (c) => {
   const doc = await requireDocument(c.req.param('id'));

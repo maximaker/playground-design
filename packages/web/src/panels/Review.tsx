@@ -6,8 +6,8 @@
  * list nobody reads.
  */
 
-import { useEffect, useMemo, useState } from 'react';
-import { type Finding, type RuleId, RULES, lintDocument, summarise } from '@playground/shared';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { type Finding, type HealthFacts, type RuleId, RULES, lintDocument, summarise } from '@playground/shared';
 import { useCanvas, getDoc, currentPage } from '../state/store.ts';
 import { Icon, type IconName } from '../ui/Icon.tsx';
 
@@ -28,11 +28,30 @@ export function Review() {
   const [expanded, setExpanded] = useState<RuleId | null>(null);
 
   const within = scope === 'selection' ? selection[0]?.split('::')[0] : undefined;
+  const setPage = useCanvas((s) => s.setPage);
+
+  // Fonts, clipping and selector coverage come from the server, which can ask
+  // Google Fonts and render each frame headlessly. Fetched when the tab opens
+  // and on demand; the other checks stay live as you edit.
+  const [facts, setFacts] = useState<HealthFacts | undefined>();
+  const [checking, setChecking] = useState(false);
+  const [checkedAt, setCheckedAt] = useState<Date | null>(null);
+  const docId = doc?.id;
+  const runFullCheck = useCallback(() => {
+    if (!docId) return;
+    setChecking(true);
+    fetch(`/api/documents/${docId}/health`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((f: HealthFacts | null) => { if (f) { setFacts(f); setCheckedAt(new Date()); } })
+      .catch(() => {})
+      .finally(() => setChecking(false));
+  }, [docId]);
+  useEffect(() => { runFullCheck(); }, [runFullCheck]);
 
   const findings = useMemo(
-    () => (doc ? lintDocument(doc, { within }) : []),
+    () => (doc ? lintDocument(doc, { within, facts }) : []),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [doc, within, structureVersion, styleEpoch],
+    [doc, within, facts, structureVersion, styleEpoch],
   );
 
   const groups = useMemo(() => {
@@ -76,8 +95,10 @@ export function Review() {
         * between using it and ignoring it.
         */}
       <p className="review-about">
-        Automatic checks against the rendered design — text contrast, tap-target
-        size, spacing off the token scale, and layers that repeat. Nothing here is
+        Automatic checks against the rendered design — text contrast in every
+        theme, fonts that will not load, clipped content, selectors that missed,
+        empty frames, tap-target size, spacing off the token scale, and layers
+        that repeat. Nothing here is
         an opinion about the design; each finding is a measurement with a
         threshold. While this panel is open the canvas outlines what it found.
       </p>
@@ -92,6 +113,17 @@ export function Review() {
           disabled={!selection.length}
           title={selection.length ? undefined : 'Select something first'}
         >Selection</button>
+      </div>
+
+      <div className="review-health">
+        <button onClick={runFullCheck} disabled={checking}>
+          {checking ? 'Checking fonts and clipping…' : 'Re-run full check'}
+        </button>
+        <span className="dim">
+          {checkedAt
+            ? `Fonts and clipping checked ${checkedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+            : checking ? '' : 'Fonts and clipping not checked'}
+        </span>
       </div>
 
       {findings.length === 0 ? (
@@ -131,11 +163,14 @@ export function Review() {
                       <button
                         key={`${f.nodeId}-${i}`}
                         className={`review-item${selection.includes(f.nodeId) ? ' is-selected' : ''}`}
+                        title="Go there"
                         onClick={() => {
+                          // The finding may be on another page: switch first, then select.
+                          const onPage = doc.pages.find((p) => f.artboard && p.artboards.includes(f.artboard));
+                          if (onPage && onPage.id !== currentPage()?.id) setPage(onPage.id);
                           select([f.nodeId]);
                           // Bring it on screen — a finding you cannot see is not actionable.
-                          const page = currentPage();
-                          if (page) void import('../hooks/commands.ts').then((m) => m.zoomToSelection());
+                          requestAnimationFrame(() => void import('../hooks/commands.ts').then((m) => m.zoomToSelection()));
                         }}
                       >
                         <span className="review-node">{doc.nodes[f.nodeId]?.name ?? f.nodeId}</span>

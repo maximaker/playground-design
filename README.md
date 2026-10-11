@@ -189,6 +189,7 @@ Artifactory's origin gets an answer that allows the session cookie.
 | `list_templates` | Built-in starter design systems |
 | `list_pages` | Pages, their artboard counts, and which one this session is on |
 | `changes_since` | Everything that moved since a checkpoint, with old and new values |
+| `lint_design` | Design checks and document health check, as JSON (`{ ok, coverage, findings: [{ rule, severity, node, artboard, page, message, fix }] }`): contrast below AA in every theme the document defines, fonts Google Fonts will not serve, `write_html` selectors that matched nothing or over 80% of elements, frames that clip their content (rendered headlessly; `measure: false` skips it), empty frames, section headers that clip, plus tap targets, alt text, token drift and repetition. The Check tab shows the same findings, each one click from the layer |
 | `get_spec` | Build spec for a layer: measured size, tokens by name, variants in words, notes, HTML and JSX |
 | `find_repeated_shapes` | Subtrees built more than once — "should be a component" before anyone named it |
 

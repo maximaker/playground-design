@@ -47,6 +47,7 @@ import {
 } from './realtime.ts';
 import { renderNode, measureSubtree, rasterizeSvg, computeStyles } from './render.ts';
 import { storeAsset } from './assets.ts';
+import { gatherHealthFacts, recordStyleRules } from './health.ts';
 import { GUIDES, guideList } from './guides.ts';
 import { importUrl, ImportError } from './import.ts';
 import { importUrlLive, tokenise, tokensFromVars } from './import-live.ts';
@@ -995,10 +996,16 @@ function registerReadTools(server: McpServer, ctx: McpContext): void {
     description:
       'Runs the design checks and reports what is wrong: text contrast below WCAG AA, tap targets ' +
       'under 44px, missing alt text, literals where the design uses a token, containers that cannot ' +
-      'reflow, and structures repeated enough to deserve a component.\n\n' +
+      'reflow, and structures repeated enough to deserve a component. It is also the document ' +
+      'health check: fonts Google Fonts will not serve (they fall back silently), stylesheet rules from ' +
+      'write_html that matched nothing or nearly every element, frames whose content is cut off ' +
+      '(measured headlessly), text contrast in every theme the document defines (dark mode included), ' +
+      'empty frames, and section headers that clip.\n\n' +
+      'Returns JSON; each finding has rule, severity, node, artboard, page and a plain message.\n\n' +
       'Run this on your own work before handing it back. get_guide describes what good output looks ' +
       'like; this tells you whether yours is.',
     inputSchema: {
+      measure: z.boolean().optional().describe('Render frames headlessly to find clipped content. Default true; false is faster.'),
       within: z.string().optional().describe('Limit to one artboard or subtree. Defaults to the whole document.'),
       rules: z.array(z.string()).optional().describe(`Limit to specific rules: ${RULES.map((r) => r.id).join(', ')}`),
       severity: z.enum(['error', 'warning', 'info']).optional()
@@ -1006,7 +1013,7 @@ function registerReadTools(server: McpServer, ctx: McpContext): void {
       theme: z.string().optional(),
     },
     annotations: { readOnlyHint: true },
-  }, async ({ within, rules, severity, theme }) => guard(async () => {
+  }, async ({ within, rules, severity, theme, measure }) => guard(async () => {
     const doc = requireDoc(ctx);
     if (within) node(doc, within);
 
@@ -1031,22 +1038,32 @@ function registerReadTools(server: McpServer, ctx: McpContext): void {
       }
     }
 
+    // Fonts, clipping and selector coverage need the network and a layout engine.
+    const wantsFacts = !rules || rules.some((r) => ['font-load', 'overflow', 'style-rule'].includes(r));
+    const facts = wantsFacts
+      ? await gatherHealthFacts(doc, { within, baseUrl: ctx.baseUrl, measure: measure !== false && (!rules || rules.includes('overflow')) })
+      : undefined;
+
     const findings = lintDocument(doc, {
       within,
       rules: rules as never,
       theme,
       measured,
+      facts,
     }).filter((f) => !severity || rank(f.severity) <= rank(severity));
 
-    if (!findings.length) {
-      return text(
-        within
-          ? 'No problems found in that subtree.'
-          : 'No problems found. Run this again after any substantial change.',
-      );
-    }
-
+    const pageOf = (id: NodeId | null) => (id ? doc.pages.find((p) => p.artboards.includes(id))?.id ?? null : null);
     return json({
+      ok: findings.length === 0,
+      ...(findings.length === 0 && {
+        note: within ? 'No problems found in that subtree.' : 'No problems found. Run this again after any substantial change.',
+      }),
+      coverage: {
+        themes: theme ? [theme] : doc.themes,
+        overflowFramesMeasured: facts?.measuredFrames ?? 0,
+        ...(facts?.overflow === undefined && wantsFacts ? { overflow: 'not measured: no headless browser available' } : {}),
+        ...(facts && facts.skippedFrames > 0 ? { overflowFramesSkipped: facts.skippedFrames } : {}),
+      },
       total: findings.length,
       bySeverity: {
         error: findings.filter((f) => f.severity === 'error').length,
@@ -1063,6 +1080,7 @@ function registerReadTools(server: McpServer, ctx: McpContext): void {
         node: f.nodeId,
         name: getNode(doc, f.nodeId)?.name ?? null,
         artboard: f.artboard,
+        page: pageOf(f.artboard),
         message: f.message,
         fix: f.fix ?? null,
       })),
@@ -1657,6 +1675,11 @@ function registerWriteTools(server: McpServer, ctx: McpContext): void {
 
     ops.push({ t: 'insert', nodes: parsed.nodes, parent, index: index ?? at });
     commit(ctx, ops);
+    recordStyleRules(doc.id, parsed.styleRules);
+    // Said now, while the agent still has the stylesheet in mind, not only on
+    // the next lint: a selector that missed or hit everything is a silent restyle.
+    const selectorWarnings = lintDocument(doc, { rules: ['style-rule'], facts: { styleRules: parsed.styleRules } })
+      .map((f) => f.message);
 
     return json({
       created: parsed.roots.length,
@@ -1665,7 +1688,7 @@ function registerWriteTools(server: McpServer, ctx: McpContext): void {
         const n = parsed.nodes.find((x) => x.id === id)!;
         return { id, name: n.name, type: n.type, tag: n.tag };
       }),
-      warnings: parsed.warnings,
+      warnings: [...parsed.warnings, ...selectorWarnings],
       next: 'Call get_screenshot on the artboard to check the result.',
     });
   }));

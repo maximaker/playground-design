@@ -1010,3 +1010,35 @@ test('set_artboard_theme shows one artboard in a document theme', async () => {
   assert.ok(isError(await raw('set_artboard_theme', { id: getDocument(id)!.nodes[a.id]!.children[0] ?? 'nope', theme: 'dark' })));
   await agent.close();
 });
+
+test('lint_design is a health check: selectors, clipping and themes, as JSON', async () => {
+  const info = jsonOf<{ artboards: { id: string }[] }>(await client.callTool({ name: 'get_basic_info', arguments: {} }));
+  const artboard = info.artboards[0]!.id;
+  const spans = Array.from({ length: 20 }, (_, i) => `<span>${i}</span>`).join('');
+  const written = jsonOf<{ warnings: string[]; roots: { id: string }[] }>(await client.callTool({
+    name: 'write_html',
+    arguments: {
+      targetId: artboard,
+      mode: 'insert-children',
+      html: `<style>span { color: #333 } .nav span { color: red }</style>
+        <div style="height:40px;overflow:hidden"><p style="font-size:16px;line-height:24px">${'Long copy that wraps. '.repeat(30)}</p></div>
+        <div>${spans}</div>`,
+    },
+  }));
+  assert.ok(written.warnings.some((w) => /"span" matched/.test(w)), 'write_html warns at once');
+  assert.ok(written.warnings.some((w) => /"\.nav span" matched nothing/.test(w)));
+
+  const report = jsonOf<{
+    ok: boolean; coverage: { themes: string[] };
+    findings: { rule: string; node: string; page: string | null; message: string }[];
+  }>(await client.callTool({ name: 'lint_design', arguments: { rules: ['style-rule', 'overflow'] } }));
+  assert.equal(report.ok, false);
+  assert.ok(report.findings.some((f) => f.rule === 'style-rule'));
+  assert.ok(report.findings.every((f) => f.page), 'every finding names its page');
+  const clipped = report.findings.find((f) => f.rule === 'overflow');
+  if (clipped) assert.equal(getDocument(docId)!.nodes[clipped.node]!.styles.overflow, 'hidden');
+  else console.log('# overflow not measured (no headless browser)');
+
+  // Clean up so later tests see the artboard as before.
+  await client.callTool({ name: 'delete_nodes', arguments: { ids: written.roots.map((r) => r.id) } });
+});

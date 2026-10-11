@@ -245,6 +245,23 @@ export interface ParseResult {
   roots: NodeId[];
   /** Things we could not represent faithfully, surfaced to the user/agent. */
   warnings: string[];
+  /**
+   * How many elements each stylesheet selector matched, out of `elements`. A
+   * rule that matched nothing, or nearly everything, is almost always a
+   * selector that does not say what its author meant — the health check reads
+   * this rather than letting it show up later as a mystery restyle.
+   */
+  styleRules: StyleRuleStat[];
+  elements: number;
+}
+
+export interface StyleRuleStat {
+  selector: string;
+  matched: number;
+  /** Elements parsed in the same import. */
+  total: number;
+  /** First root node of the import, to navigate to. */
+  root?: NodeId;
 }
 
 export interface ParseOptions {
@@ -314,6 +331,9 @@ export function parseHtml(html: string, opts: ParseOptions = {}): ParseResult {
 
   const nodes: CanvasNode[] = [];
   const roots: NodeId[] = [];
+  const ruleHits = new Map<string, number>();
+  for (const r of rules) for (const part of r.selector.split(',')) if (part.trim()) ruleHits.set(part.trim(), 0);
+  let elements = 0;
 
   const walk = (el: ParsedElement, parent: NodeId | null): NodeId | null => {
     const tag = el.rawTagName?.toLowerCase();
@@ -334,7 +354,8 @@ export function parseHtml(html: string, opts: ParseOptions = {}): ParseResult {
     const classList = (el.getAttribute('class') ?? '').trim().replace(/\s+/g, ' ');
     if (classList && !attrs['data-class']) attrs['data-class'] = classList;
 
-    const { base, variants } = resolveStyles(el, rules);
+    elements++;
+    const { base, variants } = resolveStyles(el, rules, ruleHits);
     const styles: StyleMap = { ...(parent === null ? opts.baseStyles ?? {} : {}), ...base };
 
     // Give containers the display they would have in a browser, so pasted or
@@ -421,7 +442,8 @@ export function parseHtml(html: string, opts: ParseOptions = {}): ParseResult {
     for (const el of topLevel) walk(el, null);
   }
 
-  return { nodes, roots, warnings };
+  const styleRules = [...ruleHits].map(([selector, matched]) => ({ selector, matched, total: elements, root: roots[0] }));
+  return { nodes, roots, warnings, styleRules, elements };
 }
 
 function isElement(n: unknown): n is ParsedElement {
@@ -431,6 +453,7 @@ function isElement(n: unknown): n is ParsedElement {
 function resolveStyles(
   el: ParsedElement,
   rules: ReturnType<typeof parseStylesheet>,
+  hits?: Map<string, number>,
 ): { base: StyleMap; variants: { selector: string; styles: StyleMap }[] } {
   const base: StyleMap = {};
   const variantMap = new Map<string, StyleMap>();
@@ -440,6 +463,7 @@ function resolveStyles(
     .flatMap(({ rule, parts }) => parts.map((p) => ({ rule, part: p })))
     .filter(({ part }) => selectorMatches(el, part))
     .sort((a, b) => specificity(a.part) - specificity(b.part));
+  if (hits) for (const { part } of matching) hits.set(part, (hits.get(part) ?? 0) + 1);
 
   for (const { rule, part } of matching) {
     const pseudo = /(:hover|:focus|:active|:focus-visible|:disabled)\s*$/.exec(part);
