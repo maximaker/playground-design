@@ -16,6 +16,8 @@ export function Tokens() {
   const doc = getDoc();
   const [theme, setTheme] = useState('default');
   const [adding, setAdding] = useState(false);
+  // One group at a time: a long document's tokens were a scroll of a hundred rows.
+  const [open, setOpen] = useState<TokenGroup | null>(null);
 
   if (!doc) return null;
 
@@ -53,7 +55,27 @@ export function Tokens() {
         ><Icon name="plus" size={12} /></button>
       </div>
 
-      {GROUPS.map((group) => {
+      {(() => {
+        const present = GROUPS.filter((g) => doc.tokens.some((t) => t.group === g));
+        if (present.length < 2) return null;
+        const current = open && present.includes(open) ? open : present[0];
+        return (
+          <div className="segmented token-tabs" role="tablist" aria-label="Kind of style">
+            {present.map((g) => (
+              <button key={g} role="tab" aria-selected={g === current} className={g === current ? 'is-active' : ''} onClick={() => setOpen(g)}>
+                {GROUP_LABELS[g] ?? g}
+                <span className="token-tab-count">{doc.tokens.filter((t) => t.group === g).length}</span>
+              </button>
+            ))}
+          </div>
+        );
+      })()}
+
+      {GROUPS.filter((g) => {
+        const present = GROUPS.filter((x) => doc.tokens.some((t) => t.group === x));
+        const current = open && present.includes(open) ? open : present[0];
+        return present.length < 2 || g === current;
+      }).map((group) => {
         const rows = doc.tokens.filter((t) => t.group === group);
         // Sizes read smallest to largest; colours keep the order they were made in.
         if (group !== 'color') {
@@ -135,5 +157,5 @@ function normalizeHex(v: string): string {
 /** The groups as people say them. */
 const GROUP_LABELS: Record<string, string> = {
   color: 'Colours', radius: 'Corners', space: 'Spacing', font: 'Fonts',
-  shadow: 'Shadows', size: 'Sizes', type: 'Text',
+  shadow: 'Shadows', size: 'Sizes', type: 'Text', duration: 'Timing',
 };

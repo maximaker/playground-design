@@ -3368,3 +3368,13 @@ code { font-family: var(--mono); font-size: 0.92em; }
 /* The drag-to-change handle looked like a "go" arrow: hidden until you reach for the field. */
 .scrub { opacity: 0; cursor: ew-resize !important; transition: opacity var(--transition); }
 :hover > .scrub, .scrub.is-scrubbing, :focus-within > .scrub { opacity: 1; }
+
+/* Style groups as tabs: one list at a time. */
+.token-tabs { display: flex; width: 100%; margin-bottom: var(--s3); }
+.token-tabs button { flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 0.3rem; }
+.token-tab-count { font-size: 0.68rem; color: var(--fg-faint); font-variant-numeric: tabular-nums; }
+.token-tabs + .token-group h4 { display: none; }
+.token-row { min-height: 1.85rem; padding-top: 0.05rem; padding-bottom: 0.05rem; }
+.token-tabs { overflow-x: auto; scrollbar-width: none; }
+.token-tabs::-webkit-scrollbar { display: none; }
+.token-tabs button { flex: 1 0 auto; padding-left: 0.55rem; padding-right: 0.55rem; font-size: 0.78rem; white-space: nowrap; }
