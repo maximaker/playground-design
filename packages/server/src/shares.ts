@@ -60,7 +60,7 @@ export async function createShare(docId: string, label?: string, role: ShareRole
 
 export async function listShares(docId: string): Promise<Share[]> {
   const store = await persistence();
-  return (await store.loadShares(docId)).filter((s) => !s.revoked).map(toShare);
+  return (await store.loadShares(docId)).filter((s) => !s.revoked && (s.role ?? 'view') === 'view').map(toShare);
 }
 
 /**
@@ -75,6 +75,8 @@ export async function resolveShare(token: string): Promise<Share | null> {
   const store = await persistence();
   const found = await store.loadShare(token);
   if (!found || found.revoked) return null;
+  // A handoff slug opens the spec site, never the editor.
+  if ((found.role ?? 'view') !== 'view') return null;
 
   const a = Buffer.from(found.token);
   const b = Buffer.from(token);

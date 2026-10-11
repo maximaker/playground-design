@@ -41,6 +41,10 @@ import {
 } from '@playground/shared';
 import { importUrl, ImportError } from './import.ts';
 import { freeSlug, pageArtboard, publishedHtml, slugify } from './publish.ts';
+import {
+  handoffAllows, handoffHtml, handoffScreenHtml, listHandoffs, publishHandoff, resolveHandoff, unpublishHandoff,
+  type HandoffScope,
+} from './handoff.ts';
 import { getTemplate, templateSummaries, type Template } from './templates.ts';
 import { DEFAULT_STYLE, getStarter, starterHtml, starterSummaries, STARTERS } from './starters.ts';
 import { RENDERER_VERSION, renderNode, renderThumbnail } from './render.ts';
@@ -141,6 +145,8 @@ const OWNER_ONLY: { method: string; pattern: RegExp }[] = [
   { method: 'POST', pattern: /^\/documents\/[^/]+\/shares$/ },
   { method: 'POST', pattern: /^\/documents\/[^/]+\/publish$/ },
   { method: 'DELETE', pattern: /^\/documents\/[^/]+\/publish$/ },
+  { method: 'POST', pattern: /^\/documents\/[^/]+\/handoffs$/ },
+  { method: 'DELETE', pattern: /^\/documents\/[^/]+\/handoffs(\/[^/]+)?$/ },
   { method: 'DELETE', pattern: /^\/shares\/[^/]+$/ },
 ];
 
@@ -916,6 +922,36 @@ api.delete('/documents/:id/publish', async (c) => {
   return c.json({ ok: true });
 });
 
+// --- Handoff sites ------------------------------------------------------------
+
+const handoffJson = (h: Awaited<ReturnType<typeof listHandoffs>>[number]) => ({ ...h, url: `${PUBLIC_URL}/h/${h.slug}` });
+
+api.get('/documents/:id/handoffs', async (c) => {
+  return c.json({ handoffs: (await listHandoffs(c.req.param('id'))).map(handoffJson) });
+});
+
+/** Body: { scope: 'document' } or { scope: 'section', sectionId }. Same scope again returns the same link. */
+api.post('/documents/:id/handoffs', async (c) => {
+  const doc = await requireDocument(c.req.param('id'));
+  const body = await c.req.json<{ scope?: string; sectionId?: string }>().catch(() => ({} as { scope?: string; sectionId?: string }));
+  const scope: HandoffScope = body.sectionId || (body.scope && body.scope !== 'document')
+    ? { kind: 'section', sectionId: body.sectionId ?? body.scope! }
+    : { kind: 'document' };
+  try {
+    return c.json({ handoff: handoffJson(await publishHandoff(doc, scope)) }, 201);
+  } catch (err) {
+    return c.json({ error: err instanceof Error ? err.message : String(err) }, 400);
+  }
+});
+
+api.delete('/documents/:id/handoffs/:slug', async (c) => {
+  return c.json({ ok: true, removed: await unpublishHandoff(c.req.param('id'), c.req.param('slug')) });
+});
+
+api.delete('/documents/:id/handoffs', async (c) => {
+  return c.json({ ok: true, removed: await unpublishHandoff(c.req.param('id')) });
+});
+
 api.get('/documents/:id/bundle', async (c) => {
   const doc = await requireDocument(c.req.param('id'));
   const includeAssets = c.req.query('assets') !== 'false';
@@ -1158,6 +1194,23 @@ app.get('/p/:slug', async (c) => {
     // publishing from a design tool is that edits show up.
     'cache-control': 'public, max-age=30, stale-while-revalidate=300',
   });
+});
+
+/** A handoff site: read-only spec for a document or one section, no account. */
+app.get('/h/:slug', async (c) => {
+  const found = await resolveHandoff(c.req.param('slug'));
+  if (!found) return c.html(NOT_PUBLISHED, 404);
+  return c.html(handoffHtml(found.doc, found.handoff, `/h/${found.handoff.slug}`), 200, {
+    'cache-control': 'private, max-age=15',
+    'x-robots-tag': 'noindex',
+  });
+});
+
+app.get('/h/:slug/screen/:id', async (c) => {
+  const found = await resolveHandoff(c.req.param('slug'));
+  const id = c.req.param('id');
+  if (!found || !handoffAllows(found.doc, found.handoff.scope, id)) return c.html(NOT_PUBLISHED, 404);
+  return c.html(handoffScreenHtml(found.doc, id), 200, { 'cache-control': 'private, max-age=15', 'x-robots-tag': 'noindex' });
 });
 
 app.get('/assets/:id', async (c) => {

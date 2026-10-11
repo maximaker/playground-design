@@ -43,6 +43,7 @@ import {
 } from './store.ts';
 import { persistence } from './persistence.ts';
 import { pageArtboard, slugify } from './publish.ts';
+import { publishHandoff, unpublishHandoff } from './handoff.ts';
 import {
   callTab, notifyTabs, selectionOf, hasLiveTab, NoTabError, setAgentPresence, clearAgentPresence, hasTabOnPage,
 } from './realtime.ts';
@@ -90,7 +91,7 @@ const TOOLSETS: Record<string, readonly string[]> = {
     'get_code_component_guide', 'register_code_component', 'list_code_components',
     'add_code_instance', 'set_code_props', 'remove_code_component', 'get_code_usage'],
   handover: ['export', 'get_spec', 'mark_checkpoint', 'changes_since', 'annotate',
-    'publish_page', 'unpublish_page', 'get_publication'],
+    'publish_page', 'unpublish_page', 'get_publication', 'publish_handoff', 'unpublish_handoff'],
   collab: ['list_notes', 'claim_note', 'respond_to_note', 'create_note', 'update_note', 'delete_note', 'list_comments',
     'create_comment', 'reply_to_comment', 'resolve_comment', 'start_working_on_nodes', 'finish_working_on_nodes'],
   diagrams: ['get_board', 'edit_board', 'write_diagram'],
@@ -3649,6 +3650,33 @@ function registerComponentTools(server: McpServer, ctx: McpContext): void {
       live: true,
       next: 'The page follows the document. unpublish_page takes it down.',
     });
+  }));
+
+  server.registerTool('publish_handoff', {
+    title: 'Publish a read-only handoff site',
+    description:
+      'Serves a spec site for developers and clients at /h/<slug> — no account needed: screens grouped by '
+      + 'section with status and flow card, flow diagrams, tokens, decisions log and annotations. It renders '
+      + 'live from the document. scope is "document" or a section id (list_sections). Publishing the same scope '
+      + 'again returns the same link.',
+    inputSchema: {
+      scope: z.string().optional().default('document').describe('"document", or a section id.'),
+    },
+  }, async ({ scope }) => guard(async () => {
+    const doc = requireDoc(ctx);
+    const h = await publishHandoff(doc, scope === 'document' ? { kind: 'document' } : { kind: 'section', sectionId: scope });
+    return json({ slug: h.slug, url: `${ctx.baseUrl}/h/${h.slug}`, scope: h.scope, next: 'Share the url. unpublish_handoff takes it down.' });
+  }));
+
+  server.registerTool('unpublish_handoff', {
+    title: 'Take a handoff site down',
+    description: 'Withdraws a handoff link by slug, or every handoff of this document when slug is omitted.',
+    inputSchema: { slug: z.string().optional() },
+    annotations: { destructiveHint: true },
+  }, async ({ slug }) => guard(async () => {
+    const removed = await unpublishHandoff(ctx.connection.docId, slug);
+    if (slug && !removed) return fail(`No live handoff "${slug}" on this document.`);
+    return json({ removed });
   }));
 
   server.registerTool('unpublish_page', {

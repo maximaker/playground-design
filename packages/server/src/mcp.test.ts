@@ -1354,3 +1354,43 @@ test('agents open real comment threads and settle them into the decisions log', 
   assert.equal(res.decision.by, 'Agent threads agent');
   await agent.close();
 });
+
+test('publish_handoff serves a read-only spec site at /h/<slug>, scoped and revocable', async () => {
+  const { id, agent, call, raw } = await freshAgent('Handoff');
+  const board = getDocument(id)!.pages[0]!.artboards[0]!;
+  await call('write_html', { targetId: board, html: '<h1>Welcome screen</h1>' });
+  const other = await call<{ id: string }>('create_artboard', { name: 'Secret screen', width: 300, height: 200 });
+  const sec = await call<{ id?: string; sectionId?: string; section?: { id: string } }>('create_section', {
+    title: 'Onboarding', artboards: [board], status: 'in-review', flowCard: { code: 'F1', title: 'Sign up', goal: 'Get started' } });
+  const sectionId = sec.sectionId ?? sec.id ?? sec.section!.id;
+  await call('annotate', { id: board, kind: 'behaviour', text: 'Tapping continue opens the plan picker' });
+
+  const docLevel = await call<{ slug: string; url: string }>('publish_handoff', {});
+  const again = await call<{ slug: string }>('publish_handoff', { scope: 'document' });
+  assert.equal(again.slug, docLevel.slug, 'same scope, same link');
+  const page = await fetch(`${base}/h/${docLevel.slug}`);
+  assert.equal(page.status, 200);
+  const html = await page.text();
+  assert.match(html, /Onboarding|Sign up/);
+  assert.match(html, /F1/);
+  assert.match(html, /Tapping continue opens the plan picker/);
+  assert.match(html, /Tokens/);
+  const screen = await fetch(`${base}/h/${docLevel.slug}/screen/${board}`);
+  assert.match(await screen.text(), /Welcome screen/);
+  // A handoff slug is not a share token: it never opens the editor.
+  assert.equal((await fetch(`${base}/api/shares/${docLevel.slug}`)).ok, false);
+
+  const scoped = await call<{ slug: string }>('publish_handoff', { scope: sectionId });
+  assert.notEqual(scoped.slug, docLevel.slug);
+  assert.equal((await fetch(`${base}/h/${scoped.slug}/screen/${board}`)).status, 200);
+  assert.equal((await fetch(`${base}/h/${scoped.slug}/screen/${other.id}`)).status, 404, 'out of scope');
+  assert.doesNotMatch(await (await fetch(`${base}/h/${scoped.slug}`)).text(), /Secret screen/);
+  assert.ok(isError(await raw('publish_handoff', { scope: 'sec_nope' })));
+
+  const listed = await (await api(`/api/documents/${id}/handoffs`)).json() as { handoffs: { slug: string }[] };
+  assert.equal(listed.handoffs.length, 2);
+  await call('unpublish_handoff', { slug: scoped.slug });
+  assert.equal((await fetch(`${base}/h/${scoped.slug}`)).status, 404);
+  assert.equal((await fetch(`${base}/h/${docLevel.slug}`)).status, 200);
+  await agent.close();
+});

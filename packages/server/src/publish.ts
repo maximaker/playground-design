@@ -17,7 +17,7 @@ import { persistence, type StoredPublication } from './persistence.ts';
 
 /** Reserved so a published page can never shadow a route. */
 const RESERVED = new Set([
-  'api', 'assets', 'mcp', 'd', 's', 'p', 'join', 'new', 'admin', 'static', 'health', 'index',
+  'api', 'assets', 'mcp', 'd', 's', 'p', 'h', 'join', 'new', 'admin', 'static', 'health', 'index',
 ]);
 
 export function slugify(name: string): string {

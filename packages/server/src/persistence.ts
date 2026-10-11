@@ -41,7 +41,8 @@ export interface StoredConnection {
   projectId?: string | null;
 }
 
-export type ShareRole = 'view';
+/** `view` opens the read-only editor; `handoff` only the spec site at /h/<slug>. */
+export type ShareRole = 'view' | 'handoff';
 
 export interface StoredShare {
   token: string;
