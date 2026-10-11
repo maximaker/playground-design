@@ -198,6 +198,7 @@ Artifactory's origin gets an answer that allows the session cookie.
 
 | Tool | Notes |
 |---|---|
+| `batch` | `{ steps: [{ tool, args }…], continueOnError? }` — many tool calls in one request, in order; stops on the first error unless told not to; returns `{ ran, failed, results: [{ step, tool, ok, result | error }] }`; all its changes are one history entry |
 | `write_html` | The main creation tool. HTML in, editable layers out. Each element's class list is kept as `data-class`. Component tags insert real instances: `<Button variant="primary">Save</Button>` or `<component name="Tab bar / Home" />` — attributes set variant props (or text layers by name), text fills the main text layer, child elements fill `data-slot`s (`slot="name"` for named ones). Unknown names warn and render as plain markup |
 | `create_artboard` | New screen, placed clear of existing work, on the current page |
 | `fit_artboard` | Set an artboard's height to its rendered content, plus optional `padBottom` |

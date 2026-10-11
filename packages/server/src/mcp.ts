@@ -650,7 +650,13 @@ function agentOrigin(ctx: McpContext): OpEnvelope['origin'] {
   return { kind: 'agent', id: ctx.connection.code, label: ctx.connection.label ?? 'Agent' };
 }
 
-function commit(ctx: McpContext, ops: Op[], batch = batchId()): void {
+/**
+ * The batch a `batch` call is running under, per connection: every commit made
+ * by its steps shares this id, so history and undo see one entry.
+ */
+const activeBatch = new Map<string, string>();
+
+function commit(ctx: McpContext, ops: Op[], batch = activeBatch.get(ctx.connection.code) ?? batchId()): void {
   const origin = agentOrigin(ctx);
   applyOps(ctx.connection.docId, ops.map((op) => ({ op, origin, batch })));
 }
@@ -796,6 +802,8 @@ export function buildMcpServer(ctx: McpContext): McpServer {
    */
   type Handle = { enable(): void; disable(): void; enabled: boolean };
   const handles = new Map<string, Handle>();
+  type Callable = { schema?: z.ZodType; run: (args: unknown, extra: unknown) => Promise<unknown> };
+  const callables = new Map<string, Callable>();
   const register = server.registerTool.bind(server);
   (server as { registerTool: typeof server.registerTool }).registerTool = ((name: string, ...rest: unknown[]) => {
     /*
@@ -812,6 +820,8 @@ export function buildMcpServer(ctx: McpContext): McpServer {
     }
     const handle = (register as (...args: unknown[]) => Handle)(name, ...rest);
     handles.set(name, handle);
+    const cb = rest[rest.length - 1] as (args: unknown, extra: unknown) => Promise<unknown>;
+    callables.set(name, { schema: (rest[0] as { inputSchema?: z.ZodType } | undefined)?.inputSchema, run: cb });
     return handle;
   }) as typeof server.registerTool;
 
@@ -878,10 +888,71 @@ export function buildMcpServer(ctx: McpContext): McpServer {
     });
   }));
 
+  server.registerTool('batch', {
+    title: 'Run many tool calls in one request',
+    description:
+      'Runs steps in order — [{ tool, args }, …] — and returns each one\'s result. Stops at the first '
+      + 'error unless continueOnError. Every change the steps make is recorded as ONE history entry, so '
+      + 'one undo reverts the whole batch. Use it for long, known sequences (write, rename, restyle, '
+      + 'insert instances) instead of a round trip per call. Steps cannot see each other\'s results; '
+      + 'when a step needs an id from an earlier one, write the id into the HTML (id="…") or split the batch.',
+    inputSchema: {
+      steps: z.array(z.object({
+        tool: z.string(),
+        args: z.record(z.string(), z.unknown()).optional().default({}),
+      }).strict()).min(1).max(200),
+      continueOnError: z.boolean().optional().default(false),
+    },
+  }, async ({ steps, continueOnError }, extra) => guard(async () => {
+    const code = ctx.connection.code;
+    if (activeBatch.has(code)) return fail('A batch is already running for this connection; batches do not nest.');
+    const id = batchId();
+    activeBatch.set(code, id);
+    const results: { step: number; tool: string; ok: boolean; result?: unknown; error?: string }[] = [];
+    try {
+      for (const [i, step] of steps.entries()) {
+        const target = callables.get(step.tool);
+        let out: { ok: boolean; result?: unknown; error?: string };
+        if (!target || step.tool === 'batch') {
+          out = { ok: false, error: step.tool === 'batch' ? 'batch cannot contain batch.' : `No tool "${step.tool}".` };
+        } else {
+          const parsed = target.schema ? target.schema.safeParse(step.args) : { success: true as const, data: step.args };
+          if (!parsed.success) {
+            out = { ok: false, error: `Invalid arguments: ${parsed.error.issues.map((x) => `${x.path.join('.') || '(root)'}: ${x.message}`).join('; ')}` };
+          } else {
+            try {
+              const res = await target.run(parsed.data, extra) as { isError?: boolean; content?: { type: string; text?: string }[] };
+              const textOut = (res.content ?? []).filter((c) => c.type === 'text').map((c) => c.text ?? '').join('\n');
+              let value: unknown = textOut;
+              try { value = JSON.parse(textOut); } catch { /* plain text */ }
+              out = res.isError ? { ok: false, error: textOut } : { ok: true, result: value };
+            } catch (err) {
+              out = { ok: false, error: err instanceof Error ? err.message : String(err) };
+            }
+          }
+        }
+        results.push({ step: i, tool: step.tool, ...out });
+        if (!out.ok && !continueOnError) break;
+      }
+    } finally {
+      activeBatch.delete(code);
+    }
+    const failed = results.filter((r) => !r.ok).length;
+    return json({
+      batch: id,
+      ran: results.length,
+      of: steps.length,
+      failed,
+      ...(results.length < steps.length ? { stoppedAt: results.length - 1, note: 'Stopped at the first error; steps before it were applied. Pass continueOnError to run the rest anyway.' } : {}),
+      results,
+    });
+  }));
+
   // Core is not in the table, so these two are already in it — and they must
   // survive the pass that turns everything else off.
   handles.delete('list_toolsets');
   handles.delete('use_toolset');
+  handles.delete('batch');
   apply();
 
   return server;

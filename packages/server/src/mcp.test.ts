@@ -12,7 +12,7 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 process.env.PLAYGROUND_DB = `/tmp/playground-test-${Date.now()}.db`;
 
 const { app } = await import('./app.ts');
-const { createDocument, getDocument } = await import('./store.ts');
+const { createDocument, getDocument, history } = await import('./store.ts');
 const { createConnection } = await import('./connections.ts');
 const { shutdownRenderer } = await import('./render.ts');
 
@@ -1251,5 +1251,40 @@ test('<repeat> expands rows from data and update_repeat_data re-renders them', a
   assert.equal(z.styles.padding, '4px', 'the stylesheet is remembered');
   assert.deepEqual(JSON.parse(again.attrs['data-repeat']!), [{ name: 'X' }, { name: 'Y' }, { name: 'Z' }]);
   assert.ok(isError(await raw('update_repeat_data', { id: board, data: [] })));
+  await agent.close();
+});
+
+test('batch runs steps in order, stops on error, and is one history entry', async () => {
+  const { id, agent, call } = await freshAgent('Batch');
+  const board = getDocument(id)!.pages[0]!.artboards[0]!;
+  const before = history(id).length;
+  const res = await call<{ ran: number; failed: number; results: { ok: boolean; result?: { roots?: { id: string }[] } }[] }>('batch', {
+    steps: [
+      { tool: 'write_html', args: { targetId: board, html: '<p id="one">One</p>' } },
+      { tool: 'write_html', args: { targetId: board, html: '<p>Two</p>' } },
+      { tool: 'find_nodes', args: { query: 'Two' } },
+    ],
+  });
+  assert.equal(res.ran, 3);
+  assert.equal(res.failed, 0);
+  assert.ok(res.results[0]!.result!.roots![0]!.id);
+  assert.equal(history(id).length, before + 1, 'both writes are one history entry');
+
+  const stopped = await call<{ ran: number; failed: number; stoppedAt: number; results: { ok: boolean; error?: string }[] }>('batch', {
+    steps: [
+      { tool: 'write_html', args: { targetId: board, html: '<p>Three</p>' } },
+      { tool: 'update_styles', args: { updates: [{ id: 'nope', styles: { color: 'red' } }] } },
+      { tool: 'write_html', args: { targetId: board, html: '<p>Never</p>' } },
+    ],
+  });
+  assert.equal(stopped.ran, 2);
+  assert.equal(stopped.stoppedAt, 1);
+  assert.match(stopped.results[1]!.error!, /nope/);
+  const all = await call<{ ran: number; failed: number }>('batch', {
+    continueOnError: true,
+    steps: [{ tool: 'no_such_tool' }, { tool: 'write_html', args: { targetId: board, bogus: 1 } }, { tool: 'find_nodes', args: {} }],
+  });
+  assert.equal(all.ran, 3);
+  assert.equal(all.failed, 2);
   await agent.close();
 });
