@@ -1088,3 +1088,22 @@ test('resolve_comment with an outcome feeds list_decisions; add_decision adds di
   const md = await client.callTool({ name: 'list_decisions', arguments: { format: 'markdown' } });
   assert.match((md as { content: { text: string }[] }).content[0]!.text, /# Decisions/);
 });
+
+test('create_section and update_section carry a flow card', async () => {
+  const created = jsonOf<{ id: string; heading: string; flowCard: { code: string; role: string; feedback: string[] } }>(await client.callTool({
+    name: 'create_section',
+    arguments: { title: 'Reorder a prescription', artboards: [], flowCard: { code: 'F3', role: 'Patient', persona: 'Ana, 67', goal: 'Reorder in under a minute', feedback: ['Too many steps'] } },
+  }));
+  assert.equal(created.heading, 'F3 · Reorder a prescription');
+  assert.equal(created.flowCard.role, 'Patient');
+  const updated = jsonOf<{ flowCard: { code: string; feedback: string[] } }>(await client.callTool({
+    name: 'update_section', arguments: { id: created.id, flowCard: { code: 'F3b', feedback: [] } },
+  }));
+  assert.equal(updated.flowCard.code, 'F3b');
+  assert.equal(updated.flowCard.feedback, undefined);
+  const cleared = jsonOf<{ flowCard?: unknown }>(await client.callTool({ name: 'update_section', arguments: { id: created.id, flowCard: null } }));
+  assert.equal(cleared.flowCard, undefined);
+  const bad = await client.callTool({ name: 'update_section', arguments: { id: created.id, flowCard: { code: ' ' } } });
+  assert.ok((bad as { isError?: boolean }).isError);
+  await client.callTool({ name: 'delete_section', arguments: { id: created.id } });
+});

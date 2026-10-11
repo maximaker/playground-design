@@ -9,7 +9,7 @@
  */
 
 import {
-  type CanvasDocument, type NodeId, type Page, type Section, type SectionStatus,
+  type CanvasDocument, type FlowCard, type NodeId, type Page, type Section, type SectionStatus,
   getArtboardPosition, getArtboardSize, NOTE_COLORS, type NoteColor,
 } from './model.ts';
 import type { Op } from './ops.ts';
@@ -30,6 +30,8 @@ export const SECTION_LAYOUT = {
    * fixed on-screen size. The header grows upward when zoom alone cannot give it.
    */
   labelReserve: 52,
+  /** A flow card sits left of the first screen, inside the region. */
+  flowCard: { width: 360, gap: 80 },
 };
 
 export const SECTION_STATUS_META: Record<SectionStatus, { label: string; bg: string; fg: string }> = {
@@ -105,7 +107,47 @@ export function sectionRect(doc: CanvasDocument, page: Page, section: Section): 
   const box = membersBox(doc, sectionMembers(doc, page, section));
   if (!box) return null;
   const { padding, header } = SECTION_LAYOUT;
-  return { x: box.x - padding, y: box.y - padding - header, width: box.width + padding * 2, height: box.height + padding * 2 + header };
+  const card = section.flowCard ? SECTION_LAYOUT.flowCard.width + SECTION_LAYOUT.flowCard.gap : 0;
+  // A short screen beside a long card: the region grows to hold the card.
+  const tall = section.flowCard ? Math.max(box.height, flowCardHeight(section.flowCard)) : box.height;
+  return { x: box.x - padding - card, y: box.y - padding - header, width: box.width + padding * 2 + card, height: tall + padding * 2 + header };
+}
+
+/**
+ * The card's height in canvas units, estimated from its text the way the
+ * canvas lays it out (see .flow-card in styles.css): enough for the region to
+ * wrap it without measuring a DOM the server does not have.
+ */
+export function flowCardHeight(card: FlowCard): number {
+  const inner = SECTION_LAYOUT.flowCard.width - 56;
+  const lines = (text: string, px: number) => Math.max(1, Math.ceil((text.length * px * 0.52) / inner));
+  let h = 56 + 34 + 14 + lines(card.title, 30) * 35 + 18;
+  for (const v of [card.role, card.persona, card.goal]) if (v) h += 18 + 2 + lines(v, 18) * 25 + 10;
+  if (card.feedback?.length) h += 36 + 18 + card.feedback.reduce((s, f) => s + lines(f, 18) * 25 + 6, 0);
+  return Math.ceil(h);
+}
+
+/** The title as the header shows it: "F3 · Reorder" when there is a flow card. */
+export function sectionHeading(section: Section): string {
+  const code = section.flowCard?.code?.trim();
+  return code ? `${code} · ${section.flowCard!.title || section.title}` : section.title;
+}
+
+/** A flow card from loose input, trimmed, with empty fields dropped. Null clears. */
+export function normaliseFlowCard(input: Partial<FlowCard> | null | undefined, fallbackTitle: string): FlowCard | null {
+  if (!input) return null;
+  const code = (input.code ?? '').trim();
+  if (!code) throw new Error('A flow card needs a code, e.g. "F3".');
+  const text = (v?: string) => (v?.trim() ? v.trim() : undefined);
+  const feedback = (input.feedback ?? []).map((f) => f.trim()).filter(Boolean);
+  return {
+    code,
+    title: text(input.title) ?? fallbackTitle,
+    ...(text(input.role) ? { role: text(input.role) } : {}),
+    ...(text(input.persona) ? { persona: text(input.persona) } : {}),
+    ...(text(input.goal) ? { goal: text(input.goal) } : {}),
+    ...(feedback.length ? { feedback } : {}),
+  };
 }
 
 export function sectionTint(color: string | undefined): { bg: string; border: string } {

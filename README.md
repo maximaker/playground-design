@@ -202,6 +202,7 @@ Artifactory's origin gets an answer that allows the session cookie.
 | `fit_artboard` | Set an artboard's height to its rendered content, plus optional `padBottom` |
 | `create_page` / `set_current_page` / `rename_page` / `delete_page` | Pages. Each connection has its own current page. `create_page` starts empty; `withArtboard: true` adds a 1440×900 frame |
 | `list_decisions` / `add_decision` | The document's decisions log — decision, who, date, and the thread and layer it came from (`format: "markdown"` for handoff). `resolve_comment` takes `outcome` to log a thread's result; people do the same with Resolve… in a thread, and read the log under Comments → Decisions. The log travels in the document bundle export |
+| `create_section` / `update_section` | Titled groups of screens with a status. Both take `flowCard: { code, title, role, persona, goal, feedback[] }` (null removes it): the header reads "F3 · Title" and the card is drawn at the start of the section, left of the first screen; `list_sections` returns it with the `heading` |
 | `set_version_state` | Mark a page or section `current` or `superseded` (with `reason` and `replacedBy`) instead of emoji in names. The Pages panel badges the current one and dims superseded ones; `list_sections` and `list_pages` report it |
 | `publish_page` / `unpublish_page` / `get_publication` | Put an artboard on the public web, or take it down |
 | `mark_checkpoint` | Save a named version to compare against later |

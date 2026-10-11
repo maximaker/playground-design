@@ -100,3 +100,22 @@ test('cross-page: screen cards resolve, flows resolve, artboard theme picks toke
   applyOp(doc, { t: 'attrs', updates: [{ id: 'a3', attrs: { 'data-theme': 'nonsense' } }] });
   assert.equal(artboardTheme(doc, 'a3'), 'default', 'an unknown theme falls back');
 });
+
+test('a flow card widens the region to its left and prefixes the heading with its code', async () => {
+  const { createEmptyDocument } = await import('./model.ts');
+  const { makeSection } = await import('./ops.ts');
+  const { sectionRect, sectionHeading, normaliseFlowCard, SECTION_LAYOUT } = await import('./sections.ts');
+  const doc = createEmptyDocument('F');
+  const page = doc.pages[0]!;
+  const plain = makeSection({ title: 'Reorder', artboards: [page.artboards[0]!] });
+  const card = normaliseFlowCard({ code: ' F3 ', role: 'Patient', goal: '  ', feedback: ['Too many steps', ''] }, 'Reorder')!;
+  assert.deepEqual(card, { code: 'F3', title: 'Reorder', role: 'Patient', feedback: ['Too many steps'] });
+  const withCard = { ...plain, flowCard: card };
+  const a = sectionRect(doc, page, plain)!, b = sectionRect(doc, page, withCard)!;
+  const extra = SECTION_LAYOUT.flowCard.width + SECTION_LAYOUT.flowCard.gap;
+  assert.equal(b.x, a.x - extra);
+  assert.equal(b.width, a.width + extra);
+  assert.equal(sectionHeading(withCard), 'F3 · Reorder');
+  assert.throws(() => normaliseFlowCard({ code: '' }, 'x'), /needs a code/);
+  assert.equal(normaliseFlowCard(null, 'x'), null);
+});

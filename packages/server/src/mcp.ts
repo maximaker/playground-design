@@ -34,7 +34,7 @@ import {
   artifactoryEmbedUrl, treeEntries, nodeEntry, type InstanceOverride,
   type Section, SECTION_STATUSES, makeSection, sectionsOf, sectionMembers, sectionRect, arrangeSectionOps, sectionFlows, findFlow,
   decisionsOf, addDecisionOps, resolveWithOutcomeOps, describeDecision, decisionsMarkdown,
-  sectionOfArtboard, findVersionTarget, versionOps, describeVersion, versionOf, targetTitle, VERSION_KINDS,
+  sectionOfArtboard, normaliseFlowCard, sectionHeading, findVersionTarget, versionOps, describeVersion, versionOf, targetTitle, VERSION_KINDS,
   GOOGLE_FONT_WEIGHTS,
 } from '@playground/shared';
 import {
@@ -2254,6 +2254,7 @@ function sectionSummary(doc: CanvasDocument, page: Page, sec: Section) {
     ...(sec.flows?.some((f) => !findFlow(doc, f)) ? { missingFlows: sec.flows.filter((f) => !findFlow(doc, f)) } : {}),
     bounds: sectionRect(doc, page, sec),
     ...(sec.version ? { version: describeVersion(doc, sec.version) } : {}),
+    ...(sec.flowCard ? { flowCard: sec.flowCard, heading: sectionHeading(sec) } : {}),
   };
 }
 
@@ -2510,6 +2511,16 @@ function registerNoteTools(server: McpServer, ctx: McpContext): void {
   };
 
   const sectionStatus = z.enum(SECTION_STATUSES as [Section['status'], ...Section['status'][]]);
+  const FlowCardInput = z.object({
+    code: z.string().min(1).max(20).describe('Short code shown before the title, e.g. "F3".'),
+    title: z.string().max(200).optional().describe('Defaults to the section title.'),
+    role: z.string().max(120).optional().describe('The user role, e.g. "Patient".'),
+    persona: z.string().max(200).optional(),
+    goal: z.string().max(500).optional(),
+    feedback: z.array(z.string().max(500)).max(30).optional().describe('Open feedback on this flow, one item each.'),
+  }).nullable().describe(
+    'A numbered flow card: the header shows "code · title", and a card with role, persona, goal and open ' +
+    'feedback is drawn at the start of the section, left of the first screen. null removes it.');
 
   server.registerTool('create_section', {
     title: 'Group screens into a section',
@@ -2528,13 +2539,15 @@ function registerNoteTools(server: McpServer, ctx: McpContext): void {
       arrange: z.boolean().optional().default(false),
       gap: z.number().min(0).max(2000).optional().describe('Space between screens; default 120.'),
       pageId: z.string().optional(),
+      flowCard: FlowCardInput.optional(),
     },
-  }, async ({ title, artboards, description, status, color, flows, arrange, gap, pageId }) => guard(() => {
+  }, async ({ title, artboards, description, status, color, flows, arrange, gap, pageId, flowCard }) => guard(() => {
     const doc = requireDoc(ctx);
     const page = pageOf(ctx, doc, pageId);
     checkMembers(page, artboards);
     checkFlows(doc, flows);
-    const section = makeSection({ title, artboards, description, status, color, flows, order: page.sections?.length ?? 0 });
+    const card = normaliseFlowCard(flowCard, title);
+    const section = makeSection({ title, artboards, description, status, color, flows, order: page.sections?.length ?? 0, ...(card ? { flowCard: card } : {}) });
     commit(ctx, [...releaseOps(page, section.id, artboards), { t: 'section', action: 'add', pageId: page.id, section }]);
     if (arrange) {
       const now = requireDoc(ctx);
@@ -2549,7 +2562,7 @@ function registerNoteTools(server: McpServer, ctx: McpContext): void {
   server.registerTool('update_section', {
     title: 'Edit a section',
     description:
-      'Changes a section\'s title, description, status, colour, flows or order. Members: `artboards` replaces ' +
+      'Changes a section\'s title, description, status, colour, flows, flow card or order. Members: `artboards` replaces ' +
       'the list; `add` / `remove` edit it. arrange: true re-lays members in a row. Give only what changes.',
     inputSchema: {
       id: z.string(),
@@ -2562,15 +2575,17 @@ function registerNoteTools(server: McpServer, ctx: McpContext): void {
       artboards: z.array(z.string()).max(200).optional(),
       add: z.array(z.string()).max(200).optional(),
       remove: z.array(z.string()).max(200).optional(),
+      flowCard: FlowCardInput.optional(),
       arrange: z.boolean().optional().default(false),
       gap: z.number().min(0).max(2000).optional().describe('Space between screens; default 120.'),
     },
-  }, async ({ id, arrange, gap, artboards, add, remove, ...fields }) => guard(() => {
+  }, async ({ id, arrange, gap, artboards, add, remove, flowCard, ...fields }) => guard(() => {
     const doc = requireDoc(ctx);
     const { page, section } = findSection(doc, id);
     checkFlows(doc, fields.flows);
     const patch: Partial<Section> & { id: string } = { id };
     for (const [k, v] of Object.entries(fields)) if (v !== undefined) (patch as Record<string, unknown>)[k] = v;
+    if (flowCard !== undefined) patch.flowCard = normaliseFlowCard(flowCard, fields.title ?? section.title);
     if (artboards || add || remove) {
       let next = artboards ?? section.artboards;
       if (add) next = [...next, ...add.filter((a) => !next.includes(a))];

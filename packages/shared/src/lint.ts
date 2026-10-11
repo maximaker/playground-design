@@ -17,7 +17,7 @@ import {
 import { expandNode } from './components.ts';
 import { literalTokenValue } from './css.ts';
 import type { StyleRuleStat } from './html.ts';
-import { sectionsOf, sectionRect, sectionMembers } from './sections.ts';
+import { sectionsOf, sectionRect, sectionMembers, sectionHeading } from './sections.ts';
 import { contrastRatio, formatRatio, parseColor, requiredContrast, type Rgb } from './color.ts';
 
 export type Severity = 'error' | 'warning' | 'info';
@@ -322,7 +322,7 @@ function checkSectionHeaders(doc: CanvasDocument): Finding[] {
       // The canvas header at 100%: a 26px title between 80px side padding,
       // with a status pill and screen count beside it.
       const inner = Math.max(rect.width, 360) - 160;
-      const titleTooLong = textWidth(section.title, 26) > inner - 220;
+      const titleTooLong = textWidth(sectionHeading(section), 26) > inner - 220;
       const descTooLong = !!section.description && textWidth(section.description, 16) > inner * 2;
       // A neighbour whose region reaches into this header covers it.
       const covered = sections.some((other) => {

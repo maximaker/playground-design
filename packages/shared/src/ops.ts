@@ -446,6 +446,7 @@ export function makeSection(partial: Partial<Section> = {}): Section {
     flows: partial.flows,
     order: partial.order ?? 0,
     ...(partial.version ? { version: partial.version } : {}),
+    ...(partial.flowCard ? { flowCard: partial.flowCard } : {}),
   };
 }
 

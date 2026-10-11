@@ -202,6 +202,25 @@ export interface Section {
   order: number;
   /** Current or superseded, like a page. */
   version?: VersionState | null;
+  /** The flow card that opens the section: code, title, who and why. */
+  flowCard?: FlowCard | null;
+}
+
+/**
+ * A numbered flow card — "F3 · Reorder a prescription", who does it, as which
+ * persona, to get what, and what feedback is still open. Client files hand-built
+ * these as frames; here it is data the header and the MCP can read.
+ */
+export interface FlowCard {
+  /** Short code shown before the title, e.g. "F3" or "ON-2". */
+  code: string;
+  title: string;
+  /** The user role, e.g. "Patient" or "Admin". */
+  role?: string;
+  persona?: string;
+  goal?: string;
+  /** Feedback still open on this flow, one item per line. */
+  feedback?: string[];
 }
 
 export type SectionStatus = 'draft' | 'in-review' | 'ready' | 'changed';

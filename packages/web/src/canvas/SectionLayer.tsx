@@ -9,8 +9,8 @@
 
 import { useState } from 'react';
 import {
-  type Section, type SectionStatus, SECTION_LAYOUT, SECTION_STATUSES, SECTION_STATUS_META,
-  sectionRect, sectionMembers, sectionsOf, sectionTint, newId, sectionFlows,
+  type FlowCard, type Section, type SectionStatus, SECTION_LAYOUT, SECTION_STATUSES, SECTION_STATUS_META,
+  sectionRect, sectionMembers, sectionsOf, sectionTint, newId, sectionFlows, sectionHeading,
 } from '@playground/shared';
 import { useCanvas, currentPage, getDoc } from '../state/store.ts';
 import { fitBox, jumpToBoardItem } from '../hooks/commands.ts';
@@ -81,7 +81,8 @@ function SectionRegion({ section, zoom }: { section: Section; zoom: number }) {
       >
         {!tiny && (
           <>
-            <span className="section-title">{section.title}</span>
+            {section.flowCard?.code && <span className="section-code">{section.flowCard.code}</span>}
+            <span className="section-title">{section.flowCard?.title || section.title}</span>
             <span className="section-pill" style={{ background: status.bg, color: status.fg, fontSize: Math.max(10, font * 0.6) }}>
               {status.label}
             </span>
@@ -107,6 +108,38 @@ function SectionRegion({ section, zoom }: { section: Section; zoom: number }) {
           </>
         )}
       </div>
+      {section.flowCard && !tiny && (
+        <FlowCardView card={section.flowCard} zoom={zoom} top={header + SECTION_LAYOUT.padding * zoom} left={SECTION_LAYOUT.padding * zoom} />
+      )}
+    </div>
+  );
+}
+
+/**
+ * The flow card at the start of a section, drawn in canvas units so it scales
+ * with the screens beside it — the hand-built frames it replaces did.
+ */
+function FlowCardView({ card, zoom, top, left }: { card: FlowCard; zoom: number; top: number; left: number }) {
+  const rows: [string, string | undefined][] = [['Role', card.role], ['Persona', card.persona], ['Goal', card.goal]];
+  return (
+    <div
+      className="flow-card"
+      style={{ top, left, width: SECTION_LAYOUT.flowCard.width, transform: `scale(${zoom})` }}
+      onPointerDown={(e) => e.stopPropagation()}
+    >
+      <div className="flow-card-code">{card.code}</div>
+      <div className="flow-card-title">{card.title}</div>
+      <dl className="flow-card-facts">
+        {rows.filter(([, v]) => v).map(([k, v]) => (
+          <div key={k}><dt>{k}</dt><dd>{v}</dd></div>
+        ))}
+      </dl>
+      {!!card.feedback?.length && (
+        <div className="flow-card-feedback">
+          <div className="flow-card-label">Open feedback · {card.feedback.length}</div>
+          <ul>{card.feedback.map((f, i) => <li key={i}>{f}</li>)}</ul>
+        </div>
+      )}
     </div>
   );
 }
@@ -171,7 +204,7 @@ export function SectionList() {
               />
             ) : (
               <button className="section-row-title" onClick={() => jump(s)} onDoubleClick={() => setEditing(s.id)} title="Jump to section · double-click to rename">
-                {s.title}
+                {sectionHeading(s)}
                 <VersionBadge doc={doc} version={s.version} />
                 <span className="section-row-count">{count}</span>
               </button>
