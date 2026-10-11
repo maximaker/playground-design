@@ -160,7 +160,7 @@ Artifactory's origin gets an answer that allows the session cookie.
 | `list_components` | Components, with instance counts, slots and structure |
 | `create_component` | Turn a subtree into a component and replace it with an instance |
 | `insert_instance` | Place instances; returns `{ id, ids }` |
-| `replace_with_instance` | Swap hand-built elements (`nodeId` or `nodeIds`) for instances in place: same parent and index, text mapped onto the definition's parts, differing styles and attributes kept as overrides |
+| `replace_with_instance` | Swap hand-built elements (`nodeId` or `nodeIds`) for instances in place: same parent and index, text mapped onto the definition's parts, differing styles and attributes kept as overrides. `match: "role"` finds every element with the component root's class and tag, no ids needed |
 | `name_layers` | Rename tag-named layers. Uses the client's model when it offers sampling, otherwise a deterministic name from the class or tag and first text — "Button · Save lead" |
 | `get_instance` | What an instance renders, and which parts can be overridden |
 | `set_override` | Change one instance without touching the others |
@@ -207,7 +207,7 @@ Artifactory's origin gets an answer that allows the session cookie.
 | `publish_page` / `unpublish_page` / `get_publication` | Put an artboard on the public web, or take it down |
 | `mark_checkpoint` | Save a named version to compare against later |
 | `annotate` | A typed note on a layer — behaviour, data, constraint, accessibility, to-do |
-| `componentise` | Registers a shape and swaps every identical copy for an instance, text and links carried as overrides. Refuses if any artboard would render differently |
+| `componentise` | Registers a shape and swaps every identical copy for an instance, text and links carried as overrides. Refuses if any artboard would render differently. `match: "role"` groups by the original class (`data-class`) and tag instead — "all primary buttons" — carrying each copy's style differences as overrides and skipping (and reporting) any copy that would render differently; dry-run without `id` lists the role groups |
 | `update_styles` | Batch CSS, with `:hover` / `@media` variants via `selector` |
 | `set_text_content` | Batch text |
 | `rename_nodes` / `set_attributes` | Batch |

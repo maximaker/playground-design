@@ -1107,3 +1107,57 @@ test('create_section and update_section carry a flow card', async () => {
   assert.ok((bad as { isError?: boolean }).isError);
   await client.callTool({ name: 'delete_section', arguments: { id: created.id } });
 });
+
+test('componentise match "role" groups by class and tag, carrying style differences as overrides', async () => {
+  const info = jsonOf<{ artboards: { id: string }[] }>(await client.callTool({ name: 'get_basic_info', arguments: {} }));
+  const artboard = info.artboards[0]!.id;
+  const written = jsonOf<{ roots: { id: string }[] }>(await client.callTool({
+    name: 'write_html',
+    arguments: {
+      targetId: artboard, mode: 'insert-children',
+      html: `<style>.btn { background: #111; color: #fff; border-radius: 8px } .odd:hover { opacity: .5 }</style>
+        <div class="row">
+          <button class="btn primary" style="padding:12px 20px">Save</button>
+          <button class="btn primary" style="padding:14px 20px">Send</button>
+          <button class="primary btn" style="padding:12px 24px">Pay</button>
+          <a class="btn primary" href="#">Not a button</a>
+        </div>`,
+    },
+  }));
+  const doc = getDocument(docId)!;
+  const buttons = Object.values(doc.nodes).filter((n) => n.tag === 'button' && n.attrs['data-class']?.includes('primary'));
+  assert.equal(buttons.length, 3);
+
+  const groups = jsonOf<{ groups: { role: string; copies: number; styleDifferences: number }[] }>(await client.callTool({
+    name: 'componentise', arguments: { match: 'role', dryRun: true },
+  }));
+  const g = groups.groups.find((x) => x.role === 'button.btn.primary')!;
+  assert.equal(g.copies, 3, 'class order does not matter; the <a> is a different role');
+  assert.equal(g.styleDifferences, 2);
+
+  const made = jsonOf<{ componentId: string; instances: number; skipped: unknown[] }>(await client.callTool({
+    name: 'componentise', arguments: { id: buttons[0]!.id, name: 'Primary button', match: 'role' },
+  }));
+  assert.equal(made.instances, 3);
+  assert.deepEqual(made.skipped, []);
+  const after = getDocument(docId)!;
+  const instances = Object.values(after.nodes).filter((n) => n.type === 'instance' && n.componentRef === made.componentId);
+  assert.equal(instances.length, 3);
+  assert.ok(instances.some((i) => Object.values(i.overrides ?? {}).some((o) => o.styles?.padding === '14px 20px')));
+
+  // A button built later with the same role is found without ids.
+  const later = jsonOf<{ roots: { id: string }[] }>(await client.callTool({
+    name: 'write_html',
+    arguments: { targetId: written.roots[0]!.id, mode: 'insert-children', html: '<button class="btn primary" style="padding:10px 16px">Later</button>' },
+  }));
+  const dry = jsonOf<{ wouldReplace: number; ids: string[] }>(await client.callTool({
+    name: 'replace_with_instance', arguments: { componentId: made.componentId, match: 'role', dryRun: true },
+  }));
+  assert.deepEqual(dry.ids, [later.roots[0]!.id]);
+  const swapped = jsonOf<{ replaced: { overrides: number }[] }>(await client.callTool({
+    name: 'replace_with_instance', arguments: { componentId: made.componentId, match: 'role' },
+  }));
+  assert.equal(swapped.replaced.length, 1);
+  assert.ok(swapped.replaced[0]!.overrides >= 1, 'text and padding travel as overrides');
+  await client.callTool({ name: 'delete_nodes', arguments: { ids: written.roots.map((r) => r.id) } });
+});

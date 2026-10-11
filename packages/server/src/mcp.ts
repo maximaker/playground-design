@@ -389,6 +389,123 @@ function componentisePlan(
   return { ops, componentId, definitionRoot: root.id };
 }
 
+/**
+ * Role matching: "all primary buttons", not "all byte-identical buttons".
+ *
+ * Exact matching needs every copy to agree on every style, so two buttons a
+ * hand-built page padded 12px and 14px stay two things forever. A role is the
+ * element's authored class list (kept as data-class) plus its tag; copies that
+ * share it become one component, and what each copy set differently travels as
+ * an override. Elements without a class have no role to share.
+ */
+export function roleKey(n: CanvasNode | undefined): string | null {
+  const cls = n?.attrs['data-class']?.trim();
+  return n && cls ? `${n.tag}.${cls.split(/\s+/).sort().join('.')}` : null;
+}
+
+export interface RoleGroup { role: string; ids: NodeId[]; sample: NodeId; exact: number; restyled: number; reshaped: number }
+
+/** Role groups in artboards, outermost members only, largest first. */
+export function roleGroups(doc: CanvasDocument, opts: { minCopies?: number; role?: string } = {}): RoleGroup[] {
+  const inComponent = new Set(Object.values(doc.components ?? {}).flatMap((c) => subtreeIdsOf(doc, c.root)));
+  const byRole = new Map<string, NodeId[]>();
+  for (const id of artboardNodes(doc)) {
+    const n = doc.nodes[id];
+    if (!n || n.type === 'instance' || inComponent.has(id)) continue;
+    const key = roleKey(n);
+    if (!key || (opts.role && key !== opts.role)) continue;
+    byRole.set(key, [...(byRole.get(key) ?? []), id]);
+  }
+  const groups: RoleGroup[] = [];
+  for (const [role, all] of byRole) {
+    // A member nested inside another member of the same role goes with its outer copy.
+    const ids = all.filter((id) => !ancestorsOf(doc, id).some((a) => all.includes(a)));
+    if (ids.length < (opts.minCopies ?? 2)) continue;
+    const sample = ids[0]!;
+    const sig = shapeSignature(doc, sample);
+    const shape = tagShape(doc, sample);
+    let exact = 0, restyled = 0, reshaped = 0;
+    for (const id of ids) {
+      if (shapeSignature(doc, id) === sig) exact++;
+      else if (tagShape(doc, id) === shape) restyled++;
+      else reshaped++;
+    }
+    groups.push({ role, ids, sample, exact, restyled, reshaped });
+  }
+  return groups.sort((a, b) => b.ids.length - a.ids.length);
+}
+
+function tagShape(doc: CanvasDocument, id: NodeId): string {
+  const n = doc.nodes[id];
+  return n ? `${n.tag}(${n.children.map((c) => tagShape(doc, c)).join(',')})` : '';
+}
+
+function ancestorsOf(doc: CanvasDocument, id: NodeId): NodeId[] {
+  const out: NodeId[] = [];
+  for (let p = doc.nodes[id]?.parent; p; p = doc.nodes[p]?.parent) out.push(p);
+  return out;
+}
+
+/** Ops that swap `copies` for instances of a component whose definition was cloned from `sourceId`. */
+function roleCopyOps(
+  doc: CanvasDocument, sourceId: NodeId, defOrder: NodeId[], componentId: string, name: string, copies: NodeId[],
+): Op[] {
+  const sourceOrder = subtreeIdsOf(doc, sourceId);
+  const toDef = new Map(sourceOrder.map((s, i) => [s, defOrder[i]!]));
+  const ops: Op[] = [];
+  for (const copy of copies) {
+    const copyNode = doc.nodes[copy];
+    if (!copyNode?.parent) continue;
+    const { overrides } = overridesFor(doc, copy, sourceId);
+    const remapped: Record<NodeId, InstanceOverride> = {};
+    for (const [k, v] of Object.entries(overrides)) { const d = toDef.get(k); if (d) remapped[d] = v; }
+    const instance = makeNode({ type: 'instance', name, componentRef: componentId, ...(Object.keys(remapped).length ? { overrides: remapped } : {}) });
+    ops.push({ t: 'remove', ids: [copy] });
+    ops.push({ t: 'insert', nodes: [instance], parent: copyNode.parent, index: doc.nodes[copyNode.parent]!.children.indexOf(copy) });
+  }
+  return ops;
+}
+
+/**
+ * Componentise by role, keeping only the copies that render exactly as before.
+ * The swap is rehearsed on a copy of the document; a copy whose artboard would
+ * change (a hover state, a different structure the override cannot express) is
+ * left alone and reported, and the rest go ahead.
+ */
+export function roleComponentisePlan(
+  doc: CanvasDocument, id: NodeId, name: string, copies: NodeId[], description?: string,
+): { ops: Op[]; componentId: string; definitionRoot: NodeId; replaced: NodeId[]; skipped: { id: NodeId; reason: string }[] } {
+  const base = componentisePlan(doc, id, name, [], description);
+  const defNodes = (base.ops[0] as Extract<Op, { t: 'insert' }>).nodes;
+  const defDoc = { ...doc, nodes: Object.fromEntries(defNodes.map((n) => [n.id, n])) } as CanvasDocument;
+  const defOrder = subtreeIdsOf(defDoc, base.definitionRoot);
+  const artboardOfId = (n: NodeId) => artboardOf(doc, n) ?? '';
+  const before = renderAll(doc);
+
+  let keep = copies.filter((c) => doc.nodes[c]?.parent);
+  const skipped: { id: NodeId; reason: string }[] = [];
+  for (let round = 0; round < copies.length + 2; round++) {
+    const ops = [...base.ops, ...roleCopyOps(doc, id, defOrder, base.componentId, name, keep)];
+    const rehearsal = structuredClone(doc);
+    for (const op of ops) applyOp(rehearsal, op);
+    const after = renderAll(rehearsal);
+    const moved = new Set(Object.keys(before).filter((k) => before[k] !== after[k]));
+    if (!moved.size) return { ops, componentId: base.componentId, definitionRoot: base.definitionRoot, replaced: [id, ...keep], skipped };
+    const label = (n: NodeId) => { for (const p of doc.pages) if (p.artboards.includes(artboardOfId(n))) return `${p.name} / ${doc.nodes[artboardOfId(n)]?.name ?? ''}`; return ''; };
+    if (moved.has(label(id))) {
+      throw new Error(`Refused: the artboard holding ${id} would render differently once it is an instance. Nothing was changed.`);
+    }
+    // Drop the copies on artboards that changed and try again; each round can only shrink the set.
+    const dropping = keep.filter((c) => moved.has(label(c)));
+    if (!dropping.length) throw new Error('Refused: the swap changes rendering in a way no single copy explains. Nothing was changed.');
+    // One at a time on a shared artboard would be exact, but costs a render per copy; drop
+    // the artboard's copies and retry the rest — usually the culprit is one odd frame.
+    for (const c of dropping) skipped.push({ id: c, reason: 'would render differently as an instance (a state or structure an override cannot carry)' });
+    keep = keep.filter((c) => !dropping.includes(c));
+  }
+  throw new Error('Refused: could not settle on a set of copies that render the same. Nothing was changed.');
+}
+
 // ---------------------------------------------------------------------------
 // Layer names and instance swaps
 // ---------------------------------------------------------------------------
@@ -3507,14 +3624,54 @@ function registerComponentTools(server: McpServer, ctx: McpContext): void {
       'changes nothing if the rendered HTML of any artboard would differ — instances are supposed ' +
       'to be invisible in the output.',
     inputSchema: {
-      id: z.string().describe('A node to build the component from; every copy of it is replaced.'),
-      name: z.string().min(1).max(60),
+      id: z.string().optional().describe('A node to build the component from; every copy of it is replaced. Optional only for a match: "role" dry run, which then lists every role group.'),
+      name: z.string().min(1).max(60).optional().describe('Required unless dryRun.'),
       description: z.string().max(280).optional(),
+      match: z.enum(['exact', 'role']).optional().default('exact').describe(
+        'exact: copies must be identical. role: copies share the element\'s original class (data-class) and tag — ' +
+        '"all primary buttons" — and each copy\'s own style differences travel as overrides. Copies that would ' +
+        'render differently as an instance are skipped and reported. Dry-run first to see the groups.'),
       dryRun: z.boolean().optional().default(false)
         .describe('Report what would change without changing it.'),
     },
-  }, async ({ id, name, description, dryRun }) => guard(() => {
+  }, async ({ id, name, description, dryRun, match }) => guard(() => {
     const doc = requireDoc(ctx);
+    if (match === 'role') {
+      const describeGroup = (g: RoleGroup) => ({
+        role: g.role, copies: g.ids.length, sample: g.sample,
+        identical: g.exact, styleDifferences: g.restyled, structureDifferences: g.reshaped,
+        ids: g.ids.slice(0, 30),
+      });
+      if (!id) {
+        if (!dryRun) return fail('Give id: the element to build the component from. Dry-run without id lists the role groups.');
+        const groups = roleGroups(doc);
+        return json({ groups: groups.slice(0, 30).map(describeGroup), note: groups.length ? 'Pick a sample id and call componentise with match: "role" and a name.' : 'No two elements share a class and tag.' });
+      }
+      const source = node(doc, id);
+      if (source.type === 'instance' || source.type === 'artboard') return fail(`${id} cannot be a component source.`);
+      const role = roleKey(source);
+      if (!role) return fail(`${id} has no original class (data-class), so it has no role to match. Use match: "exact".`);
+      const group = roleGroups(doc, { role, minCopies: 1 })[0];
+      const copies = (group?.ids ?? []).filter((c) => c !== id && !subtreeIdsOf(doc, id).includes(c) && !ancestorsOf(doc, id).includes(c));
+      if (dryRun) {
+        const plan = roleComponentisePlan(doc, id, name ?? 'Component', copies, description);
+        return json({ ...(group ? describeGroup(group) : { role }), wouldReplace: plan.replaced.length - 1, wouldSkip: plan.skipped, name: name ?? null });
+      }
+      if (!name) return fail('Give the component a name.');
+      try {
+        const plan = roleComponentisePlan(doc, id, name, copies, description);
+        commit(ctx, plan.ops);
+        return json({
+          componentId: plan.componentId, definitionRoot: plan.definitionRoot, role,
+          instances: plan.replaced.length, skipped: plan.skipped,
+          next: 'get_instance shows each copy\'s overrides; set_component_props and set_variant add variants.',
+        });
+      } catch (err) {
+        return fail(err instanceof Error ? err.message : String(err));
+      }
+    }
+    if (!id) return fail('Give id: the element to build the component from.');
+    if (!name && !dryRun) return fail('Give the component a name.');
     const source = node(doc, id);
     if (source.type === 'instance') return fail(`${id} is already an instance.`);
     if (source.type === 'artboard') return fail('Artboards cannot be components.');
@@ -3522,11 +3679,11 @@ function registerComponentTools(server: McpServer, ctx: McpContext): void {
     if (dryRun) {
       const sig = shapeSignature(doc, id);
       const copies = artboardNodes(doc).filter((n) => n !== id && shapeSignature(doc, n) === sig);
-      return json({ wouldReplace: copies.length, copies: copies.slice(0, 20), name });
+      return json({ wouldReplace: copies.length, copies: copies.slice(0, 20), name: name ?? null });
     }
 
     try {
-      const made = componentiseShape(ctx, id, name, description);
+      const made = componentiseShape(ctx, id, name!, description);
       return json({
         ...made,
         next: 'set_component_props and set_variant give it variants; get_instance shows what an instance can override.',
@@ -3573,13 +3730,25 @@ function registerComponentTools(server: McpServer, ctx: McpContext): void {
       nodeId: z.string().optional().describe('The element to replace.'),
       nodeIds: z.array(z.string()).min(1).max(100).optional().describe('Several elements, all with the same component.'),
       componentId: z.string(),
+      match: z.enum(['exact', 'role']).optional().default('exact').describe(
+        'role: also find every element with the same original class (data-class) and tag as the component\'s ' +
+        'root, anywhere in the artboards, and replace those too — no ids needed.'),
+      dryRun: z.boolean().optional().default(false).describe('List what would be replaced without replacing it.'),
     },
-  }, async ({ nodeId, nodeIds, componentId }) => guard(() => {
+  }, async ({ nodeId, nodeIds, componentId, match, dryRun }) => guard(() => {
     const doc = requireDoc(ctx);
     const def = doc.components?.[componentId];
     if (!def) return fail(`No component "${componentId}". Call list_components.`);
-    const targets = [...new Set([...(nodeId ? [nodeId] : []), ...(nodeIds ?? [])])];
-    if (!targets.length) return fail('Give nodeId or nodeIds.');
+    let targets = [...new Set([...(nodeId ? [nodeId] : []), ...(nodeIds ?? [])])];
+    if (match === 'role') {
+      const role = roleKey(doc.nodes[def.root]);
+      if (!role) return fail('The component\'s root has no original class (data-class), so there is no role to match. Pass nodeIds.');
+      targets = [...new Set([...targets, ...(roleGroups(doc, { role, minCopies: 1 })[0]?.ids ?? [])])];
+      if (dryRun) return json({ role, wouldReplace: targets.length, ids: targets.slice(0, 50) });
+    } else if (dryRun) {
+      return json({ wouldReplace: targets.length, ids: targets });
+    }
+    if (!targets.length) return fail(match === 'role' ? 'Nothing in the artboards has that role.' : 'Give nodeId or nodeIds.');
     const defIds = subtreeIdsOf(doc, def.root);
 
     const ops: Op[] = [];
