@@ -35,7 +35,7 @@ import {
   type Section, SECTION_STATUSES, makeSection, sectionsOf, sectionMembers, sectionRect, arrangeSectionOps, sectionFlows, findFlow,
   decisionsOf, addDecisionOps, resolveWithOutcomeOps, describeDecision, decisionsMarkdown,
   sectionOfArtboard, normaliseFlowCard, sectionHeading, findVersionTarget, versionOps, describeVersion, versionOf, targetTitle, VERSION_KINDS,
-  GOOGLE_FONT_WEIGHTS,
+  GOOGLE_FONT_WEIGHTS, artboardTheme, REPEAT_DATA_ATTR, REPEAT_TEMPLATE_ATTR, REPEAT_STYLE_ATTR, expandRepeat,
 } from '@playground/shared';
 import {
   applyOps, getDocument, getSnapshot, listSnapshots, StoreError, createSnapshot,
@@ -668,6 +668,94 @@ function node(doc: CanvasDocument, id: NodeId): CanvasNode {
 }
 
 // ---------------------------------------------------------------------------
+// Querying by style
+// ---------------------------------------------------------------------------
+
+const StringMatch = z.union([
+  z.string(),
+  z.object({
+    contains: z.string().optional(),
+    equals: z.string().optional(),
+    regex: z.string().optional(),
+    exists: z.boolean().optional(),
+  }).strict(),
+]).describe('A string means "contains"; or { contains | equals | regex | exists }. Case-insensitive.');
+type StringMatchT = z.infer<typeof StringMatch>;
+
+const NodeQueryShape = {
+  query: z.string().optional().describe('Case-insensitive substring matched against layer name and text content.'),
+  type: z.string().optional().describe('Node type: frame, text, image, vector, shape, artboard, embed, instance.'),
+  tag: z.string().optional().describe('HTML tag, e.g. "h1".'),
+  class: z.string().optional().describe('A class the element was written with (its data-class), e.g. "btn".'),
+  theme: z.string().optional().describe('Only nodes on artboards set to this theme ("default" for unthemed).'),
+  within: z.string().optional().describe('Restrict to the subtree of this node id.'),
+  pageId: z.string().optional().describe('Restrict to one page.'),
+  styles: z.record(z.string(), StringMatch).optional()
+    .describe('CSS property -> match, against the node\'s own styles. "background" also reads background-color; "border-color" reads border too.'),
+  ancestorBackground: StringMatch.optional().describe('Matches the background of the nearest ancestor that sets one.'),
+  offset: z.number().int().min(0).optional(),
+  limit: z.number().int().min(1).max(1000).optional().describe('Page size, default 100.'),
+};
+type NodeQuery = { [K in keyof typeof NodeQueryShape]?: z.infer<(typeof NodeQueryShape)[K]> };
+
+const STYLE_ALIASES: Record<string, string[]> = {
+  background: ['background', 'background-color', 'background-image'],
+  'background-color': ['background-color', 'background'],
+  'border-color': ['border-color', 'border', 'border-top', 'border-bottom', 'border-left', 'border-right'],
+  border: ['border', 'border-top', 'border-bottom', 'border-left', 'border-right', 'border-color'],
+};
+
+function styleValue(n: CanvasNode, prop: string): string | undefined {
+  const keys = STYLE_ALIASES[prop] ?? [prop];
+  const vals = keys.map((k) => n.styles[k]).filter((v): v is string => v !== undefined && v !== '');
+  return vals.length ? vals.join(' ') : undefined;
+}
+
+function stringMatches(value: string | undefined, m: StringMatchT): boolean {
+  if (typeof m === 'string') return value !== undefined && value.toLowerCase().includes(m.toLowerCase());
+  if (m.exists !== undefined && (value !== undefined) !== m.exists) return false;
+  if (m.contains === undefined && m.equals === undefined && m.regex === undefined) return true;
+  if (value === undefined) return false;
+  const v = value.toLowerCase();
+  if (m.contains !== undefined && !v.includes(m.contains.toLowerCase())) return false;
+  if (m.equals !== undefined && v.trim() !== m.equals.toLowerCase().trim()) return false;
+  if (m.regex !== undefined && !new RegExp(m.regex, 'i').test(value)) return false;
+  return true;
+}
+
+/** Every node a find_nodes query matches, in document order. */
+function matchNodes(doc: CanvasDocument, q: NodeQuery): CanvasNode[] {
+  let scope: NodeId[];
+  if (q.within) scope = [q.within, ...descendants(doc, q.within)];
+  else if (q.pageId) {
+    const page = doc.pages.find((p) => p.id === q.pageId);
+    if (!page) throw new Error(`No page "${q.pageId}". Call list_pages.`);
+    scope = page.artboards.flatMap((a) => [a, ...descendants(doc, a)]);
+  } else scope = Object.keys(doc.nodes);
+  const text = q.query?.toLowerCase();
+  const cls = q.class?.toLowerCase();
+  const out: CanvasNode[] = [];
+  for (const id of scope) {
+    const n = doc.nodes[id];
+    if (!n) continue;
+    if (q.type && n.type !== q.type) continue;
+    if (q.tag && n.tag.toLowerCase() !== q.tag.toLowerCase()) continue;
+    if (text && !n.name.toLowerCase().includes(text) && !(n.text ?? '').toLowerCase().includes(text)) continue;
+    if (cls && !(n.attrs['data-class'] ?? '').toLowerCase().split(/\s+/).includes(cls)) continue;
+    if (q.theme && artboardTheme(doc, n.id) !== q.theme) continue;
+    if (q.styles && !Object.entries(q.styles).every(([prop, m]) => stringMatches(styleValue(n, prop), m))) continue;
+    if (q.ancestorBackground) {
+      let cur = n.parent ? doc.nodes[n.parent] : undefined;
+      let bg: string | undefined;
+      while (cur && bg === undefined) { bg = styleValue(cur, 'background'); cur = cur.parent ? doc.nodes[cur.parent] : undefined; }
+      if (!stringMatches(bg, q.ancestorBackground)) continue;
+    }
+    out.push(n);
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
 // Server construction
 // ---------------------------------------------------------------------------
 
@@ -927,32 +1015,52 @@ function registerReadTools(server: McpServer, ctx: McpContext): void {
   server.registerTool('find_nodes', {
     title: 'Find nodes',
     description:
-      'Search the document by layer name, text content, tag or type. Use this instead of dumping the whole tree when you know what you are looking for.',
-    inputSchema: {
-      query: z.string().optional().describe('Case-insensitive substring matched against layer name and text content.'),
-      type: z.string().optional().describe('Node type: frame, text, image, vector, shape, artboard, embed.'),
-      tag: z.string().optional().describe('HTML tag, e.g. "h1".'),
-      within: z.string().optional().describe('Restrict to the subtree of this node id.'),
-      limit: z.number().int().min(1).max(200).optional().default(50),
-    },
+      'Search the document by layer name, text, tag, type, class, theme or style. Style filters match the '
+      + 'node\'s own CSS: { color: { contains: "--color-ink" }, background: { contains: "lime" } }; '
+      + 'ancestorBackground matches the nearest ancestor that sets a background. Returns every match, '
+      + 'paged with offset/limit. restyle_matching takes the same query to change them all at once.',
+    inputSchema: NodeQueryShape,
     annotations: { readOnlyHint: true },
-  }, async ({ query, type, tag, within, limit }) => guard(() => {
+  }, async (q) => guard(() => {
     const doc = requireDoc(ctx);
-    const scope = within ? [within, ...descendants(doc, within)] : Object.keys(doc.nodes);
-    const q = query?.toLowerCase();
-    const hits = scope.flatMap((id) => {
-      const n = doc.nodes[id];
-      if (!n) return [];
-      if (type && n.type !== type) return [];
-      if (tag && n.tag.toLowerCase() !== tag.toLowerCase()) return [];
-      if (q && !n.name.toLowerCase().includes(q) && !(n.text ?? '').toLowerCase().includes(q)) return [];
-      return [{ ...nodeEntry(n, 0), artboard: artboardOf(doc, n.id) }];
-    });
+    const all = matchNodes(doc, q);
+    const offset = q.offset ?? 0;
+    const limit = q.limit ?? 100;
+    const page = all.slice(offset, offset + limit);
     return json({
-      count: hits.length,
-      nodes: hits.slice(0, limit).map(({ depth, ...rest }) => { void depth; return rest; }),
-      ...(hits.length > limit ? { truncated: hits.length - limit } : {}),
+      count: all.length,
+      ...(offset ? { offset } : {}),
+      nodes: page.map((n) => {
+        const { depth, ...rest } = nodeEntry(n, 0); void depth;
+        return {
+          ...rest, artboard: artboardOf(doc, n.id),
+          ...(q.styles ? { styles: Object.fromEntries(Object.keys(q.styles).map((k) => [k, styleValue(n, k) ?? null])) } : {}),
+        };
+      }),
+      ...(offset + limit < all.length ? { nextOffset: offset + limit } : {}),
     });
+  }));
+
+  server.registerTool('restyle_matching', {
+    title: 'Restyle everything that matches',
+    description:
+      'Applies one style update to every node a find_nodes query matches, as a single undoable step. '
+      + 'Call with dryRun first to see how many it would touch. E.g. query { styles: { color: { contains: "#111" } } }, '
+      + 'styles { color: "var(--color-ink)" }.',
+    inputSchema: {
+      query: z.object(NodeQueryShape).strict(),
+      styles: StyleRecord.describe('Kebab-case CSS to set on each match. An empty string removes a declaration.'),
+      selector: z.string().optional().describe('":hover" or a breakpoint selector; omit for base styles.'),
+      dryRun: z.boolean().optional().default(false),
+    },
+  }, async ({ query, styles, selector, dryRun }) => guard(() => {
+    const doc = requireDoc(ctx);
+    const hits = matchNodes(doc, query).filter((n) => n.type !== 'instance');
+    if (!hits.length) return json({ matched: 0, updated: 0, ids: [] });
+    const ids = hits.map((n) => n.id);
+    if (dryRun) return json({ matched: ids.length, wouldUpdate: ids.length, ids: ids.slice(0, 200), dryRun: true });
+    commit(ctx, [{ t: 'styles', updates: ids.map((id) => ({ id, styles, ...(selector ? { selector } : {}) })) }]);
+    return json({ matched: ids.length, updated: ids.length, ids: ids.slice(0, 200), undo: 'One step: a single undo reverts every change.' });
   }));
 
   server.registerTool('get_html', {

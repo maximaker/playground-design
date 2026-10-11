@@ -177,7 +177,8 @@ Artifactory's origin gets an answer that allows the session cookie.
 | `get_tree_summary` | A subtree as rows `{ id, type, tag, name, text, parent, depth, childCount }` — the cheap way to understand a design. `outline: true` adds the compact text form |
 | `get_node_info` | One node in full: styles, variants, attributes, text, parent, children |
 | `get_children` | One level down: ids, names, types, child counts |
-| `find_nodes` | Search by name, text, tag or type; returns `{ count, nodes: [{ id, type, tag, name, text, artboard, … }] }` |
+| `find_nodes` | Search by name, text, tag, type, class, theme, page or style (`styles: { color: { contains: '--color-ink' } }`, `ancestorBackground`); returns every match, paged: `{ count, offset, nodes: [{ id, type, tag, name, text, artboard, … }], nextOffset? }` |
+| `restyle_matching` | `{ query, styles, selector?, dryRun }` — one style update applied to every `find_nodes` match as a single undoable step |
 | `get_selection` | What the human has selected right now |
 | `get_computed_styles` | Authored styles, plus browser-resolved values and measured boxes — from the person's tab when it shows the page, otherwise rendered headlessly (`source` says which) |
 | `get_screenshot` | PNG of any node, so the agent can see its own work |

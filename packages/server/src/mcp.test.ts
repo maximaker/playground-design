@@ -1193,3 +1193,32 @@ test('write_html turns component tags into real instances', async () => {
   assert.ok(res.warnings.some((w) => /No component named "Fancy"/.test(w)));
   await agent.close();
 });
+
+test('find_nodes filters by style and restyle_matching changes every match in one step', async () => {
+  const { id, agent, call } = await freshAgent('Restyle');
+  const board = getDocument(id)!.pages[0]!.artboards[0]!;
+  await call('write_html', {
+    targetId: board,
+    html: '<div style="background:lime"><p style="color:#111">A</p><p style="color:#111">B</p></div>'
+      + '<p class="note big" style="color:#111">C</p><p style="color:red">D</p>',
+  });
+  const found = await call<{ count: number; nodes: { id: string }[]; nextOffset?: number }>('find_nodes', {
+    styles: { color: { contains: '#111' } }, limit: 2 });
+  assert.equal(found.count, 3);
+  assert.equal(found.nodes.length, 2);
+  assert.equal(found.nextOffset, 2);
+  const onLime = await call<{ count: number }>('find_nodes', { styles: { color: '#111' }, ancestorBackground: 'lime' });
+  assert.equal(onLime.count, 2);
+  assert.equal((await call<{ count: number }>('find_nodes', { class: 'note' })).count, 1);
+
+  const dry = await call<{ wouldUpdate: number }>('restyle_matching', {
+    query: { styles: { color: '#111' } }, styles: { color: 'var(--color-ink)' }, dryRun: true });
+  assert.equal(dry.wouldUpdate, 3);
+  const done = await call<{ updated: number; ids: string[] }>('restyle_matching', {
+    query: { styles: { color: '#111' } }, styles: { color: 'var(--color-ink)' } });
+  assert.equal(done.updated, 3);
+  const doc = getDocument(id)!;
+  for (const nid of done.ids) assert.equal(doc.nodes[nid]!.styles.color, 'var(--color-ink)');
+  assert.equal((await call<{ count: number }>('find_nodes', { styles: { color: '#111' } })).count, 0);
+  await agent.close();
+});
