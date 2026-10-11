@@ -361,6 +361,7 @@ export async function measureSubtree(
   doc: CanvasDocument,
   artboardId: NodeId,
   baseUrl?: string,
+  opts: { unbounded?: boolean } = {},
 ): Promise<Record<string, { width: number; height: number; x: number; y: number }> | null> {
   const pw = await tryLoadPlaywright();
   if (!pw) return null;
@@ -374,6 +375,11 @@ export async function measureSubtree(
   const page = await context.newPage();
   try {
     await load(page, doc, artboardId, baseUrl, false, { includeNodeIds: true });
+    // Measuring for a fit: the frame's fixed height squeezes its content (an
+    // artboard is a flex column), so let it take its natural height first.
+    if (opts.unbounded) {
+      await page.addStyleTag({ content: 'html, body { height: auto !important; overflow: visible !important; } body > :first-child { height: auto !important; min-height: 0 !important; max-height: none !important; overflow: visible !important; }' });
+    }
     return (await page.evaluate(`(() => {
       const out = {};
       const root = document.body.firstElementChild;

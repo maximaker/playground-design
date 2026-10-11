@@ -11,6 +11,7 @@
 export interface PlaywrightElement { screenshot(opts: Record<string, unknown>): Promise<Uint8Array> }
 
 export interface PlaywrightPage {
+  addStyleTag(opts: { content: string }): Promise<unknown>;
   setContent(html: string, opts?: { waitUntil?: string }): Promise<void>;
   goto(url: string, opts?: { waitUntil?: string; timeout?: number }): Promise<unknown>;
   evaluate<T = unknown, A = unknown>(fn: ((arg: A) => T) | string, arg?: A): Promise<T>;

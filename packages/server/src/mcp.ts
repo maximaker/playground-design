@@ -1326,7 +1326,7 @@ function registerWriteTools(server: McpServer, ctx: McpContext): void {
     const doc = requireDoc(ctx);
     const board = node(doc, id);
     if (board.type !== 'artboard') return fail(`${id} is a ${board.type}; fit_artboard takes an artboard.`);
-    const boxes = await measureSubtree(doc, id, ctx.baseUrl).catch(() => null);
+    const boxes = await measureSubtree(doc, id, ctx.baseUrl, { unbounded: true }).catch(() => null);
     if (!boxes) return fail('No renderer is available on this server, so the content cannot be measured.');
     let bottom = 0;
     for (const nodeId of subtreeIdsOf(doc, id)) {
