@@ -6,6 +6,7 @@
  * `get_basic_info` return.
  */
 
+import { describeVersion } from './versions.ts';
 import {
   type CanvasDocument, type CanvasNode, type NodeId,
   artboardTheme, getArtboardPosition, getArtboardSize,
@@ -81,7 +82,7 @@ export function describeNode(node: CanvasNode, includeStyles = false): string {
 export interface BasicInfo {
   documentId: string;
   documentName: string;
-  pages: { id: string; name: string; artboardCount: number }[];
+  pages: { id: string; name: string; artboardCount: number; version?: ReturnType<typeof describeVersion> }[];
   currentPage: string;
   nodeCount: number;
   artboards: { id: string; name: string; width: number; height: number; x: number; y: number; childCount: number; theme?: string }[];
@@ -94,7 +95,10 @@ export function basicInfo(doc: CanvasDocument, pageId?: string): BasicInfo {
   return {
     documentId: doc.id,
     documentName: doc.name,
-    pages: doc.pages.map((p) => ({ id: p.id, name: p.name, artboardCount: p.artboards.length })),
+    pages: doc.pages.map((p) => ({
+      id: p.id, name: p.name, artboardCount: p.artboards.length,
+      ...(p.version ? { version: describeVersion(doc, p.version) } : {}),
+    })),
     currentPage: page.id,
     nodeCount: Object.keys(doc.nodes).length,
     artboards: page.artboards.flatMap((id) => {

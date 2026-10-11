@@ -173,7 +173,7 @@ Artifactory's origin gets an answer that allows the session cookie.
 
 | Tool | What it gives you |
 |---|---|
-| `get_basic_info` | Pages, node count, artboards with sizes and canvas positions. Call this first |
+| `get_basic_info` | Pages (with their version: current or superseded, why, and what replaced them), node count, artboards with sizes and canvas positions. Call this first |
 | `get_tree_summary` | A subtree as rows `{ id, type, tag, name, text, parent, depth, childCount }` — the cheap way to understand a design. `outline: true` adds the compact text form |
 | `get_node_info` | One node in full: styles, variants, attributes, text, parent, children |
 | `get_children` | One level down: ids, names, types, child counts |
@@ -201,6 +201,7 @@ Artifactory's origin gets an answer that allows the session cookie.
 | `create_artboard` | New screen, placed clear of existing work, on the current page |
 | `fit_artboard` | Set an artboard's height to its rendered content, plus optional `padBottom` |
 | `create_page` / `set_current_page` / `rename_page` / `delete_page` | Pages. Each connection has its own current page. `create_page` starts empty; `withArtboard: true` adds a 1440×900 frame |
+| `set_version_state` | Mark a page or section `current` or `superseded` (with `reason` and `replacedBy`) instead of emoji in names. The Pages panel badges the current one and dims superseded ones; `list_sections` and `list_pages` report it |
 | `publish_page` / `unpublish_page` / `get_publication` | Put an artboard on the public web, or take it down |
 | `mark_checkpoint` | Save a named version to compare against later |
 | `annotate` | A typed note on a layer — behaviour, data, constraint, accessibility, to-do |

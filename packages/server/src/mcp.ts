@@ -33,7 +33,7 @@ import {
   layoutDiagram, makeBoardShape, resolveScreen, screenCardSize, makeConnector, parseMermaid, routeConnector,
   artifactoryEmbedUrl, treeEntries, nodeEntry, type InstanceOverride,
   type Section, SECTION_STATUSES, makeSection, sectionsOf, sectionMembers, sectionRect, arrangeSectionOps, sectionFlows, findFlow,
-  sectionOfArtboard,
+  sectionOfArtboard, findVersionTarget, versionOps, describeVersion, versionOf, targetTitle, VERSION_KINDS,
   GOOGLE_FONT_WEIGHTS,
 } from '@playground/shared';
 import {
@@ -1170,6 +1170,7 @@ function registerWriteTools(server: McpServer, ctx: McpContext): void {
         name: p.name,
         artboards: p.artboards.length,
         current: p.id === current.id,
+        ...(p.version ? { version: describeVersion(doc, p.version) } : {}),
       })),
       currentPage: current.id,
     });
@@ -2251,6 +2252,7 @@ function sectionSummary(doc: CanvasDocument, page: Page, sec: Section) {
     ...(sec.flows?.length ? { flows: sectionFlows(doc, sec).map(({ id, title, pageId, pageName, kind }) => ({ id, title, pageId, pageName, kind })) } : {}),
     ...(sec.flows?.some((f) => !findFlow(doc, f)) ? { missingFlows: sec.flows.filter((f) => !findFlow(doc, f)) } : {}),
     bounds: sectionRect(doc, page, sec),
+    ...(sec.version ? { version: describeVersion(doc, sec.version) } : {}),
   };
 }
 
@@ -2597,6 +2599,37 @@ function registerNoteTools(server: McpServer, ctx: McpContext): void {
     const { page } = findSection(doc, id);
     commit(ctx, [{ t: 'section', action: 'remove', pageId: page.id, section: { id } }]);
     return json({ deleted: id, pageId: page.id });
+  }));
+
+  server.registerTool('set_version_state', {
+    title: 'Mark current or superseded',
+    description:
+      'Marks a page or a section as the current version, or as superseded (with a reason and what replaced it), ' +
+      'instead of putting "(old)" or emoji in its name. The Pages panel badges the current one and dims superseded ones; ' +
+      'get_basic_info and list_sections report it. state: null clears it. Superseded without replacedBy links to the ' +
+      'single current page (or section on the same page) when there is exactly one.',
+    inputSchema: {
+      id: z.string().describe('A page id or a section id.'),
+      state: z.enum(VERSION_KINDS as [string, ...string[]]).nullable(),
+      reason: z.string().max(500).optional().describe('Why it was superseded, in a sentence.'),
+      replacedBy: z.string().optional().describe('The page or section id that replaces it.'),
+    },
+  }, async ({ id, state, reason, replacedBy }) => guard(() => {
+    const doc = requireDoc(ctx);
+    const target = findVersionTarget(doc, id);
+    if (!target) return fail(`No page or section "${id}". list_pages and list_sections give ids.`);
+    let ops: Op[];
+    try {
+      ops = versionOps(doc, target, { state: state as 'current' | 'superseded' | null, reason, replacedBy });
+    } catch (err) {
+      return fail((err as Error).message);
+    }
+    commit(ctx, ops);
+    const after = findVersionTarget(requireDoc(ctx), id)!;
+    return json({
+      id, kind: after.kind, title: targetTitle(after),
+      version: describeVersion(requireDoc(ctx), versionOf(after)) ?? null,
+    });
   }));
 
   server.registerTool('list_sections', {

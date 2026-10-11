@@ -23,3 +23,4 @@ export * from './board.ts';
 export * from './diagram.ts';
 export * from './artifactory.ts';
 export * from './sections.ts';
+export * from './versions.ts';

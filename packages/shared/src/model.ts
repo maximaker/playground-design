@@ -157,7 +157,30 @@ export interface Page {
   board?: BoardItem[];
   /** Titled groups of screens — see sections.ts. Never part of the design tree. */
   sections?: Section[];
+  /** Whether this page is the version to build from, or one that was replaced. */
+  version?: VersionState | null;
 }
+
+/**
+ * Current or superseded.
+ *
+ * Client files are organised around versions — "V2 (current)", "old — do not
+ * use" — and until now that lived in emoji in page names, which nothing could
+ * read. A superseded item says why and what replaced it, so a developer landing
+ * on an old screen is pointed at the new one rather than building it.
+ */
+export interface VersionState {
+  state: VersionKind;
+  /** Why it was superseded, in a sentence. */
+  reason?: string;
+  /** The page or section id that replaces it. */
+  replacedBy?: string;
+  /** ISO date the state was set. */
+  at?: string;
+}
+
+export type VersionKind = 'current' | 'superseded';
+export const VERSION_KINDS: VersionKind[] = ['current', 'superseded'];
 
 /**
  * A named run of screens on a page: "A — Onboarding", with a status a
@@ -177,6 +200,8 @@ export interface Section {
   flows?: string[];
   /** Position in the page's section list. */
   order: number;
+  /** Current or superseded, like a page. */
+  version?: VersionState | null;
 }
 
 export type SectionStatus = 'draft' | 'in-review' | 'ready' | 'changed';

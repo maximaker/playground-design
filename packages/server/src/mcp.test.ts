@@ -1042,3 +1042,27 @@ test('lint_design is a health check: selectors, clipping and themes, as JSON', a
   // Clean up so later tests see the artboard as before.
   await client.callTool({ name: 'delete_nodes', arguments: { ids: written.roots.map((r) => r.id) } });
 });
+
+test('set_version_state marks pages and sections; get_basic_info and list_sections report it', async () => {
+  const info = jsonOf<{ pages: { id: string }[] }>(await client.callTool({ name: 'get_basic_info', arguments: {} }));
+  const pageId = info.pages[0]!.id;
+  const set = jsonOf<{ kind: string; version: { state: string } }>(
+    await client.callTool({ name: 'set_version_state', arguments: { id: pageId, state: 'current' } }));
+  assert.equal(set.kind, 'page');
+  assert.equal(set.version.state, 'current');
+  const after = jsonOf<{ pages: { id: string; version?: { state: string } }[] }>(await client.callTool({ name: 'get_basic_info', arguments: {} }));
+  assert.equal(after.pages.find((p) => p.id === pageId)!.version!.state, 'current');
+
+  const sec = jsonOf<{ id: string }>(await client.callTool({ name: 'create_section', arguments: { title: 'Old flow', artboards: [] } }));
+  const sup = jsonOf<{ version: { state: string; reason: string } }>(await client.callTool({
+    name: 'set_version_state', arguments: { id: sec.id, state: 'superseded', reason: 'Replaced after review' },
+  }));
+  assert.equal(sup.version.reason, 'Replaced after review');
+  const listed = jsonOf<{ sections: { id: string; version?: { state: string } }[] }>(await client.callTool({ name: 'list_sections', arguments: {} }));
+  assert.equal(listed.sections.find((s) => s.id === sec.id)!.version!.state, 'superseded');
+
+  const bad = await client.callTool({ name: 'set_version_state', arguments: { id: sec.id, state: 'superseded', replacedBy: 'nope' } });
+  assert.ok((bad as { isError?: boolean }).isError);
+  await client.callTool({ name: 'set_version_state', arguments: { id: pageId, state: null } });
+  await client.callTool({ name: 'delete_section', arguments: { id: sec.id } }).catch(() => {});
+});

@@ -45,6 +45,7 @@ import {
 } from './state/appearance.ts';
 import { Home } from './Home.tsx';
 import { SectionList } from './canvas/SectionLayer.tsx';
+import { VersionBadge, VersionPicker } from './ui/VersionPicker.tsx';
 
 type LeftTab = 'layers' | 'pages' | 'components' | 'tokens';
 
@@ -611,14 +612,17 @@ function Editor({ source, onHome, appearance, onAppearance, session }: {
             {leftTab === 'pages' && (
               <div className="pages">
                 {doc.pages.map((p) => (
-                  <button
-                    key={p.id}
-                    className={`page-row${p.id === pageId ? ' is-active' : ''}`}
-                    onClick={() => setPage(p.id)}
-                  >
-                    {p.name}
-                    <PageCount page={p} />
-                  </button>
+                  <div key={p.id} className={`page-item${p.version?.state === 'superseded' ? ' is-superseded' : ''}`}>
+                    <button
+                      className={`page-row${p.id === pageId ? ' is-active' : ''}`}
+                      onClick={() => setPage(p.id)}
+                    >
+                      <span className="page-name">{p.name}</span>
+                      <VersionBadge doc={doc} version={p.version} />
+                      <PageCount page={p} />
+                    </button>
+                    {!readOnly && <VersionPicker doc={doc} id={p.id} version={p.version} />}
+                  </div>
                 ))}
                 <button
                   className="button subtle full"

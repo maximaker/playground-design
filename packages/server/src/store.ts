@@ -351,7 +351,9 @@ function describeOp(op: Op): string {
     case 'tag': return 'Changed element tag';
     case 'doc': return 'Renamed document';
     case 'tokens': return 'Updated tokens';
-    case 'page': return `${op.action === 'add' ? 'Added' : op.action === 'remove' ? 'Removed' : 'Renamed'} page`;
+    case 'page':
+      if (op.action === 'version') return op.page.version ? `Marked page ${op.page.version.state}` : 'Cleared page version';
+      return `${op.action === 'add' ? 'Added' : op.action === 'remove' ? 'Removed' : 'Renamed'} page`;
     case 'note': return `${op.action === 'add' ? 'Added' : op.action === 'remove' ? 'Removed' : 'Updated'} a note`;
     case 'section': return `${op.action === 'add' ? 'Added' : op.action === 'remove' ? 'Removed' : 'Updated'} section`;
     case 'board': {

@@ -32,7 +32,7 @@ export type Op =
   | { t: 'tag'; updates: { id: NodeId; tag: string }[] }
   | { t: 'doc'; name?: string }
   | { t: 'tokens'; tokens: Token[] }
-  | { t: 'page'; action: 'add' | 'remove' | 'rename'; page: Page }
+  | { t: 'page'; action: 'add' | 'remove' | 'rename' | 'version'; page: Page }
   | { t: 'note'; action: 'add' | 'update' | 'remove'; pageId: string; note: Partial<Note> & { id: string } }
   | { t: 'section'; action: 'add' | 'update' | 'remove'; pageId: string; section: Partial<Section> & { id: string } }
   /** Diagram items on a page's board; one op per gesture, however many items it moves. */
@@ -337,6 +337,11 @@ function applyPage(doc: CanvasDocument, op: Extract<Op, { t: 'page' }>): Op {
   const page = doc.pages.find((p) => p.id === op.page.id);
   if (!page) throw new OpError(`page ${op.page.id} not found`);
   const before = { ...page };
+  if (op.action === 'version') {
+    // Only the version moves; a stale name in the op must not rename the page.
+    page.version = op.page.version ?? null;
+    return { t: 'page', action: 'version', page: { ...before, version: before.version ?? null } };
+  }
   page.name = op.page.name;
   return { t: 'page', action: 'rename', page: before };
 }
@@ -438,6 +443,7 @@ export function makeSection(partial: Partial<Section> = {}): Section {
     artboards: [...(partial.artboards ?? [])],
     flows: partial.flows,
     order: partial.order ?? 0,
+    ...(partial.version ? { version: partial.version } : {}),
   };
 }
 

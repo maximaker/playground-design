@@ -14,6 +14,7 @@ import {
 } from '@playground/shared';
 import { useCanvas, currentPage, getDoc } from '../state/store.ts';
 import { fitBox, jumpToBoardItem } from '../hooks/commands.ts';
+import { VersionBadge, VersionPicker } from '../ui/VersionPicker.tsx';
 
 const MIN_SECTION_WIDTH = 900;
 
@@ -159,7 +160,7 @@ export function SectionList() {
         const count = sectionMembers(doc, page, s).length;
         const meta = SECTION_STATUS_META[s.status];
         return (
-          <div key={s.id} className="section-row">
+          <div key={s.id} className={`section-row${s.version?.state === 'superseded' ? ' is-superseded' : ''}`}>
             {editing === s.id ? (
               <input
                 className="input"
@@ -171,6 +172,7 @@ export function SectionList() {
             ) : (
               <button className="section-row-title" onClick={() => jump(s)} onDoubleClick={() => setEditing(s.id)} title="Jump to section · double-click to rename">
                 {s.title}
+                <VersionBadge doc={doc} version={s.version} />
                 <span className="section-row-count">{count}</span>
               </button>
             )}
@@ -183,6 +185,7 @@ export function SectionList() {
             >
               {SECTION_STATUSES.map((st) => <option key={st} value={st}>{SECTION_STATUS_META[st].label}</option>)}
             </select>
+            <VersionPicker doc={doc} id={s.id} version={s.version} />
             <button className="icon-button" title="Present from this section" onClick={() => present(s)} disabled={!count}>▶</button>
             <button
               className="icon-button"
