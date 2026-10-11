@@ -35,7 +35,7 @@ import {
   type Section, SECTION_STATUSES, makeSection, sectionsOf, sectionMembers, sectionRect, arrangeSectionOps, sectionFlows, findFlow,
   decisionsOf, addDecisionOps, resolveWithOutcomeOps, describeDecision, decisionsMarkdown,
   sectionOfArtboard, normaliseFlowCard, sectionHeading, findVersionTarget, versionOps, describeVersion, versionOf, targetTitle, VERSION_KINDS,
-  GOOGLE_FONT_WEIGHTS,
+  GOOGLE_FONT_WEIGHTS, artboardTheme, REPEAT_DATA_ATTR, REPEAT_TEMPLATE_ATTR, REPEAT_STYLE_ATTR, expandRepeat,
 } from '@playground/shared';
 import {
   applyOps, getDocument, getSnapshot, listSnapshots, StoreError, createSnapshot,
@@ -650,7 +650,13 @@ function agentOrigin(ctx: McpContext): OpEnvelope['origin'] {
   return { kind: 'agent', id: ctx.connection.code, label: ctx.connection.label ?? 'Agent' };
 }
 
-function commit(ctx: McpContext, ops: Op[], batch = batchId()): void {
+/**
+ * The batch a `batch` call is running under, per connection: every commit made
+ * by its steps shares this id, so history and undo see one entry.
+ */
+const activeBatch = new Map<string, string>();
+
+function commit(ctx: McpContext, ops: Op[], batch = activeBatch.get(ctx.connection.code) ?? batchId()): void {
   const origin = agentOrigin(ctx);
   applyOps(ctx.connection.docId, ops.map((op) => ({ op, origin, batch })));
 }
@@ -665,6 +671,94 @@ function node(doc: CanvasDocument, id: NodeId): CanvasNode {
     );
   }
   return n;
+}
+
+// ---------------------------------------------------------------------------
+// Querying by style
+// ---------------------------------------------------------------------------
+
+const StringMatch = z.union([
+  z.string(),
+  z.object({
+    contains: z.string().optional(),
+    equals: z.string().optional(),
+    regex: z.string().optional(),
+    exists: z.boolean().optional(),
+  }).strict(),
+]).describe('A string means "contains"; or { contains | equals | regex | exists }. Case-insensitive.');
+type StringMatchT = z.infer<typeof StringMatch>;
+
+const NodeQueryShape = {
+  query: z.string().optional().describe('Case-insensitive substring matched against layer name and text content.'),
+  type: z.string().optional().describe('Node type: frame, text, image, vector, shape, artboard, embed, instance.'),
+  tag: z.string().optional().describe('HTML tag, e.g. "h1".'),
+  class: z.string().optional().describe('A class the element was written with (its data-class), e.g. "btn".'),
+  theme: z.string().optional().describe('Only nodes on artboards set to this theme ("default" for unthemed).'),
+  within: z.string().optional().describe('Restrict to the subtree of this node id.'),
+  pageId: z.string().optional().describe('Restrict to one page.'),
+  styles: z.record(z.string(), StringMatch).optional()
+    .describe('CSS property -> match, against the node\'s own styles. "background" also reads background-color; "border-color" reads border too.'),
+  ancestorBackground: StringMatch.optional().describe('Matches the background of the nearest ancestor that sets one.'),
+  offset: z.number().int().min(0).optional(),
+  limit: z.number().int().min(1).max(1000).optional().describe('Page size, default 100.'),
+};
+type NodeQuery = { [K in keyof typeof NodeQueryShape]?: z.infer<(typeof NodeQueryShape)[K]> };
+
+const STYLE_ALIASES: Record<string, string[]> = {
+  background: ['background', 'background-color', 'background-image'],
+  'background-color': ['background-color', 'background'],
+  'border-color': ['border-color', 'border', 'border-top', 'border-bottom', 'border-left', 'border-right'],
+  border: ['border', 'border-top', 'border-bottom', 'border-left', 'border-right', 'border-color'],
+};
+
+function styleValue(n: CanvasNode, prop: string): string | undefined {
+  const keys = STYLE_ALIASES[prop] ?? [prop];
+  const vals = keys.map((k) => n.styles[k]).filter((v): v is string => v !== undefined && v !== '');
+  return vals.length ? vals.join(' ') : undefined;
+}
+
+function stringMatches(value: string | undefined, m: StringMatchT): boolean {
+  if (typeof m === 'string') return value !== undefined && value.toLowerCase().includes(m.toLowerCase());
+  if (m.exists !== undefined && (value !== undefined) !== m.exists) return false;
+  if (m.contains === undefined && m.equals === undefined && m.regex === undefined) return true;
+  if (value === undefined) return false;
+  const v = value.toLowerCase();
+  if (m.contains !== undefined && !v.includes(m.contains.toLowerCase())) return false;
+  if (m.equals !== undefined && v.trim() !== m.equals.toLowerCase().trim()) return false;
+  if (m.regex !== undefined && !new RegExp(m.regex, 'i').test(value)) return false;
+  return true;
+}
+
+/** Every node a find_nodes query matches, in document order. */
+function matchNodes(doc: CanvasDocument, q: NodeQuery): CanvasNode[] {
+  let scope: NodeId[];
+  if (q.within) scope = [q.within, ...descendants(doc, q.within)];
+  else if (q.pageId) {
+    const page = doc.pages.find((p) => p.id === q.pageId);
+    if (!page) throw new Error(`No page "${q.pageId}". Call list_pages.`);
+    scope = page.artboards.flatMap((a) => [a, ...descendants(doc, a)]);
+  } else scope = Object.keys(doc.nodes);
+  const text = q.query?.toLowerCase();
+  const cls = q.class?.toLowerCase();
+  const out: CanvasNode[] = [];
+  for (const id of scope) {
+    const n = doc.nodes[id];
+    if (!n) continue;
+    if (q.type && n.type !== q.type) continue;
+    if (q.tag && n.tag.toLowerCase() !== q.tag.toLowerCase()) continue;
+    if (text && !n.name.toLowerCase().includes(text) && !(n.text ?? '').toLowerCase().includes(text)) continue;
+    if (cls && !(n.attrs['data-class'] ?? '').toLowerCase().split(/\s+/).includes(cls)) continue;
+    if (q.theme && artboardTheme(doc, n.id) !== q.theme) continue;
+    if (q.styles && !Object.entries(q.styles).every(([prop, m]) => stringMatches(styleValue(n, prop), m))) continue;
+    if (q.ancestorBackground) {
+      let cur = n.parent ? doc.nodes[n.parent] : undefined;
+      let bg: string | undefined;
+      while (cur && bg === undefined) { bg = styleValue(cur, 'background'); cur = cur.parent ? doc.nodes[cur.parent] : undefined; }
+      if (!stringMatches(bg, q.ancestorBackground)) continue;
+    }
+    out.push(n);
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -708,6 +802,8 @@ export function buildMcpServer(ctx: McpContext): McpServer {
    */
   type Handle = { enable(): void; disable(): void; enabled: boolean };
   const handles = new Map<string, Handle>();
+  type Callable = { schema?: z.ZodType; run: (args: unknown, extra: unknown) => Promise<unknown> };
+  const callables = new Map<string, Callable>();
   const register = server.registerTool.bind(server);
   (server as { registerTool: typeof server.registerTool }).registerTool = ((name: string, ...rest: unknown[]) => {
     /*
@@ -724,6 +820,8 @@ export function buildMcpServer(ctx: McpContext): McpServer {
     }
     const handle = (register as (...args: unknown[]) => Handle)(name, ...rest);
     handles.set(name, handle);
+    const cb = rest[rest.length - 1] as (args: unknown, extra: unknown) => Promise<unknown>;
+    callables.set(name, { schema: (rest[0] as { inputSchema?: z.ZodType } | undefined)?.inputSchema, run: cb });
     return handle;
   }) as typeof server.registerTool;
 
@@ -790,10 +888,71 @@ export function buildMcpServer(ctx: McpContext): McpServer {
     });
   }));
 
+  server.registerTool('batch', {
+    title: 'Run many tool calls in one request',
+    description:
+      'Runs steps in order — [{ tool, args }, …] — and returns each one\'s result. Stops at the first '
+      + 'error unless continueOnError. Every change the steps make is recorded as ONE history entry, so '
+      + 'one undo reverts the whole batch. Use it for long, known sequences (write, rename, restyle, '
+      + 'insert instances) instead of a round trip per call. Steps cannot see each other\'s results; '
+      + 'when a step needs an id from an earlier one, write the id into the HTML (id="…") or split the batch.',
+    inputSchema: {
+      steps: z.array(z.object({
+        tool: z.string(),
+        args: z.record(z.string(), z.unknown()).optional().default({}),
+      }).strict()).min(1).max(200),
+      continueOnError: z.boolean().optional().default(false),
+    },
+  }, async ({ steps, continueOnError }, extra) => guard(async () => {
+    const code = ctx.connection.code;
+    if (activeBatch.has(code)) return fail('A batch is already running for this connection; batches do not nest.');
+    const id = batchId();
+    activeBatch.set(code, id);
+    const results: { step: number; tool: string; ok: boolean; result?: unknown; error?: string }[] = [];
+    try {
+      for (const [i, step] of steps.entries()) {
+        const target = callables.get(step.tool);
+        let out: { ok: boolean; result?: unknown; error?: string };
+        if (!target || step.tool === 'batch') {
+          out = { ok: false, error: step.tool === 'batch' ? 'batch cannot contain batch.' : `No tool "${step.tool}".` };
+        } else {
+          const parsed = target.schema ? target.schema.safeParse(step.args) : { success: true as const, data: step.args };
+          if (!parsed.success) {
+            out = { ok: false, error: `Invalid arguments: ${parsed.error.issues.map((x) => `${x.path.join('.') || '(root)'}: ${x.message}`).join('; ')}` };
+          } else {
+            try {
+              const res = await target.run(parsed.data, extra) as { isError?: boolean; content?: { type: string; text?: string }[] };
+              const textOut = (res.content ?? []).filter((c) => c.type === 'text').map((c) => c.text ?? '').join('\n');
+              let value: unknown = textOut;
+              try { value = JSON.parse(textOut); } catch { /* plain text */ }
+              out = res.isError ? { ok: false, error: textOut } : { ok: true, result: value };
+            } catch (err) {
+              out = { ok: false, error: err instanceof Error ? err.message : String(err) };
+            }
+          }
+        }
+        results.push({ step: i, tool: step.tool, ...out });
+        if (!out.ok && !continueOnError) break;
+      }
+    } finally {
+      activeBatch.delete(code);
+    }
+    const failed = results.filter((r) => !r.ok).length;
+    return json({
+      batch: id,
+      ran: results.length,
+      of: steps.length,
+      failed,
+      ...(results.length < steps.length ? { stoppedAt: results.length - 1, note: 'Stopped at the first error; steps before it were applied. Pass continueOnError to run the rest anyway.' } : {}),
+      results,
+    });
+  }));
+
   // Core is not in the table, so these two are already in it — and they must
   // survive the pass that turns everything else off.
   handles.delete('list_toolsets');
   handles.delete('use_toolset');
+  handles.delete('batch');
   apply();
 
   return server;
@@ -927,32 +1086,52 @@ function registerReadTools(server: McpServer, ctx: McpContext): void {
   server.registerTool('find_nodes', {
     title: 'Find nodes',
     description:
-      'Search the document by layer name, text content, tag or type. Use this instead of dumping the whole tree when you know what you are looking for.',
-    inputSchema: {
-      query: z.string().optional().describe('Case-insensitive substring matched against layer name and text content.'),
-      type: z.string().optional().describe('Node type: frame, text, image, vector, shape, artboard, embed.'),
-      tag: z.string().optional().describe('HTML tag, e.g. "h1".'),
-      within: z.string().optional().describe('Restrict to the subtree of this node id.'),
-      limit: z.number().int().min(1).max(200).optional().default(50),
-    },
+      'Search the document by layer name, text, tag, type, class, theme or style. Style filters match the '
+      + 'node\'s own CSS: { color: { contains: "--color-ink" }, background: { contains: "lime" } }; '
+      + 'ancestorBackground matches the nearest ancestor that sets a background. Returns every match, '
+      + 'paged with offset/limit. restyle_matching takes the same query to change them all at once.',
+    inputSchema: NodeQueryShape,
     annotations: { readOnlyHint: true },
-  }, async ({ query, type, tag, within, limit }) => guard(() => {
+  }, async (q) => guard(() => {
     const doc = requireDoc(ctx);
-    const scope = within ? [within, ...descendants(doc, within)] : Object.keys(doc.nodes);
-    const q = query?.toLowerCase();
-    const hits = scope.flatMap((id) => {
-      const n = doc.nodes[id];
-      if (!n) return [];
-      if (type && n.type !== type) return [];
-      if (tag && n.tag.toLowerCase() !== tag.toLowerCase()) return [];
-      if (q && !n.name.toLowerCase().includes(q) && !(n.text ?? '').toLowerCase().includes(q)) return [];
-      return [{ ...nodeEntry(n, 0), artboard: artboardOf(doc, n.id) }];
-    });
+    const all = matchNodes(doc, q);
+    const offset = q.offset ?? 0;
+    const limit = q.limit ?? 100;
+    const page = all.slice(offset, offset + limit);
     return json({
-      count: hits.length,
-      nodes: hits.slice(0, limit).map(({ depth, ...rest }) => { void depth; return rest; }),
-      ...(hits.length > limit ? { truncated: hits.length - limit } : {}),
+      count: all.length,
+      ...(offset ? { offset } : {}),
+      nodes: page.map((n) => {
+        const { depth, ...rest } = nodeEntry(n, 0); void depth;
+        return {
+          ...rest, artboard: artboardOf(doc, n.id),
+          ...(q.styles ? { styles: Object.fromEntries(Object.keys(q.styles).map((k) => [k, styleValue(n, k) ?? null])) } : {}),
+        };
+      }),
+      ...(offset + limit < all.length ? { nextOffset: offset + limit } : {}),
     });
+  }));
+
+  server.registerTool('restyle_matching', {
+    title: 'Restyle everything that matches',
+    description:
+      'Applies one style update to every node a find_nodes query matches, as a single undoable step. '
+      + 'Call with dryRun first to see how many it would touch. E.g. query { styles: { color: { contains: "#111" } } }, '
+      + 'styles { color: "var(--color-ink)" }.',
+    inputSchema: {
+      query: z.object(NodeQueryShape).strict(),
+      styles: StyleRecord.describe('Kebab-case CSS to set on each match. An empty string removes a declaration.'),
+      selector: z.string().optional().describe('":hover" or a breakpoint selector; omit for base styles.'),
+      dryRun: z.boolean().optional().default(false),
+    },
+  }, async ({ query, styles, selector, dryRun }) => guard(() => {
+    const doc = requireDoc(ctx);
+    const hits = matchNodes(doc, query).filter((n) => n.type !== 'instance');
+    if (!hits.length) return json({ matched: 0, updated: 0, ids: [] });
+    const ids = hits.map((n) => n.id);
+    if (dryRun) return json({ matched: ids.length, wouldUpdate: ids.length, ids: ids.slice(0, 200), dryRun: true });
+    commit(ctx, [{ t: 'styles', updates: ids.map((id) => ({ id, styles, ...(selector ? { selector } : {}) })) }]);
+    return json({ matched: ids.length, updated: ids.length, ids: ids.slice(0, 200), undo: 'One step: a single undo reverts every change.' });
   }));
 
   server.registerTool('get_html', {
@@ -1758,7 +1937,9 @@ function registerWriteTools(server: McpServer, ctx: McpContext): void {
   server.registerTool('write_html', {
     title: 'Write HTML into the document',
     description:
-      'The main creation tool. Parses an HTML fragment into editable layers: elements become nodes, inline styles and <style> rules become node styles, :hover and @media rules become variants. Write ordinary, well-structured HTML with flexbox — read get_guide("layout") first.',
+      'The main creation tool. Parses an HTML fragment into editable layers: elements become nodes, inline styles and <style> rules become node styles, :hover and @media rules become variants. Write ordinary, well-structured HTML with flexbox — read get_guide("layout") first. '
+      + 'Components: a tag named after a component inserts a real instance — <Button variant="primary">Save</Button> or <component name="Tab bar / Home" /> — attributes set variant props (or text layers by name), text fills the main text layer, child elements fill data-slot(s) (slot="name" for named ones). '
+      + 'Lists: <repeat data=\'[{"name":"Ana"}]\' style="display:flex;gap:8px"><div>{{name}}</div></repeat> expands the row once per item ({{a.b}}, {{@index}}, {{@number}}); change the data later with update_repeat_data.',
     inputSchema: {
       html: z.string().describe('HTML fragment. May include a <style> block. <script> is stripped.'),
       targetId: z.string().describe('Node to write into or replace.'),
@@ -1771,7 +1952,7 @@ function registerWriteTools(server: McpServer, ctx: McpContext): void {
     const doc = requireDoc(ctx);
     const target = node(doc, targetId);
 
-    const parsed = parseHtml(html);
+    const parsed = parseHtml(html, { components: doc.components, defNodes: doc.nodes });
     if (parsed.nodes.length === 0) return fail('The HTML produced no nodes. Check that it contains elements.');
 
     const ops: Op[] = [];
@@ -1810,6 +1991,8 @@ function registerWriteTools(server: McpServer, ctx: McpContext): void {
     return json({
       created: parsed.roots.length,
       totalNodes: parsed.nodes.length,
+      ...(parsed.instances ? { instances: parsed.instances } : {}),
+      ...(parsed.repeats ? { repeats: parsed.repeats } : {}),
       roots: parsed.roots.map((id) => {
         const n = parsed.nodes.find((x) => x.id === id)!;
         return { id, name: n.name, type: n.type, tag: n.tag };
@@ -1817,6 +2000,32 @@ function registerWriteTools(server: McpServer, ctx: McpContext): void {
       warnings: [...parsed.warnings, ...selectorWarnings],
       next: 'Call get_screenshot on the artboard to check the result.',
     });
+  }));
+
+  server.registerTool('update_repeat_data', {
+    title: 'Re-render a repeated list with new data',
+    description:
+      'A <repeat data=\'[…]\'>row template with {{field}}</repeat> written with write_html remembers its '
+      + 'data and template. Pass new data (and optionally a new template) to rebuild its rows in one undoable step. '
+      + 'Rows are regenerated, so edits made by hand inside them are replaced.',
+    inputSchema: {
+      id: z.string().describe('The repeat frame (write_html returns it as a root, or find_nodes { styles: {} } … name "Repeat").'),
+      data: z.array(z.unknown()).max(1000),
+      template: z.string().optional().describe('A new row template; defaults to the one it was written with.'),
+    },
+  }, async ({ id, data, template }) => guard(() => {
+    const doc = requireDoc(ctx);
+    const frame = node(doc, id);
+    const tpl = template ?? frame.attrs[REPEAT_TEMPLATE_ATTR];
+    if (tpl === undefined) return fail(`${id} is not a <repeat> block. Write one with write_html: <repeat data='[...]'>…{{field}}…</repeat>.`);
+    const css = frame.attrs[REPEAT_STYLE_ATTR];
+    const parsed = parseHtml(`${css ? `<style>${css}</style>` : ''}${expandRepeat(tpl, data)}`, { components: doc.components, defNodes: doc.nodes });
+    const ops: Op[] = [];
+    if (frame.children.length) ops.push({ t: 'remove', ids: [...frame.children] });
+    if (parsed.nodes.length) ops.push({ t: 'insert', nodes: parsed.nodes, parent: id, index: 0 });
+    ops.push({ t: 'attrs', updates: [{ id, attrs: { [REPEAT_DATA_ATTR]: JSON.stringify(data), ...(template !== undefined ? { [REPEAT_TEMPLATE_ATTR]: template } : {}) } }] });
+    commit(ctx, ops);
+    return json({ id, rows: parsed.roots.length, rowIds: parsed.roots, warnings: parsed.warnings.filter((w) => !/No elements found/.test(w)) });
   }));
 
   server.registerTool('update_styles', {

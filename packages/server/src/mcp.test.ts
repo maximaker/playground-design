@@ -12,7 +12,7 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 process.env.PLAYGROUND_DB = `/tmp/playground-test-${Date.now()}.db`;
 
 const { app } = await import('./app.ts');
-const { createDocument, getDocument } = await import('./store.ts');
+const { createDocument, getDocument, history } = await import('./store.ts');
 const { createConnection } = await import('./connections.ts');
 const { shutdownRenderer } = await import('./render.ts');
 
@@ -1160,4 +1160,131 @@ test('componentise match "role" groups by class and tag, carrying style differen
   assert.equal(swapped.replaced.length, 1);
   assert.ok(swapped.replaced[0]!.overrides >= 1, 'text and padding travel as overrides');
   await client.callTool({ name: 'delete_nodes', arguments: { ids: written.roots.map((r) => r.id) } });
+});
+
+test('write_html turns component tags into real instances', async () => {
+  const { id, agent, call } = await freshAgent('Component tags');
+  const board = getDocument(id)!.pages[0]!.artboards[0]!;
+  const def = await call<{ roots: { id: string }[] }>('write_html', {
+    targetId: board, html: '<button style="padding:8px"><span>Label</span></button>' });
+  const { componentId } = await call<{ componentId: string }>('create_component', { id: def.roots[0]!.id, name: 'Button' });
+  await call('set_component_props', { componentId, props: [{ name: 'variant', values: ['primary', 'ghost'], default: 'ghost' }] });
+  const tab = await call<{ roots: { id: string }[] }>('write_html', { targetId: board, html: '<nav><b>Home</b></nav>' });
+  await call('create_component', { id: tab.roots[0]!.id, name: 'Tab bar / Home' });
+
+  const res = await call<{ roots: { id: string; type: string }[]; warnings: string[]; instances: number }>('write_html', {
+    targetId: board,
+    html: '<div style="display:flex"><Button variant="primary">Save</Button><Button variant="nope">X</Button>'
+      + '<component name="Tab bar / Home" /><Fancy>hi</Fancy></div>',
+  });
+  assert.equal(res.instances, 3);
+  const doc = getDocument(id)!;
+  const row = doc.nodes[res.roots[0]!.id]!;
+  const [save, bad, tabbar, fancy] = row.children.map((c) => doc.nodes[c]!);
+  assert.equal(save!.type, 'instance');
+  assert.equal(save!.componentRef, componentId);
+  assert.deepEqual(save!.props, { variant: 'primary' });
+  assert.ok(Object.values(save!.overrides ?? {}).some((o) => o.text === 'Save'), 'text goes to the main text layer');
+  assert.equal(bad!.type, 'instance');
+  assert.equal(tabbar!.type, 'instance');
+  assert.equal(fancy!.type, 'frame', 'unknown names render as plain markup');
+  assert.equal(fancy!.attrs['data-component'], 'Fancy');
+  assert.ok(res.warnings.some((w) => /no variant="nope"/.test(w)));
+  assert.ok(res.warnings.some((w) => /No component named "Fancy"/.test(w)));
+  await agent.close();
+});
+
+test('find_nodes filters by style and restyle_matching changes every match in one step', async () => {
+  const { id, agent, call } = await freshAgent('Restyle');
+  const board = getDocument(id)!.pages[0]!.artboards[0]!;
+  await call('write_html', {
+    targetId: board,
+    html: '<div style="background:lime"><p style="color:#111">A</p><p style="color:#111">B</p></div>'
+      + '<p class="note big" style="color:#111">C</p><p style="color:red">D</p>',
+  });
+  const found = await call<{ count: number; nodes: { id: string }[]; nextOffset?: number }>('find_nodes', {
+    styles: { color: { contains: '#111' } }, limit: 2 });
+  assert.equal(found.count, 3);
+  assert.equal(found.nodes.length, 2);
+  assert.equal(found.nextOffset, 2);
+  const onLime = await call<{ count: number }>('find_nodes', { styles: { color: '#111' }, ancestorBackground: 'lime' });
+  assert.equal(onLime.count, 2);
+  assert.equal((await call<{ count: number }>('find_nodes', { class: 'note' })).count, 1);
+
+  const dry = await call<{ wouldUpdate: number }>('restyle_matching', {
+    query: { styles: { color: '#111' } }, styles: { color: 'var(--color-ink)' }, dryRun: true });
+  assert.equal(dry.wouldUpdate, 3);
+  const done = await call<{ updated: number; ids: string[] }>('restyle_matching', {
+    query: { styles: { color: '#111' } }, styles: { color: 'var(--color-ink)' } });
+  assert.equal(done.updated, 3);
+  const doc = getDocument(id)!;
+  for (const nid of done.ids) assert.equal(doc.nodes[nid]!.styles.color, 'var(--color-ink)');
+  assert.equal((await call<{ count: number }>('find_nodes', { styles: { color: '#111' } })).count, 0);
+  await agent.close();
+});
+
+test('<repeat> expands rows from data and update_repeat_data re-renders them', async () => {
+  const { id, agent, call, raw } = await freshAgent('Repeat');
+  const board = getDocument(id)!.pages[0]!.artboards[0]!;
+  const res = await call<{ roots: { id: string }[]; repeats: number }>('write_html', {
+    targetId: board,
+    html: `<style>.row{padding:4px}</style><repeat data='[{"name":"Ana","role":{"t":"Lead"}},{"name":"Bo &lt;x&gt;"}]' style="display:flex;gap:8px">`
+      + '<div class="row"><b>{{name}}</b><span>{{role.t}} #{{@number}}</span></div></repeat>',
+  });
+  assert.equal(res.repeats, 1);
+  let doc = getDocument(id)!;
+  const frame = doc.nodes[res.roots[0]!.id]!;
+  assert.equal(frame.styles.display, 'flex');
+  assert.equal(frame.children.length, 2);
+  const first = doc.nodes[frame.children[0]!]!;
+  assert.equal(first.styles.padding, '4px', 'stylesheet rules reach the rows');
+  assert.equal(doc.nodes[first.children[0]!]!.text, 'Ana');
+  assert.equal(doc.nodes[first.children[1]!]!.text, 'Lead #1');
+
+  const upd = await call<{ rows: number }>('update_repeat_data', { id: frame.id, data: [{ name: 'X' }, { name: 'Y' }, { name: 'Z' }] });
+  assert.equal(upd.rows, 3);
+  doc = getDocument(id)!;
+  const again = doc.nodes[frame.id]!;
+  assert.equal(again.children.length, 3);
+  const z = doc.nodes[again.children[2]!]!;
+  assert.equal(doc.nodes[z.children[0]!]!.text, 'Z');
+  assert.equal(z.styles.padding, '4px', 'the stylesheet is remembered');
+  assert.deepEqual(JSON.parse(again.attrs['data-repeat']!), [{ name: 'X' }, { name: 'Y' }, { name: 'Z' }]);
+  assert.ok(isError(await raw('update_repeat_data', { id: board, data: [] })));
+  await agent.close();
+});
+
+test('batch runs steps in order, stops on error, and is one history entry', async () => {
+  const { id, agent, call } = await freshAgent('Batch');
+  const board = getDocument(id)!.pages[0]!.artboards[0]!;
+  const before = history(id).length;
+  const res = await call<{ ran: number; failed: number; results: { ok: boolean; result?: { roots?: { id: string }[] } }[] }>('batch', {
+    steps: [
+      { tool: 'write_html', args: { targetId: board, html: '<p id="one">One</p>' } },
+      { tool: 'write_html', args: { targetId: board, html: '<p>Two</p>' } },
+      { tool: 'find_nodes', args: { query: 'Two' } },
+    ],
+  });
+  assert.equal(res.ran, 3);
+  assert.equal(res.failed, 0);
+  assert.ok(res.results[0]!.result!.roots![0]!.id);
+  assert.equal(history(id).length, before + 1, 'both writes are one history entry');
+
+  const stopped = await call<{ ran: number; failed: number; stoppedAt: number; results: { ok: boolean; error?: string }[] }>('batch', {
+    steps: [
+      { tool: 'write_html', args: { targetId: board, html: '<p>Three</p>' } },
+      { tool: 'update_styles', args: { updates: [{ id: 'nope', styles: { color: 'red' } }] } },
+      { tool: 'write_html', args: { targetId: board, html: '<p>Never</p>' } },
+    ],
+  });
+  assert.equal(stopped.ran, 2);
+  assert.equal(stopped.stoppedAt, 1);
+  assert.match(stopped.results[1]!.error!, /nope/);
+  const all = await call<{ ran: number; failed: number }>('batch', {
+    continueOnError: true,
+    steps: [{ tool: 'no_such_tool' }, { tool: 'write_html', args: { targetId: board, bogus: 1 } }, { tool: 'find_nodes', args: {} }],
+  });
+  assert.equal(all.ran, 3);
+  assert.equal(all.failed, 2);
+  await agent.close();
 });

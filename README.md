@@ -177,7 +177,8 @@ Artifactory's origin gets an answer that allows the session cookie.
 | `get_tree_summary` | A subtree as rows `{ id, type, tag, name, text, parent, depth, childCount }` — the cheap way to understand a design. `outline: true` adds the compact text form |
 | `get_node_info` | One node in full: styles, variants, attributes, text, parent, children |
 | `get_children` | One level down: ids, names, types, child counts |
-| `find_nodes` | Search by name, text, tag or type; returns `{ count, nodes: [{ id, type, tag, name, text, artboard, … }] }` |
+| `find_nodes` | Search by name, text, tag, type, class, theme, page or style (`styles: { color: { contains: '--color-ink' } }`, `ancestorBackground`); returns every match, paged: `{ count, offset, nodes: [{ id, type, tag, name, text, artboard, … }], nextOffset? }` |
+| `restyle_matching` | `{ query, styles, selector?, dryRun }` — one style update applied to every `find_nodes` match as a single undoable step |
 | `get_selection` | What the human has selected right now |
 | `get_computed_styles` | Authored styles, plus browser-resolved values and measured boxes — from the person's tab when it shows the page, otherwise rendered headlessly (`source` says which) |
 | `get_screenshot` | PNG of any node, so the agent can see its own work |
@@ -197,7 +198,8 @@ Artifactory's origin gets an answer that allows the session cookie.
 
 | Tool | Notes |
 |---|---|
-| `write_html` | The main creation tool. HTML in, editable layers out. Each element's class list is kept as `data-class` |
+| `batch` | `{ steps: [{ tool, args }…], continueOnError? }` — many tool calls in one request, in order; stops on the first error unless told not to; returns `{ ran, failed, results: [{ step, tool, ok, result | error }] }`; all its changes are one history entry |
+| `write_html` | The main creation tool. HTML in, editable layers out. Each element's class list is kept as `data-class`. Component tags insert real instances: `<Button variant="primary">Save</Button>` or `<component name="Tab bar / Home" />` — attributes set variant props (or text layers by name), text fills the main text layer, child elements fill `data-slot`s (`slot="name"` for named ones). Unknown names warn and render as plain markup |
 | `create_artboard` | New screen, placed clear of existing work, on the current page |
 | `fit_artboard` | Set an artboard's height to its rendered content, plus optional `padBottom` |
 | `create_page` / `set_current_page` / `rename_page` / `delete_page` | Pages. Each connection has its own current page. `create_page` starts empty; `withArtboard: true` adds a 1440×900 frame |
@@ -208,6 +210,7 @@ Artifactory's origin gets an answer that allows the session cookie.
 | `mark_checkpoint` | Save a named version to compare against later |
 | `annotate` | A typed note on a layer — behaviour, data, constraint, accessibility, to-do |
 | `componentise` | Registers a shape and swaps every identical copy for an instance, text and links carried as overrides. Refuses if any artboard would render differently. `match: "role"` groups by the original class (`data-class`) and tag instead — "all primary buttons" — carrying each copy's style differences as overrides and skipping (and reporting) any copy that would render differently; dry-run without `id` lists the role groups |
+| `update_repeat_data` | `<repeat data='[{"name":"Ana"}]'><li>{{name}}</li></repeat>` in `write_html` expands a row template over an array (`{{a.b}}`, `{{@index}}`, `{{@number}}`); the block remembers data and template, and `update_repeat_data({ id, data, template? })` rebuilds its rows in one step |
 | `update_styles` | Batch CSS, with `:hover` / `@media` variants via `selector` |
 | `set_text_content` | Batch text |
 | `rename_nodes` / `set_attributes` | Batch |
