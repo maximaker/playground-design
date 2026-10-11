@@ -308,7 +308,7 @@ export function revealSelection(): void {
   if (moved) setTimeout(place, 220);
 }
 
-function fitBox(x: number, y: number, width: number, height: number): void {
+export function fitBox(x: number, y: number, width: number, height: number): void {
   // Measure the stage rather than assuming panel widths: the rails are
   // responsive, so hardcoded offsets push content off-screen on narrow windows.
   const stage = document.querySelector('.stage')?.getBoundingClientRect();

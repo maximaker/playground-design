@@ -155,7 +155,32 @@ export interface Page {
    * notes, not part of the design tree — see board.ts and DIAGRAMS.md.
    */
   board?: BoardItem[];
+  /** Titled groups of screens — see sections.ts. Never part of the design tree. */
+  sections?: Section[];
 }
+
+/**
+ * A named run of screens on a page: "A — Onboarding", with a status a
+ * developer can read. Membership is by artboard id and the region auto-grows
+ * to wrap its members, so moving a screen never leaves the section behind.
+ */
+export interface Section {
+  id: string;
+  title: string;
+  description?: string;
+  status: SectionStatus;
+  /** A NOTE_COLORS key or any CSS colour; tints the region. */
+  color?: string;
+  /** Member artboards, in reading order. */
+  artboards: NodeId[];
+  /** Board items (diagrams, connectors) that describe this section's flow. */
+  flows?: string[];
+  /** Position in the page's section list. */
+  order: number;
+}
+
+export type SectionStatus = 'draft' | 'in-review' | 'ready' | 'changed';
+export const SECTION_STATUSES: SectionStatus[] = ['draft', 'in-review', 'ready', 'changed'];
 
 /**
  * A comment thread, pinned to the design.

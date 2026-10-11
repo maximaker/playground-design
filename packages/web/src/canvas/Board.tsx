@@ -14,7 +14,7 @@
 import { memo, useEffect, useRef } from 'react';
 import {
   type BoardItem, type BoardShape, type Connector, type Point,
-  BOARD_COLORS, BOARD_COLOR_NAMES, BOARD_FONT, BOARD_STYLE, arrowHead, boardOf, diamondPath, isConnector, isShape,
+  BOARD_COLORS, BOARD_LABEL_TEXT, BOARD_COLOR_NAMES, BOARD_FONT, BOARD_STYLE, arrowHead, boardOf, diamondPath, isConnector, isShape,
   connectorPathData, pathData, routeConnector, shapeLook, verdictOf,
 } from '@playground/shared';
 
@@ -273,7 +273,7 @@ function ConnectorLabel({ connector: c, zoom, editing }: { connector: Connector;
         fontSize: BOARD_STYLE.labelFontSize * zoom,
         padding: `${3 * zoom}px ${9 * zoom}px`, borderRadius: 999,
         background: BOARD_STYLE.labelFill,
-        color: c.color === 'neutral' ? BOARD_STYLE.labelText : BOARD_COLORS[c.color].text, fontFamily: BOARD_FONT,
+        color: BOARD_LABEL_TEXT[c.color] ?? BOARD_STYLE.labelText, fontFamily: BOARD_FONT,
       }}
     >
       {editing ? <BoardTextEditor id={c.id} value={c.label ?? ''} zoom={zoom} align="center" single /> : c.label}

@@ -338,6 +338,7 @@ function describeOp(op: Op): string {
     case 'tokens': return 'Updated tokens';
     case 'page': return `${op.action === 'add' ? 'Added' : op.action === 'remove' ? 'Removed' : 'Renamed'} page`;
     case 'note': return `${op.action === 'add' ? 'Added' : op.action === 'remove' ? 'Removed' : 'Updated'} a note`;
+    case 'section': return `${op.action === 'add' ? 'Added' : op.action === 'remove' ? 'Removed' : 'Updated'} section`;
     case 'board': {
       const adds = op.changes.filter((c) => c.action === 'add').length;
       const removes = op.changes.filter((c) => c.action === 'remove').length;

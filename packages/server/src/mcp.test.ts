@@ -892,3 +892,35 @@ test('a project connection lists and switches between the documents in the proje
   assert.equal(single.documents.length, 1);
   assert.ok(isError(await client.callTool({ name: 'switch_document', arguments: { docId: second } })));
 });
+
+test('sections: create, arrange, update membership and status, list, delete', async () => {
+  const { id, agent, call, raw } = await freshAgent('Sections');
+  const a = await call<{ id: string }>('create_artboard', { name: 'One', width: 390, height: 844, x: 0, y: 0 });
+  const b = await call<{ id: string }>('create_artboard', { name: 'Two', width: 390, height: 844, x: 3000, y: 500 });
+  const made = await call<{ id: string; screens: number; status: string }>(
+    'create_section', { title: 'A - Onboarding', artboards: [a.id, b.id], arrange: true, gap: 80 });
+  assert.equal(made.screens, 2);
+  assert.equal(made.status, 'draft');
+  const doc = getDocument(id)!;
+  assert.equal(doc.nodes[b.id]!.attrs['data-x'], String(Number(doc.nodes[a.id]!.attrs['data-x']) + 390 + 80));
+  assert.equal(doc.nodes[b.id]!.attrs['data-y'], doc.nodes[a.id]!.attrs['data-y']);
+
+  const updated = await call<{ status: string; screens: number }>('update_section', { id: made.id, status: 'ready', remove: [b.id] });
+  assert.deepEqual([updated.status, updated.screens], ['ready', 1]);
+  // A second section claiming `a` takes it from the first.
+  const other = await call<{ id: string }>('create_section', { title: 'B', artboards: [a.id] });
+  const listed = await call<{ sections: { id: string; screens: number }[]; ungrouped: string[] }>('list_sections', {});
+  assert.deepEqual(listed.sections.map((s) => s.screens), [0, 1]);
+  assert.ok(listed.ungrouped.includes(b.id));
+
+  const info = await call<{ sections: { id: string }[] }>('get_basic_info', {});
+  assert.equal(info.sections.length, 2);
+  const spec = await call<{ section?: { status: string } }>('get_spec', { id: a.id, measure: false, includeCode: false });
+  assert.equal(spec.section?.status, 'draft');
+
+  assert.ok(isError(await raw('create_section', { title: 'X', artboards: ['nope'] })));
+  assert.ok(isError(await raw('update_section', { id: made.id })));
+  await call('delete_section', { id: other.id });
+  assert.equal(getDocument(id)!.pages[0]!.sections!.some((s) => s.id === other.id), false);
+  await agent.close();
+});

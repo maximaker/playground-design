@@ -18,7 +18,7 @@
  */
 
 import type { CanvasDocument, CanvasNode, NodeId, StyleMap, Token } from './model.ts';
-import { getNode } from './model.ts';
+import { artboardOf, getNode } from './model.ts';
 import { cssVarName } from './tokens.ts';
 
 export interface SpecValue {
@@ -65,6 +65,8 @@ export interface NodeSpec {
   groups: SpecGroup[];
   variants: SpecVariant[];
   notes: SpecNote[];
+  /** The section the screen sits in, so a developer sees what is Ready. */
+  section?: { id: string; title: string; status: string };
   assets: string[];
   children: { id: NodeId; name: string; type: string }[];
 }
@@ -242,6 +244,7 @@ export function specFor(
     groups,
     variants,
     notes: notesFor(doc, id),
+    section: sectionFor(doc, id),
     assets: assetsIn(node.styles, node.attrs ?? {}),
     children: node.children
       .map((c) => doc.nodes[c])
@@ -311,3 +314,13 @@ export const NOTE_KIND_HINTS: Record<NoteKind, string> = {
   accessibility: 'Label, role, focus order, announcement — what a screen reader needs that the markup does not carry.',
   todo: 'Known to be unfinished. Says so before someone builds it.',
 };
+
+function sectionFor(doc: CanvasDocument, id: NodeId): NodeSpec['section'] {
+  const board = artboardOf(doc, id);
+  if (!board) return undefined;
+  for (const page of doc.pages) {
+    const s = page.sections?.find((x) => x.artboards.includes(board));
+    if (s) return { id: s.id, title: s.title, status: s.status };
+  }
+  return undefined;
+}

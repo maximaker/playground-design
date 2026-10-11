@@ -32,6 +32,8 @@ import {
   BOARD_COLOR_NAMES, boardBounds, boardOf, danglingConnectors, deleteBoardItems, emitBoardSvg, isShape,
   layoutDiagram, makeBoardShape, makeConnector, parseMermaid, routeConnector,
   artifactoryEmbedUrl, treeEntries, nodeEntry, type InstanceOverride,
+  type Section, SECTION_STATUSES, makeSection, sectionsOf, sectionMembers, sectionRect, arrangeSectionOps,
+  sectionOfArtboard,
 } from '@playground/shared';
 import {
   applyOps, getDocument, getSnapshot, listSnapshots, StoreError, createSnapshot,
@@ -700,6 +702,7 @@ function registerReadTools(server: McpServer, ctx: McpContext): void {
       ...(ctx.connection.projectId
         ? { project: { id: ctx.connection.projectId, hint: 'This connection covers the whole project: list_documents and switch_document move between its documents.' } }
         : {}),
+      sections: sectionsOf(page).map((sec) => sectionSummary(doc, page, sec)),
       notes: {
         total: notes.length,
         queued: queued.length,
@@ -2176,12 +2179,37 @@ function registerWriteTools(server: McpServer, ctx: McpContext): void {
       const assetId = await storeAsset(doc.id, mime, `${slug(n.name)}.${format}`, data);
       out.push({
         id, name: n.name, format, bytes: data.length,
+        ...sectionOfNode(doc, id),
         url: `${ctx.baseUrl}/assets/${assetId}`,
         ...(includeBase64 ? { base64: data.toString('base64') } : {}),
       });
     }
     return json({ exported: out });
   }));
+}
+
+function sectionSummary(doc: CanvasDocument, page: Page, sec: Section) {
+  const members = sectionMembers(doc, page, sec);
+  return {
+    id: sec.id, title: sec.title, status: sec.status,
+    ...(sec.description ? { description: sec.description } : {}),
+    ...(sec.color ? { color: sec.color } : {}),
+    order: sec.order,
+    artboards: members.map((id) => ({ id, name: doc.nodes[id]!.name })),
+    screens: members.length,
+    ...(sec.flows?.length ? { flows: sec.flows } : {}),
+    bounds: sectionRect(doc, page, sec),
+  };
+}
+
+/** `{ section }` for a node inside a sectioned artboard, so handoff shows what is Ready. */
+function sectionOfNode(doc: CanvasDocument, id: NodeId): { section?: { id: string; title: string; status: string } } {
+  const board = artboardOf(doc, id);
+  for (const page of doc.pages) {
+    const sec = board ? sectionOfArtboard(page, board) : undefined;
+    if (sec) return { section: { id: sec.id, title: sec.title, status: sec.status } };
+  }
+  return {};
 }
 
 function rightmostEdge(doc: CanvasDocument, artboards: NodeId[]): number {
@@ -2404,6 +2432,133 @@ function registerNoteTools(server: McpServer, ctx: McpContext): void {
     const { page } = findNote(doc, id, pageId);
     commit(ctx, [{ t: 'note', action: 'remove', pageId: page.id, note: { id } }]);
     return json({ deleted: id, pageId: page.id });
+  }));
+
+  // --- Sections: titled runs of screens with a status -----------------------
+
+  const findSection = (doc: CanvasDocument, id: string) => {
+    for (const page of doc.pages) {
+      const section = (page.sections ?? []).find((s) => s.id === id);
+      if (section) return { page, section };
+    }
+    throw new Error(`No section with id "${id}". Call list_sections for current ids.`);
+  };
+
+  /** Ops that take `ids` out of any other section on the page, so they can join `self`. */
+  const releaseOps = (page: Page, self: string, ids: string[]): Op[] => (page.sections ?? [])
+    .filter((s) => s.id !== self && s.artboards.some((a) => ids.includes(a)))
+    .map((s) => ({ t: 'section', action: 'update', pageId: page.id, section: { id: s.id, artboards: s.artboards.filter((a) => !ids.includes(a)) } }));
+
+  const checkMembers = (page: Page, ids: string[]) => {
+    const missing = ids.filter((id) => !page.artboards.includes(id));
+    if (missing.length) throw new Error(`Not artboards on page ${page.id}: ${missing.join(', ')}. Sections hold top-level artboards only.`);
+  };
+
+  const sectionStatus = z.enum(SECTION_STATUSES as [Section['status'], ...Section['status'][]]);
+
+  server.registerTool('create_section', {
+    title: 'Group screens into a section',
+    description:
+      'Creates a titled section on the canvas around a set of artboards (e.g. "A - Onboarding") with a ' +
+      'status (draft, in-review, ready, changed) developers can read. The region auto-grows to wrap its ' +
+      'artboards, so do not fake headers with extra artboards. Artboards already in another section move here. ' +
+      'arrange: true lays the members out in one row with standard gaps.',
+    inputSchema: {
+      title: z.string().min(1).max(200),
+      artboards: z.array(z.string()).max(200).optional().default([]).describe('Artboard ids, in reading order.'),
+      description: z.string().max(2000).optional(),
+      status: sectionStatus.optional(),
+      color: z.string().max(40).optional().describe('yellow, blue, green, pink, purple or a CSS colour.'),
+      flows: z.array(z.string()).max(50).optional().describe('Board item ids (diagrams, connectors) describing this flow.'),
+      arrange: z.boolean().optional().default(false),
+      gap: z.number().min(0).max(2000).optional(),
+      pageId: z.string().optional(),
+    },
+  }, async ({ title, artboards, description, status, color, flows, arrange, gap, pageId }) => guard(() => {
+    const doc = requireDoc(ctx);
+    const page = pageOf(ctx, doc, pageId);
+    checkMembers(page, artboards);
+    const section = makeSection({ title, artboards, description, status, color, flows, order: page.sections?.length ?? 0 });
+    commit(ctx, [...releaseOps(page, section.id, artboards), { t: 'section', action: 'add', pageId: page.id, section }]);
+    if (arrange) {
+      const now = requireDoc(ctx);
+      const found = findSection(now, section.id);
+      commit(ctx, arrangeSectionOps(now, found.page, found.section, { gap }));
+    }
+    const after = requireDoc(ctx);
+    const found = findSection(after, section.id);
+    return json(sectionSummary(after, found.page, found.section));
+  }));
+
+  server.registerTool('update_section', {
+    title: 'Edit a section',
+    description:
+      'Changes a section\'s title, description, status, colour, flows or order. Members: `artboards` replaces ' +
+      'the list; `add` / `remove` edit it. arrange: true re-lays members in a row. Give only what changes.',
+    inputSchema: {
+      id: z.string(),
+      title: z.string().min(1).max(200).optional(),
+      description: z.string().max(2000).optional(),
+      status: sectionStatus.optional(),
+      color: z.string().max(40).optional(),
+      flows: z.array(z.string()).max(50).optional(),
+      order: z.number().int().min(0).optional(),
+      artboards: z.array(z.string()).max(200).optional(),
+      add: z.array(z.string()).max(200).optional(),
+      remove: z.array(z.string()).max(200).optional(),
+      arrange: z.boolean().optional().default(false),
+      gap: z.number().min(0).max(2000).optional(),
+    },
+  }, async ({ id, arrange, gap, artboards, add, remove, ...fields }) => guard(() => {
+    const doc = requireDoc(ctx);
+    const { page, section } = findSection(doc, id);
+    const patch: Partial<Section> & { id: string } = { id };
+    for (const [k, v] of Object.entries(fields)) if (v !== undefined) (patch as Record<string, unknown>)[k] = v;
+    if (artboards || add || remove) {
+      let next = artboards ?? section.artboards;
+      if (add) next = [...next, ...add.filter((a) => !next.includes(a))];
+      if (remove) next = next.filter((a) => !remove.includes(a));
+      checkMembers(page, next.filter((a) => !section.artboards.includes(a)));
+      patch.artboards = next;
+    }
+    const changes = Object.keys(patch).length > 1;
+    if (!changes && !arrange) return fail('Nothing to change.');
+    if (changes) commit(ctx, [...releaseOps(page, id, patch.artboards ?? []), { t: 'section', action: 'update', pageId: page.id, section: patch }]);
+    if (arrange) {
+      const now = requireDoc(ctx);
+      const found = findSection(now, id);
+      commit(ctx, arrangeSectionOps(now, found.page, found.section, { gap }));
+    }
+    const after = requireDoc(ctx);
+    const found = findSection(after, id);
+    return json(sectionSummary(after, found.page, found.section));
+  }));
+
+  server.registerTool('delete_section', {
+    title: 'Delete a section',
+    description: 'Removes the section region. Its artboards stay where they are.',
+    inputSchema: { id: z.string() },
+  }, async ({ id }) => guard(() => {
+    const doc = requireDoc(ctx);
+    const { page } = findSection(doc, id);
+    commit(ctx, [{ t: 'section', action: 'remove', pageId: page.id, section: { id } }]);
+    return json({ deleted: id, pageId: page.id });
+  }));
+
+  server.registerTool('list_sections', {
+    title: 'List sections',
+    description: 'Sections on a page in order, with status, members, flows and canvas bounds, plus artboards in no section.',
+    inputSchema: { pageId: z.string().optional() },
+    annotations: { readOnlyHint: true },
+  }, async ({ pageId }) => guard(() => {
+    const doc = requireDoc(ctx);
+    const page = pageOf(ctx, doc, pageId);
+    const grouped = new Set((page.sections ?? []).flatMap((s) => s.artboards));
+    return json({
+      pageId: page.id,
+      sections: sectionsOf(page).map((sec) => sectionSummary(doc, page, sec)),
+      ungrouped: page.artboards.filter((a) => !grouped.has(a)),
+    });
   }));
 
   // --- The board: diagrams on the canvas between artboards -------------------

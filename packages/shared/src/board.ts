@@ -108,6 +108,17 @@ export const BOARD_COLORS: Record<BoardColor, { fill: string; stroke: string; te
 };
 
 /**
+ * Text colour for a connector's label. Labels sit on the pale `labelFill`
+ * pill whatever the connector's colour, so they cannot reuse `text`, which is
+ * meant for a filled shape (white on slate read as white on near-white). Each
+ * is at least 4.5:1 on the pill.
+ */
+export const BOARD_LABEL_TEXT: Record<BoardColor, string> = {
+  neutral: '#3b4656', slate: '#4a5463', blue: '#2a55a0', green: '#226b3a',
+  yellow: '#6f500e', red: '#a83333', purple: '#5b3fb0',
+};
+
+/**
  * Everything else about how the board looks, in one place.
  *
  * Read by the canvas and by the SVG emitter alike, for the same reason the
@@ -895,7 +906,7 @@ export function emitBoardSvg(doc: CanvasDocument, page: Page, opts: { padding?: 
     } else if (item.label) {
       const w = Math.max(28, item.label.length * 6 + 18);
       out.push(`<rect x="${num(route.label.x - w / 2)}" y="${num(route.label.y - 10)}" width="${num(w)}" height="20" rx="10" fill="${S.labelFill}"/>`);
-      out.push(`<text x="${num(route.label.x)}" y="${num(route.label.y + 3.8)}" text-anchor="middle" ${font} font-size="${S.labelFontSize}" fill="${item.color === 'neutral' ? S.labelText : c.text}">${escapeXml(item.label)}</text>`);
+      out.push(`<text x="${num(route.label.x)}" y="${num(route.label.y + 3.8)}" text-anchor="middle" ${font} font-size="${S.labelFontSize}" fill="${BOARD_LABEL_TEXT[item.color] ?? S.labelText}">${escapeXml(item.label)}</text>`);
     }
   }
 

@@ -14,7 +14,7 @@ import {
   type CanvasDocument, type CanvasNode, type NodeId, type StyleMap, type Page,
   type Token, type Note, type ComponentDef, type ComponentVariant, type InstanceOverride,
   type Breakpoint, breakpointsOf,
-  type Comment, type CommentReply,
+  type Comment, type CommentReply, type Section,
   descendants, isAncestorOf, makeNote, newId, variantKey,
 } from './model.ts';
 import type { CodeComponent } from './code-components.ts';
@@ -34,6 +34,7 @@ export type Op =
   | { t: 'tokens'; tokens: Token[] }
   | { t: 'page'; action: 'add' | 'remove' | 'rename'; page: Page }
   | { t: 'note'; action: 'add' | 'update' | 'remove'; pageId: string; note: Partial<Note> & { id: string } }
+  | { t: 'section'; action: 'add' | 'update' | 'remove'; pageId: string; section: Partial<Section> & { id: string } }
   /** Diagram items on a page's board; one op per gesture, however many items it moves. */
   | { t: 'board'; pageId: string; changes: BoardChange[] }
   | { t: 'component'; action: 'add' | 'update' | 'remove'; component: Partial<ComponentDef> & { id: string } }
@@ -103,6 +104,7 @@ export function applyOp(doc: CanvasDocument, op: Op): Op {
     case 'tokens': return applyTokens(doc, op);
     case 'page': return applyPage(doc, op);
     case 'note': return applyNote(doc, op);
+    case 'section': return applySection(doc, op);
     case 'board': return applyBoard(doc, op);
     case 'component': return applyComponent(doc, op);
     case 'override': return applyOverride(doc, op);
@@ -385,6 +387,58 @@ function applyNote(doc: CanvasDocument, op: Extract<Op, { t: 'note' }>): Op {
   }
   page.notes[index] = { ...current, ...op.note, updatedAt: Date.now() };
   return { t: 'note', action: 'update', pageId: op.pageId, note: before };
+}
+
+function applySection(doc: CanvasDocument, op: Extract<Op, { t: 'section' }>): Op {
+  const page = doc.pages.find((p) => p.id === op.pageId);
+  if (!page) throw new OpError(`page ${op.pageId} not found`);
+  if (!page.sections) page.sections = [];
+  const index = page.sections.findIndex((s) => s.id === op.section.id);
+
+  if (op.action === 'add') {
+    if (index >= 0) throw new OpError(`section ${op.section.id} already exists`);
+    assertUnclaimed(page.sections, op.section.id, op.section.artboards);
+    page.sections.push(makeSection({ order: page.sections.length, ...op.section }));
+    return { t: 'section', action: 'remove', pageId: op.pageId, section: { id: op.section.id } };
+  }
+  if (index < 0) throw new OpError(`section ${op.section.id} not found`);
+  if (op.action === 'remove') {
+    const [removed] = page.sections.splice(index, 1);
+    return { t: 'section', action: 'add', pageId: op.pageId, section: removed! };
+  }
+  const current = page.sections[index]!;
+  const before: Partial<Section> & { id: string } = { id: current.id };
+  for (const key of Object.keys(op.section) as (keyof Section)[]) {
+    if (key === 'id') continue;
+    (before as Record<string, unknown>)[key] = current[key];
+  }
+  assertUnclaimed(page.sections, current.id, op.section.artboards);
+  page.sections[index] = { ...current, ...op.section };
+  return { t: 'section', action: 'update', pageId: op.pageId, section: before };
+}
+
+/** An artboard belongs to at most one section. */
+function assertUnclaimed(sections: Section[], self: string, artboards: NodeId[] | undefined): void {
+  if (!artboards?.length) return;
+  const ids = new Set(artboards);
+  for (const other of sections) {
+    if (other.id !== self && other.artboards.some((a) => ids.has(a))) {
+      throw new OpError(`an artboard is already in section ${other.id}; remove it there first`);
+    }
+  }
+}
+
+export function makeSection(partial: Partial<Section> = {}): Section {
+  return {
+    id: partial.id ?? newId('sec'),
+    title: partial.title ?? 'Section',
+    description: partial.description,
+    status: partial.status ?? 'draft',
+    color: partial.color,
+    artboards: [...(partial.artboards ?? [])],
+    flows: partial.flows,
+    order: partial.order ?? 0,
+  };
 }
 
 function applyComponent(doc: CanvasDocument, op: Extract<Op, { t: 'component' }>): Op {
@@ -719,6 +773,7 @@ export function touchedNodes(op: Op): TouchedNodes {
     case 'tokens':
     case 'page':
     case 'note':
+    case 'section':
     case 'component':
     case 'variant':
     case 'breakpoints':
