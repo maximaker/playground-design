@@ -24,7 +24,7 @@ import {
 } from './store.ts';
 import { peersOf, hasLiveTab } from './realtime.ts';
 import {
-  ConnectionError, createConnection, createProjectConnection, listConnections, projectDocuments, resolveConnection, revokeConnection,
+  ConnectionError, type ConnectionOptions, createConnection, createProjectConnection, listConnections, projectDocuments, resolveConnection, revokeConnection,
   type Connection,
 } from './connections.ts';
 import { handleMcpRequest } from './mcp.ts';
@@ -682,11 +682,41 @@ function nextX(doc: CanvasDocument, artboards: string[]): number {
 api.get('/documents/:id/connections', async (c) =>
   c.json({ connections: await listConnections((await requireDocument(c.req.param('id'))).id) }));
 
+type ConnectionBody = {
+  label?: string; docId?: string;
+  /** Epoch ms or an ISO date. */
+  expiresAt?: number | string | null;
+  /** Shorthand: hours from now. */
+  expiresInHours?: number;
+  readOnly?: boolean;
+  /** 'document' (default), 'project' (project route only) or 'sections' with sectionIds. */
+  scope?: 'document' | 'project' | 'sections';
+  sectionIds?: string[];
+};
+
+function connectionOptions(body: ConnectionBody): ConnectionOptions {
+  let expiresAt: number | null = null;
+  if (body.expiresInHours !== undefined) expiresAt = Date.now() + Number(body.expiresInHours) * 3_600_000;
+  else if (typeof body.expiresAt === 'string') expiresAt = Date.parse(body.expiresAt);
+  else if (typeof body.expiresAt === 'number') expiresAt = body.expiresAt;
+  if (expiresAt !== null && Number.isNaN(expiresAt)) throw new ConnectionError('expiresAt is not a date.');
+  if (body.scope === 'sections' && !body.sectionIds?.length) throw new ConnectionError('scope "sections" needs sectionIds.');
+  return { expiresAt, readOnly: !!body.readOnly, sectionIds: body.sectionIds?.length ? body.sectionIds : null };
+}
+
+/**
+ * Body: { label?, expiresAt? | expiresInHours?, readOnly?, scope?: 'document' | 'sections', sectionIds? }.
+ * Every option is optional; without them this is the ordinary full-access link.
+ */
 api.post('/documents/:id/connections', async (c) => {
   const doc = await requireDocument(c.req.param('id'));
-  const body = await c.req.json<{ label?: string }>().catch(() => ({} as { label?: string }));
-  const conn = await createConnection(doc.id, body.label);
-  return c.json(connectionSetup(conn), 201);
+  const body = await c.req.json<ConnectionBody>().catch(() => ({} as ConnectionBody));
+  try {
+    const conn = await createConnection(doc.id, body.label, connectionOptions(body));
+    return c.json(connectionSetup(conn), 201);
+  } catch (err) {
+    return c.json({ error: err instanceof ConnectionError ? err.message : String(err) }, 400);
+  }
 });
 
 /**
@@ -694,9 +724,9 @@ api.post('/documents/:id/connections', async (c) => {
  * (or the most recently changed document) and moves with switch_document.
  */
 api.post('/projects/:id/connections', async (c) => {
-  const body = await c.req.json<{ label?: string; docId?: string }>().catch(() => ({} as { label?: string; docId?: string }));
+  const body = await c.req.json<ConnectionBody>().catch(() => ({} as ConnectionBody));
   try {
-    const conn = await createProjectConnection(c.req.param('id'), body.label, body.docId);
+    const conn = await createProjectConnection(c.req.param('id'), body.label, body.docId, connectionOptions(body));
     return c.json({ ...connectionSetup(conn), documents: await projectDocuments(c.req.param('id')) }, 201);
   } catch (err) {
     return c.json({ error: err instanceof ConnectionError ? err.message : String(err) }, 400);
@@ -733,7 +763,9 @@ function connectionSetup(conn: Connection) {
       cursor: { mcpServers: { canvas: { url } } },
       vscode: { servers: { canvas: { type: 'http', url } } },
     },
-    expiresIn: 'The code stops working if unused for 30 minutes before its first connection.',
+    expiresIn: conn.expiresAt
+      ? `The link stops working at ${new Date(conn.expiresAt).toISOString()}, or if unused for 30 minutes before its first connection.`
+      : 'The code stops working if unused for 30 minutes before its first connection.',
   };
 }
 
@@ -1232,7 +1264,13 @@ app.get('/assets/:id', async (c) => {
 // ---------------------------------------------------------------------------
 
 app.all('/mcp/:code', async (c) => {
-  const connection = await resolveConnection(c.req.param('code'));
+  let connection: Connection | null;
+  try {
+    connection = await resolveConnection(c.req.param('code'));
+  } catch (err) {
+    if (err instanceof ConnectionError) return c.json({ error: err.message, expired: true }, 401);
+    throw err;
+  }
   if (!connection) {
     // Deliberately does not distinguish unknown / revoked / expired.
     return c.json({

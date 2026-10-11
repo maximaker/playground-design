@@ -13,7 +13,7 @@ process.env.PLAYGROUND_DB = `/tmp/playground-test-${Date.now()}.db`;
 
 const { app } = await import('./app.ts');
 const { createDocument, getDocument, history } = await import('./store.ts');
-const { createConnection } = await import('./connections.ts');
+const { createConnection, revokeConnection: _revoke } = await import('./connections.ts'); void _revoke;
 const { shutdownRenderer } = await import('./render.ts');
 
 let server: ReturnType<typeof serve>;
@@ -1393,4 +1393,73 @@ test('publish_handoff serves a read-only spec site at /h/<slug>, scoped and revo
   assert.equal((await fetch(`${base}/h/${scoped.slug}`)).status, 404);
   assert.equal((await fetch(`${base}/h/${docLevel.slug}`)).status, 200);
   await agent.close();
+});
+
+async function agentFor(code: string) {
+  const agent = new Client({ name: 'test', version: '1.0.0' });
+  await agent.connect(new StreamableHTTPClientTransport(new URL(`${base}/mcp/${code}`)));
+  const raw = (tool: string, args: Record<string, unknown> = {}) => agent.callTool({ name: tool, arguments: args });
+  return { agent, raw };
+}
+
+test('scoped links: read-only, section-limited, expiring and self-revoking', async () => {
+  const { id, agent, call } = await freshAgent('Scoped');
+  const board = getDocument(id)!.pages[0]!.artboards[0]!;
+  const inside = await call<{ roots: { id: string }[] }>('write_html', { targetId: board, html: '<p>Inside</p>' });
+  const other = await call<{ id: string }>('create_artboard', { name: 'Other', width: 300, height: 200 });
+  const sec = await call<{ id?: string; sectionId?: string; section?: { id: string } }>('create_section', { title: 'Mine', artboards: [board] });
+  const sectionId = sec.sectionId ?? sec.id ?? sec.section!.id;
+  await agent.close();
+
+  // Read-only: reads and comments work, writes are refused with a reason.
+  const ro = await (await api(`/api/documents/${id}/connections`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ label: 'Reviewer', readOnly: true }),
+  })).json() as { connection: { code: string; readOnly: boolean } };
+  assert.equal(ro.connection.readOnly, true);
+  const r = await agentFor(ro.connection.code);
+  assert.ok(!isError(await r.raw('get_tree_summary', { id: board })));
+  const refused = await r.raw('update_styles', { updates: [{ id: board, styles: { color: 'red' } }] });
+  assert.ok(isError(refused));
+  assert.match(textOf(refused), /read-only/);
+  assert.ok(!isError(await r.raw('create_comment', { nodeId: board, text: 'Looks good' })));
+  const batched = jsonOf<{ failed: number; results: { error?: string }[] }>(await r.raw('batch', { steps: [{ tool: 'write_html', args: { targetId: board, html: '<p>x</p>' } }] }));
+  assert.equal(batched.failed, 1, 'batch steps are checked too');
+  await r.agent.close();
+
+  // Sections: in-scope edits work, out-of-scope ones fail clearly.
+  const scoped = await (await api(`/api/documents/${id}/connections`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ label: 'Section agent', scope: 'sections', sectionIds: [sectionId], expiresInHours: 2 }),
+  })).json() as { connection: { code: string; sectionIds: string[]; expiresAt: number } };
+  assert.deepEqual(scoped.connection.sectionIds, [sectionId]);
+  assert.ok(scoped.connection.expiresAt > Date.now());
+  const s = await agentFor(scoped.connection.code);
+  assert.ok(!isError(await s.raw('update_styles', { updates: [{ id: inside.roots[0]!.id, styles: { color: 'red' } }] })));
+  const out = await s.raw('write_html', { targetId: other.id, html: '<p>Nope</p>' });
+  assert.ok(isError(out));
+  assert.match(textOf(out), /Out of scope/);
+  assert.match(textOf(await s.raw('create_page', { name: 'Sneaky' })), /limited to one section|Out of scope|section/);
+  const info = jsonOf<{ scope: string; readOnly: boolean }>(await s.raw('connection_info'));
+  assert.equal(info.scope, 'sections');
+
+  // Revoking its own link ends it.
+  assert.ok(!isError(await s.raw('revoke_connection', { confirm: true })));
+  await s.agent.close().catch(() => {});
+  const after = await fetch(`${base}/mcp/${scoped.connection.code}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+  assert.equal(after.status, 401);
+
+  // Bad options are refused; an expired link says so.
+  const bad = await api(`/api/documents/${id}/connections`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ sectionIds: ['sec_nope'] }) });
+  assert.equal(bad.status, 400);
+  const { persistence: store } = await import('./persistence.ts');
+  const short = await createConnection(id, 'Short', { expiresAt: Date.now() + 50 });
+  await new Promise((res) => setTimeout(res, 80));
+  const expired = await fetch(`${base}/mcp/${short.code}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+  assert.equal(expired.status, 401);
+  assert.match((await expired.json() as { error: string }).error, /expired/);
+  const listed = await (await api(`/api/documents/${id}/connections`)).json() as { connections: { code: string; expired?: boolean; readOnly: boolean }[] };
+  assert.ok(listed.connections.find((x) => x.code === short.code)!.expired);
+  assert.ok(listed.connections.find((x) => x.code === ro.connection.code)!.readOnly);
+  void store;
 });

@@ -39,6 +39,12 @@ export interface StoredConnection {
    * one it is on now.
    */
   projectId?: string | null;
+  /** Epoch ms after which the link stops working, whatever its use. */
+  expiresAt?: number | null;
+  /** Reads and comments only. */
+  readOnly?: boolean;
+  /** Limits the link to these sections' screens (document connections only). */
+  sectionIds?: string[] | null;
 }
 
 /** `view` opens the read-only editor; `handoff` only the spec site at /h/<slug>. */

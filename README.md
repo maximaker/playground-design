@@ -110,6 +110,15 @@ A code can also cover a **whole project** rather than one document: `POST /api/p
 with `list_documents` and `switch_document`. It can never reach a document outside the project, and
 per-document codes work exactly as before.
 
+Links can be narrowed. `POST /api/documents/:id/connections` (and the project route) take
+`expiresAt` (epoch ms or ISO date) or `expiresInHours`, `readOnly: true` (read, screenshot and
+comment only), and `scope: "sections"` with `sectionIds` (only those sections' screens; whole-document
+changes such as tokens or pages are refused). A call outside what the link allows fails with a
+message saying why, and an expired link says it expired. `GET` on the same route lists links with
+those fields (`expired: true` once past), `DELETE /api/connections/:code` revokes one, and an agent
+can end its own link with `revoke_connection` when the work is done (`connection_info` says what
+its link can do).
+
 Every tool returns JSON, and every input schema is strict: an unknown parameter is refused with
 an error naming it, rather than silently ignored.
 
@@ -234,6 +243,7 @@ Artifactory's origin gets an answer that allows the session cookie.
 | `get_board` | Shapes and connectors on the canvas, with each connector's real path |
 | `edit_board` | Add, change and remove shapes and connectors. Connectors take optional `waypoints`; automatic elbows route around artboards and shapes and fan into separate lanes |
 | `write_diagram` | Lay out a diagram from Mermaid or nodes/edges; edges take optional `waypoints` |
+| `connection_info` / `revoke_connection` | What this link may do (scope, read-only, expiry), and ending it for good once the work is done |
 | `list_documents` / `switch_document` | The documents a project connection covers, and moving between them |
 
 **Code components**

@@ -30,6 +30,50 @@ export interface Connection {
   lastUsedAt: number | null;
   /** Set when the connection covers a whole project; `docId` is the document it is on now. */
   projectId: string | null;
+  /** Epoch ms after which the link stops working. */
+  expiresAt: number | null;
+  /** Reads and comments only. */
+  readOnly: boolean;
+  /** When set, the link reaches only these sections' screens. */
+  sectionIds: string[] | null;
+}
+
+export interface ConnectionOptions {
+  expiresAt?: number | null;
+  readOnly?: boolean;
+  sectionIds?: string[] | null;
+}
+
+/** Validates options against the document; throws ConnectionError with what to fix. */
+function checkOptions(opts: ConnectionOptions, docId: string | null): ConnectionOptions {
+  const out: ConnectionOptions = {};
+  if (opts.expiresAt !== undefined && opts.expiresAt !== null) {
+    if (!Number.isFinite(opts.expiresAt) || opts.expiresAt <= Date.now()) {
+      throw new ConnectionError('expiresAt must be a time in the future (epoch milliseconds or an ISO date).');
+    }
+    out.expiresAt = opts.expiresAt;
+  }
+  if (opts.readOnly) out.readOnly = true;
+  if (opts.sectionIds?.length) {
+    if (!docId) throw new ConnectionError('A project connection cannot be limited to sections; make a document connection.');
+    const doc = getDocument(docId);
+    const known = new Set((doc?.pages ?? []).flatMap((p) => (p.sections ?? []).map((s) => s.id)));
+    const missing = opts.sectionIds.filter((id) => !known.has(id));
+    if (missing.length) throw new ConnectionError(`No section ${missing.map((m) => `"${m}"`).join(', ')} in this document.`);
+    out.sectionIds = [...new Set(opts.sectionIds)];
+  }
+  return out;
+}
+
+function fromRow(row: StoredConnection, docName: string): Connection {
+  return {
+    code: row.code, docId: row.docId, docName, label: row.label,
+    createdAt: row.createdAt, redeemedAt: row.redeemedAt, lastUsedAt: row.lastUsedAt,
+    projectId: row.projectId ?? null,
+    expiresAt: row.expiresAt ?? null,
+    readOnly: !!row.readOnly,
+    sectionIds: row.sectionIds?.length ? row.sectionIds : null,
+  };
 }
 
 // Unambiguous alphabet: no O/0, I/1, so a code read off a screen types correctly.
@@ -45,20 +89,19 @@ function randomCode(): string {
   return s;
 }
 
-export async function createConnection(docId: string, label?: string): Promise<Connection> {
+export class ConnectionError extends Error {}
+
+export async function createConnection(docId: string, label?: string, options: ConnectionOptions = {}): Promise<Connection> {
   const doc = getDocument(docId);
   if (!doc) throw new Error(`document ${docId} not found`);
-  const code = randomCode();
-  const createdAt = Date.now();
-  const store = await persistence();
-  await store.saveConnection({
-    code, docId, label: label ?? null, createdAt,
-    redeemedAt: null, lastUsedAt: null, revoked: false,
-  });
-  return { code, docId, docName: doc.name, label: label ?? null, createdAt, redeemedAt: null, lastUsedAt: null, projectId: null };
+  const opts = checkOptions(options, docId);
+  const row: StoredConnection = {
+    code: randomCode(), docId, label: label ?? null, createdAt: Date.now(),
+    redeemedAt: null, lastUsedAt: null, revoked: false, ...opts,
+  };
+  await (await persistence()).saveConnection(row);
+  return fromRow(row, doc.name);
 }
-
-export class ConnectionError extends Error {}
 
 /** The documents filed in a project, most recently changed first. */
 export async function projectDocuments(projectId: string): Promise<{ id: string; name: string; updatedAt: number }[]> {
@@ -77,20 +120,21 @@ export async function projectDocuments(projectId: string): Promise<{ id: string;
  * and the agent moves between the project's documents with switch_document.
  * It can never reach a document outside the project.
  */
-export async function createProjectConnection(projectId: string, label?: string, docId?: string): Promise<Connection> {
+export async function createProjectConnection(
+  projectId: string, label?: string, docId?: string, options: ConnectionOptions = {},
+): Promise<Connection> {
   const docs = await projectDocuments(projectId);
   if (!docs.length) throw new ConnectionError('This project has no documents yet. File one into it first.');
   const start = docId ? docs.find((d) => d.id === docId) : docs[0];
   if (!start) throw new ConnectionError(`Document ${docId} is not in this project.`);
   await ensureLoaded(start.id);
-  const code = randomCode();
-  const createdAt = Date.now();
-  const store = await persistence();
-  await store.saveConnection({
-    code, docId: start.id, label: label ?? null, createdAt,
-    redeemedAt: null, lastUsedAt: null, revoked: false, projectId,
-  });
-  return { code, docId: start.id, docName: start.name, label: label ?? null, createdAt, redeemedAt: null, lastUsedAt: null, projectId };
+  const opts = checkOptions(options, null);
+  const row: StoredConnection = {
+    code: randomCode(), docId: start.id, label: label ?? null, createdAt: Date.now(),
+    redeemedAt: null, lastUsedAt: null, revoked: false, projectId, ...opts,
+  };
+  await (await persistence()).saveConnection(row);
+  return fromRow(row, start.name);
 }
 
 /**
@@ -138,6 +182,11 @@ export async function resolveConnection(code: string): Promise<Connection | null
   if (!row) return null;
 
   const t = Date.now();
+  // Possession of the code is proven by now, so saying why it stopped working is safe — and useful.
+  if (row.expiresAt && t > row.expiresAt) {
+    throw new ConnectionError(
+      `This connection link expired at ${new Date(row.expiresAt).toISOString()}. Ask for a new one from the Connect agent panel.`);
+  }
   if (row.redeemedAt === null) {
     if (t - row.createdAt > UNREDEEMED_TTL_MS) { await revokeConnection(row.code); return null; }
     row.redeemedAt = t;
@@ -152,11 +201,7 @@ export async function resolveConnection(code: string): Promise<Connection | null
   const doc = getDocument(row.docId);
   if (!doc) return null;
 
-  return {
-    code: row.code, docId: row.docId, docName: doc.name, label: row.label,
-    createdAt: row.createdAt, redeemedAt: row.redeemedAt, lastUsedAt: row.lastUsedAt,
-    projectId: row.projectId ?? null,
-  };
+  return fromRow(row, doc.name);
 }
 
 export async function touchConnection(code: string): Promise<void> {
@@ -170,7 +215,10 @@ export async function listConnections(docId: string): Promise<Omit<Connection, '
   return (await store.loadConnections(docId))
     .filter((c) => !c.revoked)
     .sort((a, b) => b.createdAt - a.createdAt)
-    .map(({ revoked, ...rest }) => { void revoked; return { ...rest, projectId: rest.projectId ?? null }; });
+    .map((row) => {
+      const { docName, ...rest } = fromRow(row, ''); void docName;
+      return { ...rest, ...(rest.expiresAt && rest.expiresAt < Date.now() ? { expired: true } : {}) };
+    });
 }
 
 export async function revokeConnection(code: string): Promise<boolean> {

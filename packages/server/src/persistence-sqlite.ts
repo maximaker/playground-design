@@ -148,6 +148,10 @@ export class SqlitePersistence implements Persistence {
     try {
       const cols = this.db.prepare("PRAGMA table_info('connections')").all() as { name: string }[];
       if (!cols.some((c) => c.name === 'project_id')) this.db.exec('ALTER TABLE connections ADD COLUMN project_id TEXT');
+      // Scoped, expiring links arrived later still.
+      if (!cols.some((c) => c.name === 'expires_at')) this.db.exec('ALTER TABLE connections ADD COLUMN expires_at INTEGER');
+      if (!cols.some((c) => c.name === 'read_only')) this.db.exec('ALTER TABLE connections ADD COLUMN read_only INTEGER');
+      if (!cols.some((c) => c.name === 'section_ids')) this.db.exec('ALTER TABLE connections ADD COLUMN section_ids TEXT');
     } catch { /* fresh database: created below or above with the column */ }
   }
 
@@ -186,12 +190,15 @@ export class SqlitePersistence implements Persistence {
 
   async saveConnection(c: StoredConnection): Promise<void> {
     this.db.prepare(`
-      INSERT INTO connections (code, doc_id, label, created_at, redeemed_at, last_used_at, revoked, project_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO connections (code, doc_id, label, created_at, redeemed_at, last_used_at, revoked, project_id,
+        expires_at, read_only, section_ids)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(code) DO UPDATE SET redeemed_at = excluded.redeemed_at,
         last_used_at = excluded.last_used_at, revoked = excluded.revoked,
-        doc_id = excluded.doc_id, project_id = excluded.project_id
-    `).run(c.code, c.docId, c.label, c.createdAt, c.redeemedAt, c.lastUsedAt, c.revoked ? 1 : 0, c.projectId ?? null);
+        doc_id = excluded.doc_id, project_id = excluded.project_id,
+        expires_at = excluded.expires_at, read_only = excluded.read_only, section_ids = excluded.section_ids
+    `).run(c.code, c.docId, c.label, c.createdAt, c.redeemedAt, c.lastUsedAt, c.revoked ? 1 : 0, c.projectId ?? null,
+      c.expiresAt ?? null, c.readOnly ? 1 : 0, c.sectionIds?.length ? JSON.stringify(c.sectionIds) : null);
   }
 
   async loadConnections(docId?: string): Promise<StoredConnection[]> {
@@ -440,6 +447,9 @@ function toConnection(row: Record<string, unknown>): StoredConnection {
     lastUsedAt: row.last_used_at === null ? null : Number(row.last_used_at),
     revoked: Number(row.revoked) === 1,
     projectId: (row.project_id as string | null | undefined) ?? null,
+    expiresAt: row.expires_at === null || row.expires_at === undefined ? null : Number(row.expires_at),
+    readOnly: Number(row.read_only ?? 0) === 1,
+    sectionIds: typeof row.section_ids === 'string' ? JSON.parse(row.section_ids) as string[] : null,
   };
 }
 

@@ -55,7 +55,7 @@ import { importUrl, ImportError } from './import.ts';
 import { importUrlLive, tokenise, tokensFromVars } from './import-live.ts';
 import { getTemplate, templateSummaries } from './templates.ts';
 import {
-  touchConnection, switchConnectionDocument, projectDocuments, ConnectionError, type Connection,
+  touchConnection, revokeConnection, switchConnectionDocument, projectDocuments, ConnectionError, type Connection,
 } from './connections.ts';
 
 // ---------------------------------------------------------------------------
@@ -657,7 +657,105 @@ function agentOrigin(ctx: McpContext): OpEnvelope['origin'] {
  */
 const activeBatch = new Map<string, string>();
 
+// ---------------------------------------------------------------------------
+// Scoped links: read-only and section-limited connections
+// ---------------------------------------------------------------------------
+
+/** Tools a read-only link may still call: reading, commenting, presence and its own revocation. */
+const READ_ONLY_ALLOWED = new Set([
+  'create_comment', 'reply_to_comment', 'resolve_comment', 'list_toolsets', 'use_toolset', 'batch',
+  'revoke_connection', 'connection_info', 'start_working_on_nodes', 'finish_working_on_nodes', 'export',
+  'switch_document', 'list_documents', 'set_current_page', 'mark_checkpoint',
+]);
+const READ_NAME = /^(get_|list_|find_|lint_|check_|changes_since$|preview_)/;
+
+/** Document-wide changes a section-limited link may not make. */
+const SECTION_SCOPE_BLOCKED = new Set([
+  'set_tokens', 'sync_tokens_from_code', 'create_page', 'delete_page', 'rename_page', 'set_breakpoints',
+  'apply_template', 'import_url', 'create_artboard', 'publish_page', 'unpublish_page', 'publish_handoff',
+  'unpublish_handoff', 'create_section', 'delete_section', 'edit_board', 'write_diagram', 'register_code_component',
+  'remove_code_component',
+]);
+
+/** Argument keys that name nodes. */
+const NODE_KEYS = new Set(['id', 'ids', 'targetId', 'nodeId', 'nodeIds', 'parentId', 'within', 'instanceId', 'artboardId', 'source']);
+
+function scopedArtboards(ctx: McpContext, doc: CanvasDocument): Set<NodeId> | null {
+  const ids = ctx.connection.sectionIds;
+  if (!ids?.length) return null;
+  const out = new Set<NodeId>();
+  for (const page of doc.pages) for (const s of page.sections ?? []) if (ids.includes(s.id)) s.artboards.forEach((a) => out.add(a));
+  return out;
+}
+
+/** Whether a node is inside the link's sections. Nodes on no page (component definitions) are shared. */
+function nodeInScope(doc: CanvasDocument, allowed: Set<NodeId>, id: NodeId): boolean {
+  if (!doc.nodes[id]) return true; // unknown ids fail on their own with a better message
+  const board = artboardOf(doc, id);
+  if (!board) return true;
+  return allowed.has(board) && doc.pages.some((p) => p.artboards.includes(board));
+}
+
+function nodeIdsIn(value: unknown, key?: string, out: string[] = []): string[] {
+  if (typeof value === 'string') { if (key && NODE_KEYS.has(key)) out.push(value); return out; }
+  if (Array.isArray(value)) { for (const v of value) nodeIdsIn(v, key, out); return out; }
+  if (value && typeof value === 'object') for (const [k, v] of Object.entries(value)) nodeIdsIn(v, k, out);
+  return out;
+}
+
+/** Why this call is not allowed on this link, or null. */
+function accessDenied(ctx: McpContext, tool: string, readOnlyHint: boolean, args: unknown): string | null {
+  const c = ctx.connection;
+  if (c.readOnly && !readOnlyHint && !READ_NAME.test(tool) && !READ_ONLY_ALLOWED.has(tool)) {
+    return `This connection link is read-only: ${tool} changes the document. It can read, screenshot and comment. Ask for a link with edit access.`;
+  }
+  if (c.sectionIds?.length) {
+    if (SECTION_SCOPE_BLOCKED.has(tool)) {
+      return `This connection link is limited to ${c.sectionIds.length === 1 ? 'one section' : `${c.sectionIds.length} sections`}; ${tool} changes the whole document.`;
+    }
+    const doc = getDocument(c.docId);
+    const allowed = doc ? scopedArtboards(ctx, doc) : null;
+    if (doc && allowed) {
+      const outside = nodeIdsIn(args).filter((id) => !nodeInScope(doc, allowed, id));
+      if (outside.length) {
+        return `Out of scope: ${outside.slice(0, 5).join(', ')} ${outside.length === 1 ? 'is' : 'are'} not in the section(s) this link covers `
+          + `(${c.sectionIds.join(', ')}). list_sections shows which screens are.`;
+      }
+    }
+  }
+  return null;
+}
+
+/** The last line of defence: the ops themselves, whatever tool produced them. */
+function checkOpsAllowed(ctx: McpContext, doc: CanvasDocument, ops: Op[]): void {
+  const c = ctx.connection;
+  if (c.readOnly && !ops.every((op) => op.t === 'comment' || op.t === 'decision')) {
+    throw new Error('This connection link is read-only; it can comment but not change the design.');
+  }
+  const allowed = scopedArtboards(ctx, doc);
+  if (!allowed) return;
+  const inScope = (id: NodeId | null | undefined) => !id || nodeInScope(doc, allowed, id);
+  const deny = (what: string) => { throw new Error(`Out of scope for this section-limited link: ${what}.`); };
+  for (const op of ops) {
+    switch (op.t) {
+      case 'insert':
+        if (op.parent === null && op.page !== DEFINITIONS_PAGE) deny('adding artboards');
+        if (!inScope(op.parent)) deny(`writing into ${op.parent}`);
+        break;
+      case 'remove': for (const id of op.ids) if (!inScope(id)) deny(`deleting ${id}`); break;
+      case 'move': for (const m of op.moves) if (!inScope(m.id) || (m.parent === null ? true : !inScope(m.parent))) deny(`moving ${m.id}`); break;
+      case 'styles': case 'text': case 'rename': case 'attrs': case 'meta': case 'tag': case 'props': case 'override':
+        for (const u of op.updates) if (!inScope(u.id)) deny(`changing ${u.id}`);
+        break;
+      case 'section': if (!c.sectionIds!.includes(op.section.id)) deny('another section'); break;
+      case 'comment': case 'decision': case 'note': case 'component': case 'variant': break;
+      default: deny(`a document-wide change (${op.t})`);
+    }
+  }
+}
+
 function commit(ctx: McpContext, ops: Op[], batch = activeBatch.get(ctx.connection.code) ?? batchId()): void {
+  if (ctx.connection.readOnly || ctx.connection.sectionIds?.length) checkOpsAllowed(ctx, requireDoc(ctx), ops);
   const origin = agentOrigin(ctx);
   applyOps(ctx.connection.docId, ops.map((op) => ({ op, origin, batch })));
 }
@@ -819,6 +917,13 @@ export function buildMcpServer(ctx: McpContext): McpServer {
         inputSchema: z.object(config.inputSchema as z.ZodRawShape).strict(),
       };
     }
+    // Scoped links are checked before any tool runs, so a refusal names the reason.
+    const inner = rest[rest.length - 1] as (args: unknown, extra: unknown) => Promise<unknown>;
+    const readOnlyHint = !!(rest[0] as { annotations?: { readOnlyHint?: boolean } } | undefined)?.annotations?.readOnlyHint;
+    rest[rest.length - 1] = async (args: unknown, extra: unknown) => {
+      const denied = accessDenied(ctx, name, readOnlyHint, args);
+      return denied ? fail(denied) : inner(args, extra);
+    };
     const handle = (register as (...args: unknown[]) => Handle)(name, ...rest);
     handles.set(name, handle);
     const cb = rest[rest.length - 1] as (args: unknown, extra: unknown) => Promise<unknown>;
@@ -4888,6 +4993,35 @@ function registerSessionTools(server: McpServer, ctx: McpContext): void {
       current,
       documents: docs.map((d) => ({ ...d, current: d.id === current })),
     });
+  }));
+
+  server.registerTool('connection_info', {
+    title: 'What this link can do',
+    description: 'This connection\u2019s label, scope (document, project or sections), whether it is read-only, and when it expires.',
+    inputSchema: {},
+    annotations: { readOnlyHint: true },
+  }, async () => guard(() => {
+    const c = ctx.connection;
+    return json({
+      label: c.label, document: { id: c.docId, name: c.docName },
+      scope: c.projectId ? 'project' : c.sectionIds?.length ? 'sections' : 'document',
+      ...(c.sectionIds?.length ? { sectionIds: c.sectionIds } : {}),
+      readOnly: c.readOnly,
+      expiresAt: c.expiresAt ? new Date(c.expiresAt).toISOString() : null,
+    });
+  }));
+
+  server.registerTool('revoke_connection', {
+    title: 'Revoke this connection link',
+    description:
+      'Ends this link for good once the work is done, so it cannot be used again by anyone. Every later call, '
+      + 'from this session or any other, fails. Only the link you are connected with can be revoked here.',
+    inputSchema: { confirm: z.literal(true).describe('Pass true; there is no undo.') },
+    annotations: { destructiveHint: true },
+  }, async () => guard(async () => {
+    await revokeConnection(ctx.connection.code);
+    for (const [id, s] of sessions) if (s.code === ctx.connection.code) sessions.delete(id);
+    return json({ revoked: true, note: 'This link no longer works. Ask the person for a new one if more work is needed.' });
   }));
 
   server.registerTool('switch_document', {
