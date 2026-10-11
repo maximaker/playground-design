@@ -163,14 +163,9 @@ function Thread({ children }: { children: ReactNode }) {
   return <div ref={ref} className={`comment-thread${left ? ' is-left' : ''}`}>{children}</div>;
 }
 
-/**
- * Whether an agent started this thread. Replies have always said so (`kind`);
- * threads are newer, and the field is read loosely so a document written by a
- * server that names it differently still shows the badge rather than nothing.
- */
+/** Whether an agent started this thread; its label is the comment's author. */
 export function isAgentThread(c: Comment): boolean {
-  const x = c as Comment & { authorKind?: string; agent?: unknown; origin?: { kind?: string } };
-  return x.authorKind === 'agent' || !!x.agent || x.origin?.kind === 'agent';
+  return c.authorKind === 'agent';
 }
 
 function Entry({ author, text, at, agent }: { author: string; text: string; at: number; agent?: boolean }) {

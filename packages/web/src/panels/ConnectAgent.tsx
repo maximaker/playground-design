@@ -18,8 +18,9 @@ interface ConnectionRow {
   /** Scoped, expiring links. Absent on servers that predate them. */
   expiresAt?: number | null;
   readOnly?: boolean;
-  scope?: LinkScope;
+  sectionIds?: string[] | null;
   projectId?: string | null;
+  expired?: boolean;
 }
 
 type LinkScope =
@@ -28,6 +29,8 @@ type LinkScope =
   | { kind: 'sections'; sectionIds: string[] };
 
 type Expiry = '1h' | '1d' | '7d' | 'never';
+
+const EXPIRY_HOURS: Record<Expiry, number | undefined> = { '1h': 1, '1d': 24, '7d': 168, never: undefined };
 
 const EXPIRY_LABELS: Record<Expiry, string> = { '1h': '1 hour', '1d': '1 day', '7d': '7 days', never: 'Never' };
 
@@ -119,7 +122,13 @@ export function ConnectAgent({ onClose }: { onClose: () => void }) {
       const scope: LinkScope = scopeKind === 'project' && projectId
         ? { kind: 'project', projectId }
         : scopeKind === 'sections' && sectionIds.length ? { kind: 'sections', sectionIds } : { kind: 'document' };
-      const options = supported ? { expiresIn: expiry, readOnly, scope } : {};
+      const options = supported
+        ? {
+            expiresInHours: EXPIRY_HOURS[expiry],
+            readOnly,
+            ...(scope.kind === 'sections' ? { scope: 'sections', sectionIds: scope.sectionIds } : {}),
+          }
+        : {};
       const url = supported && scope.kind === 'project'
         ? `/api/projects/${scope.projectId}/connections`
         : `/api/documents/${docId}/connections`;
@@ -296,15 +305,16 @@ export function ConnectAgent({ onClose }: { onClose: () => void }) {
                     <strong>
                       {c.label ?? 'Agent'}
                       {c.readOnly && <span className="connect-tag">read-only</span>}
-                      {c.scope && c.scope.kind !== 'document' && (
-                        <span className="connect-tag">{c.scope.kind === 'project' ? 'project' : `${c.scope.sectionIds.length} section${c.scope.sectionIds.length === 1 ? '' : 's'}`}</span>
+                      {c.projectId && <span className="connect-tag">project</span>}
+                      {!c.projectId && c.sectionIds && (
+                        <span className="connect-tag">{c.sectionIds.length} section{c.sectionIds.length === 1 ? '' : 's'}</span>
                       )}
                     </strong>
                     <span className="dim">
                       {c.redeemedAt
                         ? `last used ${relative(c.lastUsedAt ?? c.redeemedAt)}`
                         : 'expiresAt' in c ? 'not used yet' : 'not used yet — stops working 30 minutes after it was made'}
-                      {'expiresAt' in c && ` · ${expiryText(c.expiresAt ?? null)}`}
+                      {'expiresAt' in c && ` · ${c.expired ? 'expired' : expiryText(c.expiresAt ?? null)}`}
                     </span>
                   </div>
                   <button className="button subtle" onClick={() => revoke(c.code)}>Revoke</button>
