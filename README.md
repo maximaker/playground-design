@@ -214,8 +214,8 @@ Artifactory's origin gets an answer that allows the session cookie.
 | `update_styles` | Batch CSS, with `:hover` / `@media` variants via `selector` |
 | `set_text_content` | Batch text |
 | `rename_nodes` / `set_attributes` | Batch |
-| `move_nodes` | Reparent and reorder, preserving ids |
-| `duplicate_nodes` | Deep clone; returns a full old→new id map |
+| `move_nodes` | Reparent and reorder, preserving ids; artboards take `x`/`y` and `pageId` to move across pages. Returns `{ ids, map }` |
+| `duplicate_nodes` | Deep clone, artboards onto any page (`pageId`, `x`/`y`); returns `{ ids, map }` — new root ids and one old→new id map for every descendant |
 | `delete_nodes` | Cascades to descendants |
 | `set_tokens` | Add or update tokens. Any group name works beyond the built-in six, and a value of `{color.lime}` aliases another token (emitted as `var(--color-lime)`) |
 | `set_selection` | Select nodes in the human's browser and scroll them into view |

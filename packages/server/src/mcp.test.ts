@@ -1288,3 +1288,32 @@ test('batch runs steps in order, stops on error, and is one history entry', asyn
   assert.equal(all.failed, 2);
   await agent.close();
 });
+
+test('artboards move and copy across pages with { ids, map }', async () => {
+  const { id, agent, call } = await freshAgent('Cross page');
+  const doc0 = getDocument(id)!;
+  const board = doc0.pages[0]!.artboards[0]!;
+  await call('write_html', { targetId: board, html: '<p>Hi</p>' });
+  const page = await call<{ id?: string; pageId?: string }>('create_page', { name: 'Two' });
+  const pageId = page.pageId ?? page.id!;
+  const target = getDocument(id)!.pages.find((p) => p.id === pageId)!;
+  const existing = target.artboards.length;
+
+  const dup = await call<{ ids: string[]; map: Record<string, string> }>('duplicate_nodes', { ids: [board], pageId });
+  let doc = getDocument(id)!;
+  const copy = dup.ids[0]!;
+  assert.equal(dup.map[board], copy);
+  assert.ok(Object.keys(dup.map).length >= 2, 'map covers descendants');
+  assert.ok(doc.pages.find((p) => p.id === pageId)!.artboards.includes(copy));
+  assert.equal(doc.pages.find((p) => p.id === pageId)!.artboards.length, existing + 1);
+
+  const moved = await call<{ ids: string[]; map: Record<string, string> }>('move_nodes', { moves: [{ id: board, pageId, y: 40 }] });
+  assert.deepEqual(moved.ids, [board]);
+  assert.equal(moved.map[board], board);
+  doc = getDocument(id)!;
+  assert.ok(!doc.pages[0]!.artboards.includes(board));
+  assert.ok(doc.pages.find((p) => p.id === pageId)!.artboards.includes(board));
+  assert.equal(doc.nodes[board]!.attrs['data-y'], '40');
+  assert.ok(Number(doc.nodes[board]!.attrs['data-x']) > Number(doc.nodes[copy]!.attrs['data-x']), 'placed clear of the copy');
+  await agent.close();
+});
