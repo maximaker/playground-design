@@ -60,15 +60,15 @@ export const NoteCard = memo(function NoteCard({ note }: Props) {
 
   return (
     <div
-      className={`note${isSelected ? ' is-selected' : ''} note-${note.status}`}
+      className={`note${collapsed ? ' is-collapsed' : ''}${isSelected ? ' is-selected' : ''} note-${note.status}`}
       data-note-id={note.id}
       style={{
         left: note.x * zoom,
         top: note.y * zoom,
-        width: note.width * zoom,
+        width: collapsed ? Math.max(28, note.width * zoom) : note.width * zoom,
         // The card's type scales with the canvas so it stays in proportion.
         // Height is clamped when collapsed so a marker cannot grow unbounded.
-        height: collapsed ? note.height * zoom : 'auto',
+        height: collapsed ? Math.max(28, note.height * zoom) : 'auto',
         minHeight: collapsed ? undefined : note.height * zoom,
         background: colors.bg,
         borderColor: isSelected ? 'var(--accent)' : colors.border,
@@ -77,13 +77,30 @@ export const NoteCard = memo(function NoteCard({ note }: Props) {
         padding: collapsed ? 0 : 10 * zoom,
         borderRadius: Math.max(2, 8 * zoom),
       }}
-      onPointerDown={(e) => { e.stopPropagation(); selectNote(note.id); }}
+      onPointerDown={(e) => {
+        selectNote(note.id);
+        // With the move tool the canvas turns this into a drag, so let it
+        // through; any other tool would draw on top of the card instead.
+        if (useCanvas.getState().tool !== 'move' || e.button) e.stopPropagation();
+      }}
       onDoubleClick={(e) => { e.stopPropagation(); setEditing(true); }}
     >
       {collapsed ? (
-        <span className="note-collapsed" title={note.text}>
-          <Icon name={note.status === 'done' ? 'check' : note.status === 'idle' ? 'note' : 'agent'} size={Math.max(6, 14 * zoom)} />
-        </span>
+        <>
+          <span className="note-collapsed" title={note.text ? `${note.text}
+
+Drag to move` : 'Drag to move'}>
+            <span className="note-grip" aria-hidden>⠿</span>
+            <Icon name={note.status === 'done' ? 'check' : note.status === 'idle' ? 'note' : 'agent'} size={Math.max(10, 14 * zoom)} />
+          </span>
+          <button
+            className="note-collapsed-delete"
+            title="Delete note"
+            aria-label="Delete note"
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => { e.stopPropagation(); remove(); }}
+          ><Icon name="close" size={10} /></button>
+        </>
       ) : (
         <>
       <header className="note-header" style={{ gap: 4 * zoom }}>
@@ -94,7 +111,7 @@ export const NoteCard = memo(function NoteCard({ note }: Props) {
           {note.status === 'idle' && (note.author ?? 'Note')}
         </span>
         {isSelected && (
-          <button className="note-close" onClick={(e) => { e.stopPropagation(); remove(); }} title="Delete note">✕</button>
+          <button className="note-close" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); remove(); }} title="Delete note">✕</button>
         )}
       </header>
 

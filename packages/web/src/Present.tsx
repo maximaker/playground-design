@@ -16,8 +16,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import type { NodeId } from '@playground/shared';
-import { getArtboardPosition, getArtboardSize, makeComment } from '@playground/shared';
+import type { BoardSide, CanvasDocument, NodeId, Page } from '@playground/shared';
+import { boardOf, getArtboardPosition, getArtboardSize, makeComment } from '@playground/shared';
 import { useCanvas, getDoc, getNodeById } from './state/store.ts';
 import { useArtboardFrame } from './canvas/frame.ts';
 import { NodeView } from './canvas/NodeView.tsx';
@@ -65,6 +65,10 @@ export function Present() {
   );
   const index = Math.min(present?.index ?? 0, Math.max(0, frames.length - 1));
   const current = frames[index];
+  const links = useMemo(
+    () => (doc && page && current ? linksFrom(doc, page, current, frames) : []),
+    [doc, page, current, frames],
+  );
 
   const go = useCallback((next: number) => {
     if (!present) return;
@@ -226,6 +230,18 @@ export function Present() {
           // comments are on, where a click is where the comment goes.
           if (showComments) return;
           if ((e.target as HTMLElement).closest('.present-bar')) return;
+          // A screen that the board connects onward is a prototype: a click
+          // follows the connector nearest to where you clicked, not the deck.
+          const frameEl = (e.target as HTMLElement).closest<HTMLElement>('.present-frame');
+          if (frameEl && links.length) {
+            const r = frameEl.getBoundingClientRect();
+            const px = (e.clientX - r.left) / r.width;
+            const py = (e.clientY - r.top) / r.height;
+            const nearest = links
+              .map((l) => ({ l, d: Math.hypot(SIDE_POINT[l.side].x - px, SIDE_POINT[l.side].y - py) }))
+              .sort((a, b) => a.d - b.d)[0]!.l;
+            return go(nearest.index);
+          }
           go(index + 1);
         }}
       >
@@ -236,6 +252,8 @@ export function Present() {
           scale={scale}
           scaling={scaling}
           comments={showComments}
+          links={showComments ? EMPTY : links}
+          onLink={go}
         />
       </div>
 
@@ -321,8 +339,9 @@ export function Present() {
  * against 1440px, so what is on screen is the desktop layout made small and not
  * the mobile layout.
  */
-function PresentFrame({ id, width, height, scale, scaling, comments }: {
+function PresentFrame({ id, width, height, scale, scaling, comments, links, onLink }: {
   id: NodeId; width: number; height: number; scale: number; scaling: Scaling; comments: boolean;
+  links: Link[]; onLink: (index: number) => void;
 }) {
   const { frameRef, body } = useArtboardFrame(id, true, { register: false });
   const node = getNodeById(id);
@@ -390,6 +409,27 @@ function PresentFrame({ id, width, height, scale, scaling, comments }: {
         {body && createPortal(<NodeView id={id} isRoot />, body)}
       </div>
 
+      {links.length > 0 && (
+        <div className="present-links">
+          {SIDES.map((side) => {
+            const here = links.filter((l) => l.side === side);
+            if (!here.length) return null;
+            return (
+              <div key={side} className={`present-link-group is-${side}`}>
+                {here.map((l) => (
+                  <button
+                    key={l.id}
+                    className="present-link"
+                    onClick={(e) => { e.stopPropagation(); onLink(l.index); }}
+                    title={`Go to ${l.targetName}`}
+                  >{l.label || l.targetName} <span aria-hidden>→</span></button>
+                ))}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
       {comments && (
         <div
           className="present-comments"
@@ -415,4 +455,53 @@ async function toggleFullscreen(): Promise<void> {
   } catch {
     // Denied by the browser, or unsupported. The view is already full-window.
   }
+}
+
+/** A connector on the board read as a prototype link out of the current screen. */
+interface Link { id: string; index: number; label?: string; targetName: string; side: BoardSide }
+
+const SIDES: BoardSide[] = ['top', 'right', 'bottom', 'left'];
+/** Where each side's hotspot sits, as a fraction of the frame. */
+const SIDE_POINT: Record<BoardSide, { x: number; y: number }> = {
+  top: { x: 0.5, y: 0 }, right: { x: 1, y: 0.5 }, bottom: { x: 0.5, y: 1 }, left: { x: 0, y: 0.5 },
+};
+
+/**
+ * The connectors that leave `from` for another frame on the page — and the
+ * double-headed ones that arrive at it, which go both ways. The side is the
+ * one the connector leaves from, given or worked out the way the board does.
+ */
+function linksFrom(doc: CanvasDocument, page: Page, from: NodeId, frames: NodeId[]): Link[] {
+  const out: Link[] = [];
+  for (const item of boardOf(page)) {
+    if (item.type !== 'connector' || item.from.kind !== 'artboard' || item.to.kind !== 'artboard') continue;
+    let target: NodeId | null = null;
+    let side: BoardSide | undefined;
+    // Going back along a two-way connector, its label names the forward step
+    // ("Pay"), so the hint names where you are going instead.
+    let reverse = false;
+    if (item.from.id === from) { target = item.to.id; side = item.fromSide; }
+    else if (item.to.id === from && item.arrow === 'both') { target = item.from.id; side = item.toSide; reverse = true; }
+    if (!target || target === from) continue;
+    const index = frames.indexOf(target);
+    const a = doc.nodes[from];
+    const b = doc.nodes[target];
+    if (index < 0 || !a || !b) continue;
+    out.push({
+      id: item.id, index, label: reverse ? undefined : item.label?.trim() || undefined,
+      targetName: b.name ?? 'Next screen',
+      side: side ?? facing(a, b),
+    });
+  }
+  return out;
+}
+
+function facing(a: Parameters<typeof getArtboardSize>[0], b: Parameters<typeof getArtboardSize>[0]): BoardSide {
+  const pa = getArtboardPosition(a), sa = getArtboardSize(a);
+  const pb = getArtboardPosition(b), sb = getArtboardSize(b);
+  const gapX = Math.max(pb.x - (pa.x + sa.width), pa.x - (pb.x + sb.width));
+  const gapY = Math.max(pb.y - (pa.y + sa.height), pa.y - (pb.y + sb.height));
+  const ca = { x: pa.x + sa.width / 2, y: pa.y + sa.height / 2 };
+  const cb = { x: pb.x + sb.width / 2, y: pb.y + sb.height / 2 };
+  return gapX >= gapY ? (cb.x >= ca.x ? 'right' : 'left') : (cb.y >= ca.y ? 'bottom' : 'top');
 }

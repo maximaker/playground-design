@@ -1182,7 +1182,19 @@ code { font-family: var(--mono); font-size: 0.92em; }
 .note-swatch { width: 12px; height: 12px; border-radius: 50%; border: 1.5px solid; padding: 0; }
 .note-swatch.is-active { box-shadow: 0 0 0 1.5px rgba(0,0,0,.55); }
 .note-targets { font-size: .8em; opacity: .65; }
-.note-collapsed { display: grid; place-items: center; width: 100%; height: 100%; opacity: .7; }
+.note-collapsed { display: flex; align-items: center; justify-content: center; gap: 2px; width: 100%; height: 100%; opacity: .75; cursor: grab; }
+.note.is-collapsed { overflow: visible; cursor: grab; }
+.note.is-collapsed:active { cursor: grabbing; }
+.note-grip { font-size: 11px; line-height: 1; opacity: .6; }
+/* Delete without having to zoom in and expand the card first. */
+.note-collapsed-delete {
+  position: absolute; top: -8px; right: -8px; width: 18px; height: 18px;
+  display: none; place-items: center; padding: 0; border-radius: 999px;
+  background: var(--bg-raised); color: var(--fg-muted); border: 1px solid var(--border-strong);
+  box-shadow: var(--shadow); cursor: pointer;
+}
+.note.is-collapsed:hover .note-collapsed-delete, .note.is-collapsed.is-selected .note-collapsed-delete { display: grid; }
+.note-collapsed-delete:hover { color: var(--danger); }
 
 /* --- Gradient editor ----------------------------------------------------- */
 
@@ -2155,6 +2167,22 @@ code { font-family: var(--mono); font-size: 0.92em; }
 
 .agent-change-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .agent-change-step { display: flex; align-items: center; gap: var(--s1); flex: 0 0 auto; }
+/* Secondary on purpose: a text link, not a button, so it is never the obvious click. */
+.agent-change-undo {
+  flex: 0 0 auto; background: none; border: 0; padding: var(--s1);
+  color: var(--fg-muted); font: inherit; font-size: 0.78rem; cursor: pointer;
+  text-decoration: underline; text-underline-offset: 2px;
+}
+.agent-change-undo:hover { color: var(--danger); }
+.agent-change-confirm { display: flex; align-items: center; gap: var(--s2); flex: 0 0 auto; white-space: nowrap; }
+.button.danger { background: var(--danger); border-color: var(--danger); color: #fff; }
+.button.danger:hover { filter: brightness(1.08); }
+
+/* Follow agent: a quiet toggle and a hint, never a jump you did not ask for. */
+.agent-banner .agent-follow { margin-left: auto; display: flex; align-items: center; gap: var(--s3); flex: 0 0 auto; }
+.agent-banner .agent-goto { background: none; border: 0; padding: 0; font: inherit; color: var(--accent); cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+.agent-banner label { display: flex; align-items: center; gap: var(--s1); color: var(--fg-muted); font-size: 0.8rem; cursor: pointer; }
+.page-row .page-count { margin-left: auto; font-variant-numeric: tabular-nums; }
 
 /* Library: projects beside documents -------------------------------------- */
 
@@ -3091,6 +3119,23 @@ code { font-family: var(--mono); font-size: 0.92em; }
   background: rgba(32, 32, 38, 0.9); border: 1px solid rgba(255, 255, 255, 0.12);
   font-size: 0.78rem; color: rgba(255, 255, 255, 0.78);
 }
+/* Prototype links: the board's connectors, as tappable hints just inside the edge they
+   leave from — inside, because a frame fitted to the window has no room outside it. */
+.present-links { position: absolute; inset: 0; pointer-events: none; }
+.present-link-group { position: absolute; display: flex; gap: var(--s2); pointer-events: none; }
+.present-link-group.is-right { right: var(--s3); top: 50%; transform: translateY(-50%); flex-direction: column; align-items: flex-end; }
+.present-link-group.is-left { left: var(--s3); top: 50%; transform: translateY(-50%); flex-direction: column; align-items: flex-start; }
+.present-link-group.is-top { top: var(--s3); left: 50%; transform: translateX(-50%); }
+.present-link-group.is-bottom { bottom: var(--s3); left: 50%; transform: translateX(-50%); }
+.present-link {
+  pointer-events: auto; white-space: nowrap; cursor: pointer;
+  padding: 0.3rem var(--s3); border-radius: var(--radius-pill);
+  background: rgba(32, 32, 38, 0.9); border: 1px solid rgba(255, 255, 255, 0.18);
+  color: #fff; font: inherit; font-size: 0.78rem;
+  transition: opacity var(--transition-slow);
+}
+.present-link:hover { background: var(--accent); border-color: var(--accent); }
+.present.is-idle .present-link { opacity: 0.45; }
 .present.is-idle .present-hint { opacity: 0; transition: opacity var(--transition-slow); }
 
 /* ---------------------------------------------------------------------------

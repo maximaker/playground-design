@@ -65,6 +65,10 @@ export interface AgentChange {
   ops: number;
 }
 
+function readFollowAgent(): boolean {
+  try { return localStorage.getItem('pg.followAgent') === '1'; } catch { return false; }
+}
+
 export interface AgentActivity {
   active: boolean;
   agent: string;
@@ -258,6 +262,8 @@ interface CanvasState {
   redoStack: UndoEntry[];
 
   agentActivity: AgentActivity | null;
+  /** Jump to the page an agent is working on. Off unless the user turns it on. */
+  followAgent: boolean;
   toasts: Toast[];
 
   /** Set by the socket layer; sends ops to the server. */
@@ -328,6 +334,7 @@ interface CanvasActions {
   setPage(id: string): void;
 
   setAgentActivity(a: AgentActivity | null): void;
+  setFollowAgent(v: boolean): void;
   toast(message: string, tone?: Toast['tone']): void;
   dismissToast(id: string): void;
 }
@@ -452,12 +459,18 @@ export const useCanvas = create<CanvasState & CanvasActions>((set, get) => ({
   undoStack: [],
   redoStack: [],
   agentActivity: null,
+  followAgent: readFollowAgent(),
   toasts: [],
   send: null,
 
   loadDocument(doc) {
+    // A resync of the same document keeps you on the page you were looking at:
+    // being thrown back to the first page because the server resent the
+    // document reads as the editor jumping around on its own.
+    const prevPage = get().docId === doc.id ? get().pageId : null;
+    const keep = prevPage && doc.pages.some((p) => p.id === prevPage);
     set({
-      doc, docId: doc.id, rev: doc.rev, pageId: doc.pages[0]?.id ?? null,
+      doc, docId: doc.id, rev: doc.rev, pageId: keep ? prevPage : doc.pages[0]?.id ?? null,
       version: get().version + 1, selection: [], undoStack: [], redoStack: [],
       nodeVersions: {}, structureVersion: get().structureVersion + 1,
       styleEpoch: get().styleEpoch + 1,
@@ -765,6 +778,10 @@ export const useCanvas = create<CanvasState & CanvasActions>((set, get) => ({
   setPage(pageId) { set({ pageId, selection: [] }); },
 
   setAgentActivity(agentActivity) { set({ agentActivity }); },
+  setFollowAgent(followAgent) {
+    try { localStorage.setItem('pg.followAgent', followAgent ? '1' : '0'); } catch { /* private mode */ }
+    set({ followAgent });
+  },
 
   toast(message, tone = 'info') {
     const id = `t_${Math.random().toString(36).slice(2, 8)}`;

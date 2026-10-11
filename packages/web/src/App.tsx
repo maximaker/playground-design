@@ -201,6 +201,19 @@ function Editor({ source, onHome, appearance, onAppearance, session }: {
   const transport = useCanvas((s) => s.transport);
   const agentActivity = useCanvas((s) => s.agentActivity);
   const dispatch = useCanvas((s) => s.dispatch);
+  const followAgent = useCanvas((s) => s.followAgent);
+  const setFollowAgent = useCanvas((s) => s.setFollowAgent);
+
+  // The page the agent is on, worked out from the artboards it says it is touching.
+  const agentPage = agentActivity?.active && doc
+    ? doc.pages.find((p) => agentActivity.artboards.some((id) => p.artboards.includes(id))) ?? null
+    : null;
+
+  // Following is opt-in. Unasked, the editor stays where you are and the
+  // banner offers the jump instead.
+  useEffect(() => {
+    if (followAgent && agentPage && agentPage.id !== useCanvas.getState().pageId) setPage(agentPage.id);
+  }, [followAgent, agentPage?.id, setPage]);
 
   const [leftTab, setLeftTab] = useState<LeftTab>('layers');
 
@@ -549,7 +562,18 @@ function Editor({ source, onHome, appearance, onAppearance, session }: {
         <div className="agent-banner">
           <span className="pulse" />
           <strong>{agentActivity.agent}</strong>
-          {agentActivity.summary ? ` — ${agentActivity.summary}` : ' is working on this document'}
+          {agentPage
+            ? <> is working on {agentPage.name}{agentActivity.summary ? ` — ${agentActivity.summary}` : ''}</>
+            : agentActivity.summary ? ` — ${agentActivity.summary}` : ' is working on this document'}
+          <span className="agent-follow">
+            {agentPage && agentPage.id !== pageId && (
+              <button className="agent-goto" onClick={() => setPage(agentPage.id)}>Go there</button>
+            )}
+            <label title="Jump to whatever page the agent is working on">
+              <input type="checkbox" checked={followAgent} onChange={(e) => setFollowAgent(e.target.checked)} />
+              Follow agent
+            </label>
+          </span>
         </div>
       )}
 
@@ -592,7 +616,7 @@ function Editor({ source, onHome, appearance, onAppearance, session }: {
                     onClick={() => setPage(p.id)}
                   >
                     {p.name}
-                    <span className="dim">{p.artboards.length}</span>
+                    <PageCount page={p} />
                   </button>
                 ))}
                 <button
@@ -733,4 +757,24 @@ function Toasts() {
       ))}
     </div>
   );
+}
+
+/**
+ * Everything on a page, not just its frames: a page of flow diagrams and notes
+ * that read "0" looks empty when it is not.
+ */
+function PageCount({ page }: { page: { artboards: unknown[]; board?: { type: string }[]; notes?: unknown[] } }) {
+  const frames = page.artboards.length;
+  const diagrams = page.board?.filter((b) => b.type !== 'connector').length ?? 0;
+  const links = page.board?.filter((b) => b.type === 'connector').length ?? 0;
+  const notes = page.notes?.length ?? 0;
+  const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? '' : 's'}`;
+  const parts = [
+    plural(frames, 'frame'),
+    diagrams && plural(diagrams, 'diagram shape'),
+    links && plural(links, 'connector'),
+    notes && plural(notes, 'note'),
+  ].filter(Boolean);
+  const total = frames + diagrams + links + notes;
+  return <span className="dim page-count" title={parts.join(' · ')}>{total}</span>;
 }

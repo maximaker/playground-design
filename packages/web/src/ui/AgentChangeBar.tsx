@@ -8,7 +8,9 @@
  *
  * So the changed layers are outlined where they are, and this bar walks you
  * through them one at a time. Taking the whole run back is one action, because
- * the alternative is pressing undo an unknown number of times and hoping.
+ * the alternative is pressing undo an unknown number of times and hoping. It
+ * asks first and names the count: a run can be hundreds of changes, and one
+ * stray click should not take them all back.
  */
 
 import { useEffect, useState } from 'react';
@@ -24,14 +26,17 @@ export function AgentChangeBar() {
   const setViewport = useCanvas((s) => s.setViewport);
 
   const [at, setAt] = useState(0);
+  const [confirming, setConfirming] = useState(false);
 
   // A new run starts the walk over rather than leaving the index pointing at
   // whatever position the last one reached.
-  useEffect(() => { setAt(0); }, [change?.at]);
+  useEffect(() => { setAt(0); setConfirming(false); }, [change?.at]);
 
   if (!change) return null;
 
   const ids = change.nodeIds;
+  // Ops, not layers: that is how many steps "Undo all" actually takes back.
+  const total = change.ops;
 
   const focus = (index: number) => {
     const id = ids[index];
@@ -79,9 +84,19 @@ export function AgentChangeBar() {
         </span>
       )}
 
-      <button className="button subtle" onClick={revert} title="Put everything back the way it was">
-        Undo all
-      </button>
+      {confirming ? (
+        <span className="agent-change-confirm">
+          <span>Undo all {total} change{total === 1 ? '' : 's'}?</span>
+          <button className="button subtle" onClick={() => setConfirming(false)} autoFocus>Keep</button>
+          <button className="button danger" onClick={() => { setConfirming(false); revert(); }}>Undo {total}</button>
+        </span>
+      ) : (
+        <button
+          className="agent-change-undo"
+          onClick={() => setConfirming(true)}
+          title="Put everything back the way it was — asks first"
+        >Undo all…</button>
+      )}
       <button className="icon-button" onClick={dismiss} title="Dismiss" aria-label="Dismiss">
         <Icon name="close" size={14} />
       </button>
