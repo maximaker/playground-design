@@ -463,15 +463,50 @@ function resolveStyles(
 }
 
 /**
- * Matches a *simple* selector (last compound only) against an element. We
- * intentionally ignore combinators: over-applying a descendant rule is a better
- * failure than silently dropping every style the author wrote.
+ * Matches a selector against an element, combinators included: descendant
+ * (` `), child (`>`), adjacent (`+`) and general sibling (`~`). Matching runs
+ * right to left through the parsed tree, the way browsers do — `.nav span`
+ * must not style every span in the document.
  */
 function selectorMatches(el: ParsedElement, selector: string): boolean {
-  const last = selector.split(/[\s>+~]+/).filter(Boolean).pop();
-  if (!last) return false;
-  const compound = last.replace(/::?[\w-]+(\([^)]*\))?/g, '');
-  if (!compound) return true;
+  const tokens = selector.trim().replace(/\s*([>+~])\s*/g, ' $1 ').split(/\s+/).filter(Boolean);
+  if (!tokens.length) return false;
+  // [compound, combinator-to-its-left, compound, …] read from the right.
+  const compounds: string[] = [];
+  const combinators: string[] = [];
+  for (const t of tokens) {
+    if (t === '>' || t === '+' || t === '~') combinators[compounds.length - 1] = t;
+    else { if (compounds.length && combinators[compounds.length - 1] === undefined) combinators[compounds.length - 1] = ' '; compounds.push(t); }
+  }
+  return matchAt(el, compounds, combinators, compounds.length - 1);
+}
+
+type Parentish = { parentNode?: unknown; childNodes?: unknown[] };
+const parentEl = (el: ParsedElement): ParsedElement | null => {
+  const p = (el as unknown as Parentish).parentNode as ParsedElement | undefined;
+  return p && isElement(p) && p.rawTagName ? p : null;
+};
+const prevSiblings = (el: ParsedElement): ParsedElement[] => {
+  const p = (el as unknown as Parentish).parentNode as Parentish | undefined;
+  const kids = (p?.childNodes ?? []).filter(isElement) as ParsedElement[];
+  const i = kids.indexOf(el);
+  return i > 0 ? kids.slice(0, i).reverse() : [];
+};
+
+function matchAt(el: ParsedElement, compounds: string[], combinators: string[], i: number): boolean {
+  if (!compoundMatches(el, compounds[i]!)) return false;
+  if (i === 0) return true;
+  const comb = combinators[i - 1] ?? ' ';
+  if (comb === '>') { const p = parentEl(el); return !!p && matchAt(p, compounds, combinators, i - 1); }
+  if (comb === '+') { const s = prevSiblings(el)[0]; return !!s && matchAt(s, compounds, combinators, i - 1); }
+  if (comb === '~') return prevSiblings(el).some((s) => matchAt(s, compounds, combinators, i - 1));
+  for (let p = parentEl(el); p; p = parentEl(p)) if (matchAt(p, compounds, combinators, i - 1)) return true;
+  return false;
+}
+
+function compoundMatches(el: ParsedElement, raw: string): boolean {
+  const compound = raw.replace(/::?[\w-]+(\([^)]*\))?/g, '');
+  if (!compound || compound === '*') return true;
 
   const tagMatch = /^[a-zA-Z][\w-]*/.exec(compound);
   if (tagMatch && tagMatch[0].toLowerCase() !== el.rawTagName?.toLowerCase()) return false;

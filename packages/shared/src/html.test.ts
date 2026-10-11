@@ -70,3 +70,24 @@ test('parseHtml keeps the space between an inline element and the text after it'
   const flex = parseHtml('<div style="display:flex"><b>A</b> <b>B</b></div>');
   assert.equal(flex.nodes.filter((n) => n.type === 'text' && !n.text?.trim()).length, 0);
 });
+
+test('style rules respect descendant, child and sibling combinators', () => {
+  const html = `<style>
+    .nav span { color: red; }
+    .card > b { color: blue; }
+    .a + .b { color: green; }
+    span.hot { font-weight: 700; }
+  </style>
+  <div><span class="t">time</span><div class="nav"><span>tab</span></div>
+  <div class="card"><b>direct</b><i><b>nested</b></i></div>
+  <p class="a">a</p><p class="b">b</p><p class="b">c</p><span class="hot">h</span></div>`;
+  const { nodes } = parseHtml(html);
+  const by = (text: string) => nodes.find((n) => n.text === text)!;
+  assert.equal(by('time').styles.color, undefined, 'span outside .nav untouched');
+  assert.equal(by('tab').styles.color, 'red');
+  assert.equal(by('direct').styles.color, 'blue');
+  assert.equal(by('nested').styles.color, undefined, 'child combinator is not descendant');
+  assert.equal(by('b').styles.color, 'green');
+  assert.equal(by('c').styles.color, undefined, '+ is the immediate sibling only');
+  assert.equal(by('h').styles['font-weight'], '700');
+});
