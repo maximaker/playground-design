@@ -471,6 +471,10 @@ code { font-family: var(--mono); font-size: 0.92em; }
 .artboard-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .artboard-label:focus { outline: 1px solid var(--accent); background: var(--bg-input); }
 .artboard-size { opacity: .6; font-variant-numeric: tabular-nums; }
+.artboard-theme-badge {
+  font-size: 0.7rem; padding: 0 0.4rem; border-radius: 99px; line-height: 1.5;
+  border: 1px solid var(--border-strong); color: var(--fg-muted); flex: none;
+}
 
 .artboard-agent-badge {
   position: absolute; bottom: 100%; right: 0; margin-bottom: 0.45rem;
@@ -570,6 +574,17 @@ code { font-family: var(--mono); font-size: 0.92em; }
 .toolbar button:hover { background: var(--bg-hover); color: var(--fg); }
 .toolbar button.is-active { background: var(--accent); color: var(--accent-fg); }
 .toolbar-divider { width: 1px; height: 1.4rem; background: var(--border); margin: 0 0.3rem; }
+.view-as {
+  display: inline-flex; align-items: center; gap: 0.3rem; padding: 0 var(--s2);
+  color: var(--fg-muted); border-radius: 8px; height: 32px; cursor: pointer;
+}
+.view-as.is-active { color: var(--accent); background: var(--accent-soft); }
+.view-as select {
+  appearance: none; border: 0; background: transparent; color: inherit;
+  font: inherit; font-size: 0.82rem; cursor: pointer; max-width: 9rem; padding: 0;
+}
+.view-as select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
 .zoom-readout {
   width: auto !important; padding: 0 var(--s3); font-size: 0.82rem;
   font-variant-numeric: tabular-nums; color: var(--fg-muted);

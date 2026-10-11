@@ -13,6 +13,7 @@ import { useCanvas, getDoc, currentPage, topLevelSelection, getNodeById } from '
 import { resolveKey, treeNodeId } from '../state/keys.ts';
 import { artboardOf } from '@playground/shared';
 import { Artboard } from './Artboard.tsx';
+import { LIVE_ZOOM } from './thumbs.ts';
 import { NoteCard } from './NoteCard.tsx';
 import { SectionLayer } from './SectionLayer.tsx';
 import { sectionAt, sectionOfArtboard } from '@playground/shared';
@@ -180,17 +181,27 @@ export function Canvas({ onContextMenu }: CanvasProps) {
     const doc = getDoc();
     if (!doc || !page) return new Set<NodeId>();
 
-    const stage = containerRef.current?.getBoundingClientRect();
-    if (!stage) return new Set(page.artboards);
+    const near = new Set<NodeId>();
+    // Never unmount an artboard that holds the selection: measuring it drives
+    // the overlay, and it must stay live even if the user pans it off screen.
+    for (const id of selection) {
+      const artboard = artboardOf(doc, id);
+      if (artboard) near.add(artboard);
+    }
 
-    // A generous margin so panning does not reveal blank frames.
-    const margin = Math.max(stage.width, stage.height);
+    const stage = containerRef.current?.getBoundingClientRect();
+    // Far out, every artboard is a thumbnail: thirty live documents at 10% is
+    // what froze the tab, and at that size nobody can tell the difference.
+    if (!stage || viewport.zoom < LIVE_ZOOM) return near;
+
+    // A margin so a short pan does not have to mount anything; the thumbnails
+    // cover the rest, so it no longer has to be a whole screen wide.
+    const margin = Math.max(stage.width, stage.height) / 4;
     const left = (stage.left - viewport.x - margin) / viewport.zoom;
     const top = (stage.top - viewport.y - margin) / viewport.zoom;
     const right = (stage.right - viewport.x + margin) / viewport.zoom;
     const bottom = (stage.bottom - viewport.y + margin) / viewport.zoom;
 
-    const near = new Set<NodeId>();
     for (const id of page.artboards) {
       const node = doc.nodes[id];
       if (!node) continue;
@@ -199,13 +210,6 @@ export function Canvas({ onContextMenu }: CanvasProps) {
       if (pos.x + size.width < left || pos.x > right) continue;
       if (pos.y + size.height < top || pos.y > bottom) continue;
       near.add(id);
-    }
-
-    // Never unmount an artboard that holds the selection: measuring it drives
-    // the overlay, and it must stay live even if the user pans it off screen.
-    for (const id of selection) {
-      const artboard = artboardOf(doc, id);
-      if (artboard) near.add(artboard);
     }
     return near;
     // eslint-disable-next-line react-hooks/exhaustive-deps

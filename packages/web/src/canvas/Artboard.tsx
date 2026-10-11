@@ -6,13 +6,15 @@
  * in a browser, and it isolates artboard CSS from the editor's own chrome.
  */
 
-import { memo, useMemo } from 'react';
+import { memo, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { NodeId } from '@playground/shared';
 import { descendants, getArtboardPosition, getArtboardSize } from '@playground/shared';
 import { useCanvas, getDoc, getNodeById } from '../state/store.ts';
 import { useArtboardFrame } from './frame.ts';
 import { NodeView } from './NodeView.tsx';
+import { effectiveTheme, pinnedTheme, useViewTheme } from '../state/viewTheme.ts';
+import { requestThumb, useThumb } from './thumbs.ts';
 import { BreakpointBar } from './BreakpointBar.tsx';
 
 interface Props {
@@ -34,8 +36,19 @@ export const Artboard = memo(function Artboard({ id, live }: Props) {
   const agentActivity = useCanvas((s) => s.agentActivity);
   const selection = useCanvas((s) => s.selection);
   const dispatch = useCanvas((s) => s.dispatch);
+  const preview = useViewTheme((s) => s.theme);
 
   const { frameRef, body } = useArtboardFrame(id, live);
+
+  // Whether the live frame has painted its content yet. Two frames after the
+  // portal mounts: one for React to commit into it, one for it to paint.
+  const [painted, setPainted] = useState(false);
+  useEffect(() => {
+    if (!live || !body) { setPainted(false); return; }
+    let b = 0;
+    const a = requestAnimationFrame(() => { b = requestAnimationFrame(() => setPainted(true)); });
+    return () => { cancelAnimationFrame(a); cancelAnimationFrame(b); };
+  }, [live, body]);
 
   const node = getNodeById(id);
   const doc = getDoc();
@@ -59,6 +72,9 @@ export const Artboard = memo(function Artboard({ id, live }: Props) {
   // Labels are unreadable far out, and adjacent artboards' labels overlap into
   // an unreadable run of text. Below this zoom they are noise.
   const showLabel = zoom > 0.12;
+  // While previewing the page in a theme, a frame that pins its own says so,
+  // or it reads as the preview not working.
+  const pinned = preview && doc ? pinnedTheme(doc, id) : null;
 
   const rename = (name: string) => {
     if (name.trim() && name !== node.name) dispatch([{ t: 'rename', updates: [{ id, name: name.trim() }] }]);
@@ -109,6 +125,11 @@ export const Artboard = memo(function Artboard({ id, live }: Props) {
         suppressContentEditableWarning
       >
         <span className="artboard-name">{node.name}</span>
+        {pinned && pinned !== preview && (
+          <span className="artboard-theme-badge" title="This frame sets its own theme, so the preview leaves it alone">
+            {pinned === 'default' ? 'Main' : pinned}
+          </span>
+        )}
         <span className="artboard-size">{Math.round(width)} × {Math.round(height)}</span>
       </div>
       )}
@@ -122,7 +143,7 @@ export const Artboard = memo(function Artboard({ id, live }: Props) {
       )}
 
       <div
-        className={`artboard-frame${isSelected ? ' is-selected' : ''}${agentWorking ? ' is-agent-working' : ''}`}
+        className={`artboard-frame${live ? '' : ' is-static'}${isSelected ? ' is-selected' : ''}${agentWorking ? ' is-agent-working' : ''}`}
         style={{
           width,
           height,
@@ -130,7 +151,7 @@ export const Artboard = memo(function Artboard({ id, live }: Props) {
           transformOrigin: 'top left',
         }}
       >
-        {live ? (
+        {live && (
           <>
             <iframe
               ref={frameRef}
@@ -151,13 +172,45 @@ export const Artboard = memo(function Artboard({ id, live }: Props) {
             />
             {body && createPortal(<NodeView id={id} isRoot />, body)}
           </>
-        ) : (
-          <div
-            className="artboard-placeholder"
-            style={{ width, height, background: node.styles['background-color'] ?? '#fff' }}
-          />
+        )}
+        {/* The thumbnail stays on top of a frame that has just gone live until
+            the frame has painted, so zooming in never flashes a blank page. */}
+        {(!live || !painted) && (
+          <StaticFrame id={id} width={width} height={height} fallback={node.styles['background-color'] ?? '#fff'} />
         )}
       </div>
     </div>
   );
 });
+
+/**
+ * An artboard as a picture: the cached thumbnail, or its background colour
+ * until the first one is drawn. Subscribes to edits only while it is mounted,
+ * which is only while the artboard is not live.
+ */
+function StaticFrame({ id, width, height, fallback }: { id: NodeId; width: number; height: number; fallback: string }) {
+  const version = useCanvas((s) => s.version);
+  const styleEpoch = useCanvas((s) => s.styleEpoch);
+  const preview = useViewTheme((s) => s.theme);
+  const url = useThumb(id);
+
+  useEffect(() => {
+    // Debounced by the queue itself: a run of edits is one draw, at idle time.
+    requestThumb(id, () => {
+      const doc = getDoc();
+      return doc?.nodes[id] ? { doc, theme: effectiveTheme(doc, id, preview) } : null;
+    });
+  }, [id, version, styleEpoch, preview, width, height]);
+
+  return url ? (
+    <img
+      className="artboard-thumb"
+      src={url}
+      alt=""
+      draggable={false}
+      style={{ position: 'absolute', inset: 0, width, height, display: 'block' }}
+    />
+  ) : (
+    <div className="artboard-placeholder" style={{ position: 'absolute', inset: 0, width, height, background: fallback }} />
+  );
+}

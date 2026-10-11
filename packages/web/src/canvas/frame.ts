@@ -12,6 +12,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { NodeId } from '@playground/shared';
 import { useCanvas, getDoc } from '../state/store.ts';
 import { registerFrame } from './registry.ts';
+import { effectiveTheme, useViewTheme } from '../state/viewTheme.ts';
 import { artboardStylesheet, fontFamilies, googleFontsHref } from './styles.ts';
 
 export const RESET = `
@@ -33,15 +34,17 @@ export function useArtboardFrame(id: NodeId, live: boolean, opts: { register?: b
   const styleEpoch = useCanvas((s) => s.styleEpoch);
   // The artboard's own version: its data-theme attribute picks the token values.
   const selfVersion = useCanvas((s) => s.nodeVersions[id] ?? 0);
+  // The page-wide "View as" preview, which overrides unpinned artboards.
+  const preview = useViewTheme((s) => s.theme);
 
   const frameRef = useRef<HTMLIFrameElement | null>(null);
   const [body, setBody] = useState<HTMLElement | null>(null);
   const doc = getDoc();
 
   const stylesheet = useMemo(
-    () => (doc ? artboardStylesheet(doc, id) : ''),
+    () => (doc ? artboardStylesheet(doc, id, effectiveTheme(doc, id, preview)) : ''),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [doc, id, structureVersion, styleEpoch, selfVersion],
+    [doc, id, structureVersion, styleEpoch, selfVersion, preview],
   );
   const fontsHref = useMemo(
     () => (doc ? googleFontsHref(fontFamilies(doc, id)) : null),

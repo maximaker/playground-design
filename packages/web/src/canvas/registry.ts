@@ -116,5 +116,14 @@ export function hitTest(clientX: number, clientY: number): { artboardId: NodeId;
     if (target?.dataset.nodeId) return { artboardId, nodeId: target.dataset.nodeId };
     return { artboardId, nodeId: artboardId };
   }
+  // Artboards drawn as thumbnails have no frame to look inside, but they are
+  // still on screen and still have to be clickable: the hit is the artboard.
+  const boards = document.querySelectorAll<HTMLElement>('.artboard[data-artboard-id] > .artboard-frame.is-static');
+  for (let i = boards.length - 1; i >= 0; i--) {
+    const rect = boards[i]!.getBoundingClientRect();
+    if (clientX < rect.left || clientX > rect.right || clientY < rect.top || clientY > rect.bottom) continue;
+    const artboardId = boards[i]!.parentElement!.dataset.artboardId!;
+    return { artboardId, nodeId: artboardId };
+  }
   return null;
 }
