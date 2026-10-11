@@ -175,10 +175,7 @@ export function Components() {
       {components.length === 0 && (
         <p className="panel-empty">
           No components yet.<br />
-          <span className="dim">
-            Select something you will reuse — a button, a card — and create a component from it.
-            Editing the component updates every instance; editing an instance overrides just that one.
-          </span>
+          <span className="dim">Select something you reuse — a button, a card — and make it a component.</span>
         </p>
       )}
 
@@ -247,12 +244,8 @@ export function Components() {
       <div className="components-section">
         <h4 className="components-section-title">From your code</h4>
         {codeComponents.length === 0 ? (
-          <p className="panel-empty">
-            <span className="dim">
-              An agent connected to this document can register your real React components here —
-              ask it for <code>register_code_component</code>. They render on the canvas with their
-              own props, and export as a real import rather than a copy of their markup.
-            </span>
+          <p className="panel-note">
+            For developers: an AI assistant can add your real React components here.
           </p>
         ) : codeComponents.map((c) => {
           const count = Object.values(doc?.nodes ?? {}).filter((n) => n.codeRef === c.id).length;
@@ -291,16 +284,18 @@ export function Components() {
       )}
 
       {components.length > 0 && (
-        <p className="panel-hint">
-          Click a component to insert an instance; it is selected and brought into view. Select an
-          instance and use <strong>Go to component</strong> to edit the original — changes there
-          reach every instance, while editing an instance overrides just that one.
-          {' '}A component can contain an instance of another one: insert into a definition's layers
-          above and the outer component follows the inner one from then on. To turn something you already built into a component,
-          select it and use <strong>Replace with component</strong> from the right-click menu, or the
-          swap button on a tile — it keeps the layer's place in the flow. Mark a layer with a
-          <code> data-slot</code> attribute to let instances put their own content there.
-        </p>
+        <div className="panel-help">
+          <p className="panel-note">Click a component to add it to the page.</p>
+          <details>
+            <summary>How components work</summary>
+            <ul>
+              <li>Change the original and every copy updates.</li>
+              <li>Change one copy and only that one changes.</li>
+              <li>To edit the original, select a copy and choose <strong>Go to component</strong>.</li>
+              <li>To swap something for a component, right-click it and choose <strong>Replace with component</strong>.</li>
+            </ul>
+          </details>
+        </div>
       )}
     </div>
   );
