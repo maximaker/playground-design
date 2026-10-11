@@ -170,6 +170,8 @@ export function Properties() {
         </div>
       </div>
 
+      {nodes.length === 1 && first.type === 'artboard' && doc && doc.themes.length > 1 && <ArtboardThemeSelect node={first} themes={doc.themes} />}
+
       <div className="segmented panel-mode" role="radiogroup" aria-label="How many controls to show">
         <button role="radio" aria-checked={simple} className={simple ? 'is-active' : ''} onClick={() => setSimple(true)}>Simple</button>
         <button role="radio" aria-checked={!simple} className={!simple ? 'is-active' : ''} onClick={() => setSimple(false)}>All controls</button>
@@ -776,6 +778,27 @@ function CodeProps({ node }: { node: CanvasNode }) {
  * Shown above everything else because it is the highest-level thing about an
  * instance: which variant it is determines most of what the other panels show.
  */
+/**
+ * Which document theme the artboard's tokens resolve in — "show this screen
+ * dark" without copying it. Stored as data-theme on the artboard, which the
+ * canvas, export, publish and Present all read.
+ */
+function ArtboardThemeSelect({ node, themes }: { node: CanvasNode; themes: string[] }) {
+  const dispatch = useCanvas((s) => s.dispatch);
+  const current = node.attrs['data-theme'] && themes.includes(node.attrs['data-theme']) ? node.attrs['data-theme'] : 'default';
+  return (
+    <Row>
+      <Field label="Theme" prop="the artboard's theme" wide>
+        <Select
+          value={current}
+          options={themes.map((t) => ({ value: t, label: t === 'default' ? 'Main' : t }))}
+          onCommit={(v) => dispatch([{ t: 'attrs', updates: [{ id: node.id, attrs: { 'data-theme': v === 'default' ? null : v } }] }])}
+        />
+      </Field>
+    </Row>
+  );
+}
+
 function InstanceProps({ instanceId, def, node }: {
   instanceId: string;
   def: ComponentDef;

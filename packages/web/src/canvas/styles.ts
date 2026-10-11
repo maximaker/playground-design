@@ -1,7 +1,7 @@
 /** Conversions between the document's CSS-shaped styles and React style objects. */
 
 import type { CanvasDocument, CanvasNode, NodeId, StyleMap } from '@playground/shared';
-import { contestedProperties, descendants, fontFamiliesIn } from '@playground/shared';
+import { artboardTheme, contestedProperties, descendants, fontFamiliesIn } from '@playground/shared';
 import type { CSSProperties } from 'react';
 
 export function toReactStyle(styles: StyleMap): CSSProperties {
@@ -27,7 +27,7 @@ export function kebab(prop: string): string {
  * descendant's variants. Variants (`:hover`, `@media`) cannot be expressed as
  * inline styles, so they have to live in a real stylesheet inside the iframe.
  */
-export function artboardStylesheet(doc: CanvasDocument, artboardId: NodeId, theme = 'default'): string {
+export function artboardStylesheet(doc: CanvasDocument, artboardId: NodeId, theme = artboardTheme(doc, artboardId)): string {
   const blocks: string[] = [];
 
   const vars = doc.tokens

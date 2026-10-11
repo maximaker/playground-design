@@ -10,10 +10,10 @@
 import { useState } from 'react';
 import {
   type Section, type SectionStatus, SECTION_LAYOUT, SECTION_STATUSES, SECTION_STATUS_META,
-  sectionRect, sectionMembers, sectionsOf, sectionTint, newId,
+  sectionRect, sectionMembers, sectionsOf, sectionTint, newId, sectionFlows,
 } from '@playground/shared';
 import { useCanvas, currentPage, getDoc } from '../state/store.ts';
-import { fitBox } from '../hooks/commands.ts';
+import { fitBox, jumpToBoardItem } from '../hooks/commands.ts';
 
 const MIN_SECTION_WIDTH = 900;
 
@@ -39,6 +39,7 @@ function SectionRegion({ section, zoom }: { section: Section; zoom: number }) {
   const rect = sectionRect(doc, page, section);
   if (!rect) return null;
   const count = sectionMembers(doc, page, section).length;
+  const flows = sectionFlows(doc, section);
   const tint = sectionTint(section.color);
   const status = SECTION_STATUS_META[section.status];
   // Text is sized in canvas units so it stays proportional to the screens, but
@@ -83,6 +84,19 @@ function SectionRegion({ section, zoom }: { section: Section; zoom: number }) {
             <span className="section-pill" style={{ background: status.bg, color: status.fg, fontSize: Math.max(10, font * 0.6) }}>
               {status.label}
             </span>
+            {!brief && flows.map((f) => (
+              <button
+                key={f.id}
+                className="section-flow"
+                style={{ fontSize: Math.max(10, font * 0.55) }}
+                title={`Flow: ${f.title}${f.pageId === page.id ? '' : ` on ${f.pageName}`} — click to open the diagram`}
+                // The header drags the section; a chip is a link, not a handle.
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={() => jumpToBoardItem(f.pageId, f.id)}
+              >
+                <span className="section-flow-label">Flow</span>{f.title}
+              </button>
+            ))}
             {!brief && <span className="section-count" style={{ fontSize: Math.max(10, font * 0.6) }}>
               {count} screen{count === 1 ? '' : 's'}
             </span>}

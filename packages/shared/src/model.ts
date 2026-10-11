@@ -562,6 +562,17 @@ export function artboardOf(doc: CanvasDocument, id: NodeId): NodeId | null {
   return null;
 }
 
+/**
+ * The document theme an artboard is shown in: its `data-theme` attribute when
+ * that names one of the document's themes, else `default`. Any node resolves
+ * to its artboard's theme, so exporting a child still gets the right tokens.
+ */
+export function artboardTheme(doc: CanvasDocument, id: NodeId): string {
+  const board = artboardOf(doc, id);
+  const theme = board ? doc.nodes[board]?.attrs['data-theme'] : undefined;
+  return theme && doc.themes.includes(theme) ? theme : 'default';
+}
+
 export function componentsOf(doc: CanvasDocument): ComponentDef[] {
   return Object.values(doc.components ?? {}).sort((a, b) => a.name.localeCompare(b.name));
 }

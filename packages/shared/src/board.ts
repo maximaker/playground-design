@@ -19,7 +19,12 @@ import { getArtboardPosition, getArtboardSize, newId } from './model.ts';
 // Model
 // ---------------------------------------------------------------------------
 
-export type BoardShapeKind = 'rect' | 'ellipse' | 'diamond' | 'text' | 'section';
+/**
+ * `screen` is a card standing in for an artboard on another page: a user-flow
+ * page can run its arrows between the real screens without the screens having
+ * to live on it. It points at the artboard by `ref` and is drawn from it, live.
+ */
+export type BoardShapeKind = 'rect' | 'ellipse' | 'diamond' | 'text' | 'section' | 'screen';
 
 export interface BoardShape {
   type: 'shape';
@@ -34,6 +39,8 @@ export interface BoardShape {
   color: BoardColor;
   /** Rounded corners on a rectangle, for Mermaid's `(rounded)` and `([stadium])`. */
   rounded?: boolean;
+  /** For a `screen`: the artboard it shows, usually on another page. */
+  ref?: NodeId;
 }
 
 /**
@@ -188,7 +195,29 @@ export const DEFAULT_SHAPE_SIZE: Record<BoardShapeKind, { width: number; height:
   diamond: { width: 150, height: 100 },
   text: { width: 160, height: 32 },
   section: { width: 480, height: 320 },
+  screen: { width: 180, height: 300 },
 };
+
+/** Height of the name/page strip under a screen card's thumbnail. */
+export const SCREEN_CARD_FOOTER = 44;
+
+/** A screen card's size for an artboard: a fixed width, the thumbnail at its aspect. */
+export function screenCardSize(doc: CanvasDocument, ref: NodeId | undefined, width = DEFAULT_SHAPE_SIZE.screen.width): { width: number; height: number } {
+  const node = ref ? doc.nodes[ref] : undefined;
+  if (!node || node.type !== 'artboard') return { ...DEFAULT_SHAPE_SIZE.screen, width };
+  const size = getArtboardSize(node);
+  const thumb = Math.round(Math.min(width * 2.4, Math.max(width * 0.4, (width * size.height) / Math.max(1, size.width))));
+  return { width, height: thumb + SCREEN_CARD_FOOTER };
+}
+
+/** What a screen card points at, or null when that artboard has been deleted. */
+export function resolveScreen(doc: CanvasDocument, ref: NodeId | undefined): { id: NodeId; name: string; pageId: string; pageName: string } | null {
+  const node = ref ? doc.nodes[ref] : undefined;
+  if (!ref || !node || node.type !== 'artboard') return null;
+  const page = doc.pages.find((p) => p.artboards.includes(ref));
+  if (!page) return null;
+  return { id: ref, name: node.name, pageId: page.id, pageName: page.name };
+}
 
 export function makeBoardShape(partial: Partial<BoardShape> & { kind: BoardShapeKind }): BoardShape {
   const size = DEFAULT_SHAPE_SIZE[partial.kind];
@@ -203,6 +232,7 @@ export function makeBoardShape(partial: Partial<BoardShape> & { kind: BoardShape
     text: partial.text ?? (partial.kind === 'section' ? 'Section' : ''),
     color: partial.color ?? 'neutral',
     ...(partial.rounded ? { rounded: true } : {}),
+    ...(partial.ref ? { ref: partial.ref } : {}),
   };
 }
 
@@ -865,6 +895,17 @@ export function emitBoardSvg(doc: CanvasDocument, page: Page, opts: { padding?: 
     if (s.kind === 'section') {
       out.push(`<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${S.sectionRadius}" fill="#ffffff" filter="url(#sheet)"/>`);
       out.push(`<text x="${x + 24}" y="${y + 34}" ${font} font-size="${look.fontSize}" font-weight="600" fill="${look.text}">${escapeXml(s.text)}</text>`);
+      continue;
+    }
+    if (s.kind === 'screen') {
+      const target = resolveScreen(doc, s.ref);
+      const thumb = h - SCREEN_CARD_FOOTER;
+      out.push(`<rect x="${x + 0.5}" y="${y + 0.5}" width="${w - 1}" height="${h - 1}" rx="10" fill="#ffffff" stroke="${target ? '#cfd6df' : '#ec6262'}" stroke-width="1"${target ? '' : ' stroke-dasharray="4 3"'} filter="url(#card)"/>`);
+      out.push(`<rect x="${x + 6}" y="${y + 6}" width="${w - 12}" height="${Math.max(1, thumb - 6)}" rx="6" fill="${target ? '#eef1f5' : '#fde5e5'}"/>`);
+      const title = target ? target.name : 'Missing screen';
+      const sub = target ? target.pageName : (s.text || 'artboard deleted');
+      out.push(`<text x="${x + 10}" y="${y + thumb + 18}" ${font} font-size="12" font-weight="600" fill="${target ? '#3b4656' : '#c03d3d'}">${escapeXml(title)}</text>`);
+      out.push(`<text x="${x + 10}" y="${y + thumb + 34}" ${font} font-size="11" fill="#7a8594">${escapeXml(sub)}</text>`);
       continue;
     }
     const lifted = s.color === 'neutral' && s.kind === 'rect';

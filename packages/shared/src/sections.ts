@@ -13,6 +13,7 @@ import {
   getArtboardPosition, getArtboardSize, NOTE_COLORS, type NoteColor,
 } from './model.ts';
 import type { Op } from './ops.ts';
+import { boardOf, isShape } from './board.ts';
 
 export const SECTION_LAYOUT = {
   /** Space between the members' box and the region edge. */
@@ -37,6 +38,37 @@ export const SECTION_STATUS_META: Record<SectionStatus, { label: string; bg: str
   ready: { label: 'Ready', bg: '#dcfce7', fg: '#166534' },
   changed: { label: 'Changed', bg: '#fce7f3', fg: '#9d174d' },
 };
+
+/** A section's flow, resolved: the board item it names, on whatever page. */
+export interface SectionFlow {
+  id: string;
+  title: string;
+  pageId: string;
+  pageName: string;
+  kind: 'section' | 'shape' | 'connector';
+}
+
+/** The board item `id` on any page, as a flow chip names it. */
+export function findFlow(doc: CanvasDocument, id: string): SectionFlow | null {
+  for (const page of doc.pages) {
+    const item = boardOf(page).find((i) => i.id === id);
+    if (!item) continue;
+    if (isShape(item)) {
+      const title = item.text.trim().split('\n')[0] || (item.kind === 'section' ? 'Untitled diagram' : 'Untitled shape');
+      return { id, title, pageId: page.id, pageName: page.name, kind: item.kind === 'section' ? 'section' : 'shape' };
+    }
+    return { id, title: item.label?.trim() || 'Connector', pageId: page.id, pageName: page.name, kind: 'connector' };
+  }
+  return null;
+}
+
+/**
+ * A section's flows that still exist, resolved, in order. They may be on any
+ * page: the screens live on one, the user-flow diagram usually on another.
+ */
+export function sectionFlows(doc: CanvasDocument, section: Section): SectionFlow[] {
+  return (section.flows ?? []).map((id) => findFlow(doc, id)).filter((f): f is SectionFlow => !!f);
+}
 
 export function sectionsOf(page: Page | undefined): Section[] {
   return [...(page?.sections ?? [])].sort((a, b) => a.order - b.order);

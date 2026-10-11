@@ -28,11 +28,11 @@ import {
   codeElementJsx, explicitCodeProps, MOUNT_CONTRACT,
   type Comment, commentsOf, newId as newIdOf,
   NOTE_KINDS, NOTE_KIND_HINTS, specFor, changesWithin, diffDocuments, describeComponent,
-  type BoardChange, type BoardColor, type Endpoint, type DiagramGraph,
+  type BoardChange, type BoardShape, type BoardColor, type Endpoint, type DiagramGraph,
   BOARD_COLOR_NAMES, boardBounds, boardOf, danglingConnectors, deleteBoardItems, emitBoardSvg, isShape,
-  layoutDiagram, makeBoardShape, makeConnector, parseMermaid, routeConnector,
+  layoutDiagram, makeBoardShape, resolveScreen, screenCardSize, makeConnector, parseMermaid, routeConnector,
   artifactoryEmbedUrl, treeEntries, nodeEntry, type InstanceOverride,
-  type Section, SECTION_STATUSES, makeSection, sectionsOf, sectionMembers, sectionRect, arrangeSectionOps,
+  type Section, SECTION_STATUSES, makeSection, sectionsOf, sectionMembers, sectionRect, arrangeSectionOps, sectionFlows, findFlow,
   sectionOfArtboard,
 } from '@playground/shared';
 import {
@@ -1277,12 +1277,14 @@ function registerWriteTools(server: McpServer, ctx: McpContext): void {
       x: z.number().optional().describe('Canvas position. Defaults to the right of the last artboard.'),
       y: z.number().optional(),
       styles: StyleRecord.optional().describe('CSS for the artboard itself, e.g. background-color.'),
+      theme: z.string().optional().describe('A document theme (see get_tokens, e.g. "dark") the artboard tokens resolve in. Same as set_artboard_theme.'),
       pageId: z.string().optional(),
     },
     annotations: { destructiveHint: false },
-  }, async ({ name, width, height, x, y, styles, pageId }) => guard(() => {
+  }, async ({ name, width, height, x, y, styles, theme, pageId }) => guard(() => {
     const doc = requireDoc(ctx);
     const page = pageOf(ctx, doc, pageId);
+    if (theme && theme !== 'default' && !doc.themes.includes(theme)) return fail(`No theme "${theme}". Themes: ${doc.themes.join(', ')}.`);
 
     // Place to the right of the rightmost artboard so new work never lands on
     // top of existing work.
@@ -1305,11 +1307,30 @@ function registerWriteTools(server: McpServer, ctx: McpContext): void {
       type: 'artboard',
       name: name ?? `Artboard ${page.artboards.length + 1}`,
       styles: { ...DEFAULT_ARTBOARD_STYLES, ...styles, width: `${width}px`, height: `${height}px` },
-      attrs: { 'data-x': String(px), 'data-y': String(py) },
+      attrs: { 'data-x': String(px), 'data-y': String(py), ...(theme && theme !== 'default' ? { 'data-theme': theme } : {}) },
     });
 
     commit(ctx, [{ t: 'insert', nodes: [artboard], parent: null, index: page.artboards.length, page: page.id }]);
-    return json({ id: artboard.id, name: artboard.name, width, height, x: px, y: py });
+    return json({ id: artboard.id, name: artboard.name, width, height, x: px, y: py, ...(theme && theme !== 'default' ? { theme } : {}) });
+  }));
+
+  server.registerTool('set_artboard_theme', {
+    title: 'Set an artboard theme',
+    description:
+      'Shows one artboard in a document theme (e.g. "dark"): its tokens resolve to that theme in the editor, screenshots, ' +
+      'export, publish and Present. "default" (or null) puts it back on the main theme. Stored as the artboard data-theme attribute.',
+    inputSchema: {
+      id: z.string().describe('Artboard id.'),
+      theme: z.string().nullable().describe('A theme from get_tokens, or "default"/null.'),
+    },
+  }, async ({ id, theme }) => guard(() => {
+    const doc = requireDoc(ctx);
+    const board = node(doc, id);
+    if (board.type !== 'artboard') return fail(`${id} is a ${board.type}; set_artboard_theme takes an artboard.`);
+    const value = theme && theme !== 'default' ? theme : null;
+    if (value && !doc.themes.includes(value)) return fail(`No theme "${value}". Themes: ${doc.themes.join(', ')}. Add one with set_tokens.`);
+    commit(ctx, [{ t: 'attrs', updates: [{ id, attrs: { 'data-theme': value } }] }]);
+    return json({ id, theme: value ?? 'default' });
   }));
 
   server.registerTool('fit_artboard', {
@@ -2188,6 +2209,12 @@ function registerWriteTools(server: McpServer, ctx: McpContext): void {
   }));
 }
 
+/** Every flow id must name a board item on some page. */
+function checkFlows(doc: CanvasDocument, flows: string[] | undefined): void {
+  const unknown = (flows ?? []).filter((f) => !findFlow(doc, f));
+  if (unknown.length) throw new Error(`No board item ${unknown.map((u) => `"${u}"`).join(', ')} on any page. get_board (with pageId) lists a page's diagram ids.`);
+}
+
 function sectionSummary(doc: CanvasDocument, page: Page, sec: Section) {
   const members = sectionMembers(doc, page, sec);
   return {
@@ -2197,7 +2224,8 @@ function sectionSummary(doc: CanvasDocument, page: Page, sec: Section) {
     order: sec.order,
     artboards: members.map((id) => ({ id, name: doc.nodes[id]!.name })),
     screens: members.length,
-    ...(sec.flows?.length ? { flows: sec.flows } : {}),
+    ...(sec.flows?.length ? { flows: sectionFlows(doc, sec).map(({ id, title, pageId, pageName, kind }) => ({ id, title, pageId, pageName, kind })) } : {}),
+    ...(sec.flows?.some((f) => !findFlow(doc, f)) ? { missingFlows: sec.flows.filter((f) => !findFlow(doc, f)) } : {}),
     bounds: sectionRect(doc, page, sec),
   };
 }
@@ -2469,7 +2497,7 @@ function registerNoteTools(server: McpServer, ctx: McpContext): void {
       description: z.string().max(2000).optional(),
       status: sectionStatus.optional(),
       color: z.string().max(40).optional().describe('yellow, blue, green, pink, purple or a CSS colour.'),
-      flows: z.array(z.string()).max(50).optional().describe('Board item ids (diagrams, connectors) describing this flow.'),
+      flows: z.array(z.string()).max(50).optional().describe('Board item ids (a diagram\'s section shape, shapes, connectors) describing this flow, on any page — get_board lists them. Shown as Flow chips on the section header.'),
       arrange: z.boolean().optional().default(false),
       gap: z.number().min(0).max(2000).optional().describe('Space between screens; default 120.'),
       pageId: z.string().optional(),
@@ -2478,6 +2506,7 @@ function registerNoteTools(server: McpServer, ctx: McpContext): void {
     const doc = requireDoc(ctx);
     const page = pageOf(ctx, doc, pageId);
     checkMembers(page, artboards);
+    checkFlows(doc, flows);
     const section = makeSection({ title, artboards, description, status, color, flows, order: page.sections?.length ?? 0 });
     commit(ctx, [...releaseOps(page, section.id, artboards), { t: 'section', action: 'add', pageId: page.id, section }]);
     if (arrange) {
@@ -2501,7 +2530,7 @@ function registerNoteTools(server: McpServer, ctx: McpContext): void {
       description: z.string().max(2000).optional(),
       status: sectionStatus.optional(),
       color: z.string().max(40).optional(),
-      flows: z.array(z.string()).max(50).optional(),
+      flows: z.array(z.string()).max(50).optional().describe('Replaces the flow list: board item ids on any page.'),
       order: z.number().int().min(0).optional(),
       artboards: z.array(z.string()).max(200).optional(),
       add: z.array(z.string()).max(200).optional(),
@@ -2512,6 +2541,7 @@ function registerNoteTools(server: McpServer, ctx: McpContext): void {
   }, async ({ id, arrange, gap, artboards, add, remove, ...fields }) => guard(() => {
     const doc = requireDoc(ctx);
     const { page, section } = findSection(doc, id);
+    checkFlows(doc, fields.flows);
     const patch: Partial<Section> & { id: string } = { id };
     for (const [k, v] of Object.entries(fields)) if (v !== undefined) (patch as Record<string, unknown>)[k] = v;
     if (artboards || add || remove) {
@@ -2572,22 +2602,61 @@ function registerNoteTools(server: McpServer, ctx: McpContext): void {
     return id ? getNode(doc, id) ?? null : null;
   };
 
+  /**
+   * An artboard on any page, by id or name — this page's first. One on another
+   * page is drawn on this board as a screen card.
+   */
+  const anyArtboardRef = (doc: CanvasDocument, page: Page, ref: string): { node: CanvasNode; local: boolean } | null => {
+    const here = artboardRef(doc, page, ref);
+    if (here) return { node: here, local: true };
+    for (const other of doc.pages) {
+      if (other.id === page.id) continue;
+      const found = artboardRef(doc, other, ref);
+      if (found) return { node: found, local: false };
+    }
+    return null;
+  };
+
+  /** Where a new screen card goes when nothing says: right of everything, stacked. */
+  const screenSlot = (doc: CanvasDocument, page: Page, pending: BoardShape[]): { x: number; y: number } => {
+    let right = -Infinity, top = Infinity;
+    for (const id of page.artboards) {
+      const n = getNode(doc, id);
+      if (!n) continue;
+      const pos = getArtboardPosition(n);
+      right = Math.max(right, pos.x + getArtboardSize(n).width);
+      top = Math.min(top, pos.y);
+    }
+    for (const item of boardOf(page)) {
+      if (!isShape(item)) continue;
+      right = Math.max(right, item.x + item.width);
+      top = Math.min(top, item.y);
+    }
+    const x = Number.isFinite(right) ? Math.round(right + 160) : 0;
+    const y = (Number.isFinite(top) ? Math.round(top) : 0) + pending.reduce((h, p) => h + p.height + 40, 0);
+    return { x, y };
+  };
+
   const EndpointInput = z.object({
     shape: z.string().optional().describe('Id of a board shape.'),
-    artboard: z.string().optional().describe('Id or name of an artboard on this page.'),
+    artboard: z.string().optional().describe('Id or name of an artboard. One on another page becomes a screen card on this board (reused if one is already here).'),
     x: z.number().optional(),
     y: z.number().optional(),
   }).describe('One of: { shape }, { artboard }, or a free point { x, y }.');
 
-  const toEndpoint = (doc: CanvasDocument, page: Page, e: z.infer<typeof EndpointInput>, known: Set<string>): Endpoint => {
+  const toEndpoint = (
+    doc: CanvasDocument, page: Page, e: z.infer<typeof EndpointInput>, known: Set<string>,
+    screenCard?: (artboard: CanvasNode) => string,
+  ): Endpoint => {
     if (e.shape) {
       if (!known.has(e.shape)) throw new Error(`No board shape "${e.shape}". Call get_board for current ids.`);
       return { kind: 'shape', id: e.shape };
     }
     if (e.artboard) {
-      const found = artboardRef(doc, page, e.artboard);
-      if (!found) throw new Error(`No artboard "${e.artboard}" on this page. get_board lists the ones you can connect to.`);
-      return { kind: 'artboard', id: found.id };
+      const found = anyArtboardRef(doc, page, e.artboard);
+      if (!found || (!found.local && !screenCard)) throw new Error(`No artboard "${e.artboard}" in this document. get_basic_info lists each page's artboards.`);
+      if (found.local) return { kind: 'artboard', id: found.node.id };
+      return { kind: 'shape', id: screenCard!(found.node) };
     }
     if (e.x !== undefined && e.y !== undefined) return { kind: 'point', x: e.x, y: e.y };
     throw new Error('An endpoint needs a shape, an artboard, or both x and y.');
@@ -2602,7 +2671,9 @@ function registerNoteTools(server: McpServer, ctx: McpContext): void {
       if (isShape(item)) return item;
       const route = routeConnector(doc, page, item);
       return { ...item, path: route?.points.map((p) => [Math.round(p.x), Math.round(p.y)]) ?? null };
-    });
+    }).map((item) => (isShape(item) && item.kind === 'screen'
+      ? { ...item, screen: resolveScreen(doc, item.ref) ?? { missing: true, artboardId: item.ref, hint: 'The artboard this card showed was deleted.' } }
+      : item));
     return {
       page: { id: page.id, name: page.name },
       items,
@@ -2652,8 +2723,9 @@ function registerNoteTools(server: McpServer, ctx: McpContext): void {
     title: 'Change the board',
     description:
       'Adds, changes and removes shapes and connectors on the board, in one undoable step. Shapes are ' +
-      'rect, ellipse, diamond, text and section (a titled region drawn under everything). Connectors ' +
-      'attach to a shape, to an artboard (by id or name), or to a point, and stay attached when either ' +
+      'rect, ellipse, diamond, text, section (a titled region drawn under everything) and screen (a live ' +
+      'card for an artboard on any page: { kind: "screen", artboard }). Connectors attach to a shape, ' +
+      'to an artboard (by id or name; one on another page gets a screen card), or to a point, and stay attached when either ' +
       'end moves. Removing a shape keeps connectors to it, ending where it was. For anything bigger ' +
       'than a few boxes, write_diagram lays it out for you.',
     inputSchema: {
@@ -2662,7 +2734,8 @@ function registerNoteTools(server: McpServer, ctx: McpContext): void {
         z.object({
           action: z.literal('add'),
           shape: z.object({
-            kind: z.enum(['rect', 'ellipse', 'diamond', 'text', 'section']),
+            kind: z.enum(['rect', 'ellipse', 'diamond', 'text', 'section', 'screen']),
+            artboard: z.string().optional().describe('For kind "screen": id or name of the artboard (any page) the card shows.'),
             x: z.number(), y: z.number(),
             width: z.number().positive().optional(), height: z.number().positive().optional(),
             text: z.string().max(2000).optional(),
@@ -2716,13 +2789,33 @@ function registerNoteTools(server: McpServer, ctx: McpContext): void {
     const out: BoardChange[] = [];
     const added: string[] = [];
     const removing: string[] = [];
+    const cards: BoardShape[] = [];
+    // One card per artboard per board: a second connector to the same screen reuses it.
+    const screenCard = (artboard: CanvasNode): string => {
+      const existing = [...boardOf(page), ...cards].find((i) => isShape(i) && i.kind === 'screen' && i.ref === artboard.id);
+      if (existing) return existing.id;
+      const card = makeBoardShape({ kind: 'screen', ref: artboard.id, text: artboard.name, ...screenSlot(doc, page, cards), ...screenCardSize(doc, artboard.id) });
+      cards.push(card);
+      known.add(card.id);
+      added.push(card.id);
+      out.push({ action: 'add', item: card });
+      return card.id;
+    };
 
     for (const c of changes) {
       if (c.action === 'add') {
         if (!!c.shape === !!c.connector) throw new Error('An add needs exactly one of shape or connector.');
         if (c.shape) {
           if (c.shape.id && known.has(c.shape.id)) throw new Error(`There is already a board item "${c.shape.id}".`);
-          const shape = makeBoardShape({ ...c.shape, ...(c.shape.id ? { id: c.shape.id } : {}) });
+          const { artboard: screenOfRef, ...shapeIn } = c.shape;
+          let screen: Partial<BoardShape> = {};
+          if (shapeIn.kind === 'screen') {
+            const found = screenOfRef ? anyArtboardRef(doc, page, screenOfRef) : null;
+            if (!found) throw new Error(`A screen card needs artboard: the id or name of an artboard${screenOfRef ? ` (there is no "${screenOfRef}")` : ''}.`);
+            screen = { ref: found.node.id, text: shapeIn.text ?? found.node.name, ...screenCardSize(doc, found.node.id, shapeIn.width) };
+            if (shapeIn.height) screen.height = shapeIn.height;
+          }
+          const shape = makeBoardShape({ ...shapeIn, ...screen, ...(c.shape.id ? { id: c.shape.id } : {}) });
           known.add(shape.id);
           added.push(shape.id);
           out.push({ action: 'add', item: shape });
@@ -2730,7 +2823,7 @@ function registerNoteTools(server: McpServer, ctx: McpContext): void {
           const k = c.connector!;
           const connector = makeConnector({
             ...(k.id ? { id: k.id } : {}),
-            from: toEndpoint(doc, page, k.from, known), to: toEndpoint(doc, page, k.to, known),
+            from: toEndpoint(doc, page, k.from, known, screenCard), to: toEndpoint(doc, page, k.to, known, screenCard),
             route: k.route, arrow: k.arrow, label: k.label, color: k.color, dashed: k.dashed,
             fromSide: k.fromSide, toSide: k.toSide, waypoints: k.waypoints,
           });
@@ -2744,8 +2837,8 @@ function registerNoteTools(server: McpServer, ctx: McpContext): void {
       if (c.action === 'remove') { removing.push(c.id); continue; }
       const { from, to, ...rest } = c.patch;
       const patch: Record<string, unknown> = { ...rest };
-      if (from) patch.from = toEndpoint(doc, page, from, known);
-      if (to) patch.to = toEndpoint(doc, page, to, known);
+      if (from) patch.from = toEndpoint(doc, page, from, known, screenCard);
+      if (to) patch.to = toEndpoint(doc, page, to, known, screenCard);
       out.push({ action: 'update', id: c.id, patch });
     }
 
@@ -2773,7 +2866,7 @@ function registerNoteTools(server: McpServer, ctx: McpContext): void {
       'Supports the four directions, [rect] (rounded) ([stadium]) ((circle)) {diamond}, --> --- -.-> ==>, ' +
       'labels as -->|label| or -- label -->, chains, & and subgraph … end (drawn as sections). A node can ' +
       'be a real artboard — "artboard" in the structured form — so a user flow runs between the actual ' +
-      'screens. Placed to the right of everything on the page unless you give x and y. Lines it cannot ' +
+      'screens; screens on another page appear as screen cards. Placed to the right of everything on the page unless you give x and y. Lines it cannot ' +
       'read are reported, never silently dropped.',
     inputSchema: {
       mermaid: z.string().max(20000).optional(),
@@ -2783,7 +2876,7 @@ function registerNoteTools(server: McpServer, ctx: McpContext): void {
         kind: z.enum(['rect', 'ellipse', 'diamond', 'text']).optional(),
         rounded: z.boolean().optional(),
         color: Color.optional(),
-        artboard: z.string().optional().describe('Id or name of an artboard to use instead of a new shape.'),
+        artboard: z.string().optional().describe('Id or name of an artboard to use instead of a new shape. One on another page is drawn as a screen card (live thumbnail, name, page) laid out with the flow.'),
       })).max(300).optional(),
       edges: z.array(z.object({
         from: z.string(), to: z.string(), label: z.string().max(200).optional(),
@@ -2855,8 +2948,11 @@ function registerNoteTools(server: McpServer, ctx: McpContext): void {
       origin,
       placeArtboards: args.arrangeArtboards,
       artboards: (ref) => {
-        const found = artboardRef(doc, page, ref);
-        return found ? { id: found.id, ...getArtboardSize(found) } : null;
+        const found = anyArtboardRef(doc, page, ref);
+        if (!found) return null;
+        return found.local
+          ? { id: found.node.id, ...getArtboardSize(found.node) }
+          : { id: found.node.id, ...screenCardSize(doc, found.node.id), remote: true };
       },
     });
 

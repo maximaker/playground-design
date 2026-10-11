@@ -75,3 +75,28 @@ test('sections: arranging keeps sectionGap clear of other sections', () => {
   assert.ok(r2.y - (r1.y + r1.height) >= SECTION_LAYOUT.sectionGap, 'sections stay apart');
   assert.equal(Number(doc.nodes.a3!.attrs['data-x']) - Number(doc.nodes.a2!.attrs['data-x']), 390 + SECTION_LAYOUT.gap);
 });
+
+test('cross-page: screen cards resolve, flows resolve, artboard theme picks token values', async () => {
+  const { resolveScreen, screenCardSize, emitBoardSvg, makeBoardShape, findFlow, sectionFlows, artboardTheme, emitHtml } = await import('./index.ts');
+  const doc = doc3();
+  doc.pages.push({ id: 'flows', name: 'User flows', artboards: [], board: [] });
+  const card = makeBoardShape({ kind: 'screen', ref: 'a1', text: 'S1', x: 0, y: 0, ...screenCardSize(doc, 'a1') });
+  const group = makeBoardShape({ kind: 'section', text: 'Sign in\nmore', x: -40, y: -80, width: 400, height: 500 });
+  doc.pages[1]!.board!.push(group, card);
+  assert.deepEqual(resolveScreen(doc, 'a1'), { id: 'a1', name: 'S1', pageId: doc.pages[0]!.id, pageName: doc.pages[0]!.name });
+  assert.ok(card.height > card.width, 'a phone screen makes a tall card');
+  assert.deepEqual(findFlow(doc, group.id), { id: group.id, title: 'Sign in', pageId: 'flows', pageName: 'User flows', kind: 'section' });
+  assert.deepEqual(sectionFlows(doc, { id: 's', title: 's', status: 'draft', artboards: [], order: 0, flows: [group.id, 'gone'] }).map((f) => f.id), [group.id]);
+
+  applyOp(doc, { t: 'remove', ids: ['a1'] });
+  assert.equal(resolveScreen(doc, 'a1'), null);
+  assert.match(emitBoardSvg(doc, doc.pages[1]!), /Missing screen/);
+
+  doc.tokens.push({ name: 'color.bg', group: 'color', values: { default: '#ffffff', dark: '#000000' } });
+  assert.equal(artboardTheme(doc, 'a2'), 'default');
+  applyOp(doc, { t: 'attrs', updates: [{ id: 'a2', attrs: { 'data-theme': 'dark' } }] });
+  assert.equal(artboardTheme(doc, 'a2'), 'dark');
+  assert.match(emitHtml(doc, 'a2').css, /--color-bg: #000000/);
+  applyOp(doc, { t: 'attrs', updates: [{ id: 'a3', attrs: { 'data-theme': 'nonsense' } }] });
+  assert.equal(artboardTheme(doc, 'a3'), 'default', 'an unknown theme falls back');
+});

@@ -3461,3 +3461,35 @@ code { font-family: var(--mono); font-size: 0.92em; }
 /* Zoomed far out, text keeps a readable minimum while the region shrinks: the
    title gives way with an ellipsis so the status pill always stays whole. */
 .section-title { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+
+/* A screen from another page on the board: live thumbnail, name, page. */
+.board-screen {
+  background: #ffffff; border: 1px solid #cfd6df; flex-direction: column; overflow: hidden;
+}
+.board-screen.is-missing { border: 1px dashed #ec6262; }
+.board-screen-thumb {
+  position: relative; flex: none; overflow: hidden; background: #eef1f5; pointer-events: none;
+}
+.board-screen.is-missing .board-screen-thumb { background: #fde5e5; display: flex; align-items: center; justify-content: center; color: #c03d3d; }
+.board-screen-thumb iframe {
+  position: absolute; left: 0; top: 0; border: 0; transform-origin: 0 0; pointer-events: none; background: #fff;
+}
+.board-screen-meta {
+  all: unset; box-sizing: border-box; flex: none; width: 100%; display: flex; flex-direction: column;
+  justify-content: center; gap: 1px; cursor: pointer; min-width: 0;
+}
+.board-screen-meta:disabled { cursor: default; }
+.board-screen-name { font-weight: 600; color: #3b4656; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.board-screen.is-missing .board-screen-name { color: #c03d3d; }
+.board-screen-page { color: #7a8594; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.board-screen-meta:hover:not(:disabled) .board-screen-page { color: var(--accent); }
+
+/* Flow chips on a section header: the user-flow diagrams this run of screens follows. */
+.section-flow {
+  all: unset; flex: 0 0 auto; display: inline-flex; align-items: baseline; gap: 0.45em; cursor: pointer;
+  padding: 0.2em 0.75em; border-radius: var(--radius-pill); font-weight: 500;
+  background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--fg);
+  max-width: 18em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.section-flow:hover { background: color-mix(in srgb, var(--accent) 22%, transparent); }
+.section-flow-label { font-size: 0.8em; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--accent); }

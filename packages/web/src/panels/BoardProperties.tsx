@@ -17,7 +17,7 @@ import { Field, NumberInput, Row, Section, SegmentedControl, TextInput } from '.
 import { Icon } from '../ui/Icon.tsx';
 
 const KIND_NAMES: Record<BoardShape['kind'], string> = {
-  rect: 'Rectangle', ellipse: 'Ellipse', diamond: 'Diamond', text: 'Text', section: 'Section',
+  rect: 'Rectangle', ellipse: 'Ellipse', diamond: 'Diamond', text: 'Text', section: 'Section', screen: 'Screen',
 };
 
 export function BoardProperties() {

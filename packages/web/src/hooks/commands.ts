@@ -641,3 +641,44 @@ export function toggleLock(): void {
   if (!selection.length) return;
   dispatch([{ t: 'meta', updates: selection.map((id) => ({ id, locked: !(doc?.nodes[id]?.locked ?? false) })) }]);
 }
+
+/**
+ * Go to an artboard wherever it is: switch to its page, select it and fit it.
+ * Measured from the document rather than the screen, because on another page
+ * nothing is rendered yet to measure. How a screen card on a user-flow page
+ * opens the real screen.
+ */
+export function jumpToArtboard(id: string): boolean {
+  const doc = getDoc();
+  const node = doc?.nodes[id];
+  const page = doc?.pages.find((p) => p.artboards.includes(id));
+  if (!doc || !node || !page) return false;
+  const state = useCanvas.getState();
+  if (state.pageId !== page.id) state.setPage(page.id);
+  state.selectBoard([]);
+  state.select([id]);
+  const pos = getArtboardPosition(node);
+  const size = getArtboardSize(node);
+  fitBox(pos.x, pos.y, size.width, size.height);
+  return true;
+}
+
+/** Go to a board item (a diagram's section or shape) on any page. */
+export function jumpToBoardItem(pageId: string, itemId: string): boolean {
+  const doc = getDoc();
+  const page = doc?.pages.find((p) => p.id === pageId);
+  const item = page && boardOf(page).find((i) => i.id === itemId);
+  if (!doc || !page || !item) return false;
+  const state = useCanvas.getState();
+  if (state.pageId !== page.id) state.setPage(page.id);
+  state.selectBoard([itemId]);
+  if (isShape(item)) fitBox(item.x, item.y, item.width, item.height);
+  else {
+    const pts = routeConnector(doc, page, item)?.points ?? [];
+    if (pts.length) {
+      const xs = pts.map((p) => p.x), ys = pts.map((p) => p.y);
+      fitBox(Math.min(...xs), Math.min(...ys), Math.max(1, Math.max(...xs) - Math.min(...xs)), Math.max(1, Math.max(...ys) - Math.min(...ys)));
+    }
+  }
+  return true;
+}

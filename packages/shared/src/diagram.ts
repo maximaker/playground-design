@@ -203,7 +203,7 @@ export interface LayoutOptions {
   /** Top-left corner of the diagram in canvas space. */
   origin?: { x: number; y: number };
   /** Resolves `artboard` references to an id and its size. */
-  artboards?: (ref: string) => { id: string; width: number; height: number } | null;
+  artboards?: (ref: string) => { id: string; width: number; height: number; remote?: boolean } | null;
   /**
    * Whether artboards take part in the layout. Off, they are anchors: the
    * diagram is laid out without them and its connectors run to wherever they
@@ -385,9 +385,16 @@ export function layoutDiagram(graph: DiagramGraph, opts: LayoutOptions = {}): La
   const artboardOf = new Map<string, string>();
   const sizes = new Map<string, { width: number; height: number }>();
   const anchored = new Set<string>();
+  // Artboards on another page: drawn as screen cards, laid out like any node.
+  const screenOf = new Map<string, string>();
   for (const n of graph.nodes) {
     if (n.artboard) {
       const found = opts.artboards?.(n.artboard);
+      if (found?.remote) {
+        screenOf.set(n.id, found.id);
+        sizes.set(n.id, { width: found.width, height: found.height });
+        continue;
+      }
       if (found) {
         artboardOf.set(n.id, found.id);
         // Laying out a slot for a screen that is not going to move there put
@@ -467,7 +474,8 @@ export function layoutDiagram(graph: DiagramGraph, opts: LayoutOptions = {}): La
     if (!box) continue;
     const artboard = artboardOf.get(n.id);
     if (artboard) { placed[n.id] = { kind: 'artboard', id: artboard }; continue; }
-    const shape = makeBoardShape({
+    const screen = screenOf.get(n.id);
+    const shape = screen ? makeBoardShape({ kind: 'screen', ref: screen, text: n.label, ...box }) : makeBoardShape({
       kind: n.kind ?? 'rect', text: n.label, ...box,
       color: n.color && BOARD_COLOR_NAMES.includes(n.color) ? n.color : 'neutral',
       ...(n.rounded ? { rounded: true } : {}),

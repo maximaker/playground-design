@@ -1073,6 +1073,12 @@ export function Canvas({ onContextMenu }: CanvasProps) {
     // A shape's text, or a connector's label.
     const boardId = boardIdAt(e.target);
     if (boardId) {
+      // A screen card opens the screen it stands for, on whatever page.
+      const item = boardOf(currentPage()).find((i) => i.id === boardId);
+      if (isShape(item) && item.kind === 'screen') {
+        if (item.ref) void import('../hooks/commands.ts').then((m) => m.jumpToArtboard(item.ref!));
+        return;
+      }
       useCanvas.getState().selectBoard([boardId]);
       useCanvas.getState().setEditingBoard(boardId);
       return;

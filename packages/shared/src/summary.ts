@@ -8,7 +8,7 @@
 
 import {
   type CanvasDocument, type CanvasNode, type NodeId,
-  getArtboardPosition, getArtboardSize,
+  artboardTheme, getArtboardPosition, getArtboardSize,
 } from './model.ts';
 
 export interface TreeSummaryOptions {
@@ -84,7 +84,7 @@ export interface BasicInfo {
   pages: { id: string; name: string; artboardCount: number }[];
   currentPage: string;
   nodeCount: number;
-  artboards: { id: string; name: string; width: number; height: number; x: number; y: number; childCount: number }[];
+  artboards: { id: string; name: string; width: number; height: number; x: number; y: number; childCount: number; theme?: string }[];
   themes: string[];
   tokenCount: number;
 }
@@ -102,7 +102,8 @@ export function basicInfo(doc: CanvasDocument, pageId?: string): BasicInfo {
       if (!n) return [];
       const { width, height } = getArtboardSize(n);
       const { x, y } = getArtboardPosition(n);
-      return [{ id, name: n.name, width, height, x, y, childCount: n.children.length }];
+      const theme = artboardTheme(doc, id);
+      return [{ id, name: n.name, width, height, x, y, childCount: n.children.length, ...(theme !== 'default' ? { theme } : {}) }];
     }),
     themes: doc.themes,
     tokenCount: doc.tokens.length,

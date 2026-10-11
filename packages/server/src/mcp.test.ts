@@ -924,3 +924,89 @@ test('sections: create, arrange, update membership and status, list, delete', as
   assert.equal(getDocument(id)!.pages[0]!.sections!.some((s) => s.id === other.id), false);
   await agent.close();
 });
+
+test('screen cards: a diagram on one page runs between artboards on another', async () => {
+  const { id, agent, call, raw } = await freshAgent('Cross-page flows');
+  const screensPage = getDocument(id)!.pages[0]!.id;
+  const login = await call<{ id: string }>('create_artboard', { name: 'Login', width: 390, height: 844, x: 0, y: 0 });
+  const home = await call<{ id: string }>('create_artboard', { name: 'Home', width: 390, height: 844, x: 600, y: 0 });
+  const flowsPage = (await call<{ pageId: string }>('create_page', { name: 'User flows' })).pageId;
+
+  const drawn = await call<{ ids: string[]; shapes: Record<string, string> }>('write_diagram', {
+    pageId: flowsPage, direction: 'LR',
+    nodes: [
+      { id: 'start', label: 'Open app', kind: 'ellipse' },
+      { id: 'login', label: 'Login', artboard: 'Login' },
+      { id: 'home', label: 'Home', artboard: home.id },
+    ],
+    edges: [{ from: 'start', to: 'login' }, { from: 'login', to: 'home', label: 'signed in' }],
+    groups: [{ label: 'Sign in', members: ['start', 'login', 'home'] }],
+  });
+  const page = getDocument(id)!.pages.find((p) => p.id === flowsPage)!;
+  const cards = page.board!.filter((i) => i.type === 'shape' && i.kind === 'screen');
+  assert.deepEqual(cards.map((c) => (c as { ref?: string }).ref).sort(), [home.id, login.id].sort());
+  // The screens stayed on their own page.
+  assert.deepEqual(getDocument(id)!.pages.find((p) => p.id === screensPage)!.artboards.slice(-2), [login.id, home.id]);
+  const connectors = page.board!.filter((i) => i.type === 'connector');
+  assert.ok(connectors.every((c) => c.type === 'connector' && c.from.kind === 'shape' && c.to.kind === 'shape'));
+
+  type Item = { id: string; kind?: string; screen?: { id?: string; name?: string; pageId?: string; pageName?: string; missing?: boolean } };
+  const board = await call<{ items: Item[] }>('get_board', { pageId: flowsPage });
+  const loginCard = board.items.find((i) => i.kind === 'screen' && i.screen?.id === login.id)!;
+  assert.deepEqual([loginCard.screen!.name, loginCard.screen!.pageId], ['Login', screensPage]);
+
+  // edit_board: a connector end on another page's artboard reuses the card.
+  const edited = await call<{ added: string[] }>('edit_board', {
+    pageId: flowsPage,
+    changes: [{ action: 'add', connector: { from: { artboard: 'Home' }, to: { artboard: 'Login' }, label: 'sign out' } }],
+  });
+  assert.equal(edited.added.length, 1, 'no new cards: both screens already have one');
+  const added = await call<{ added: string[] }>('edit_board', {
+    pageId: flowsPage,
+    changes: [{ action: 'add', shape: { kind: 'screen', artboard: login.id, x: 0, y: 2000, id: 'again' } }],
+  });
+  assert.deepEqual(added.added, ['again']);
+  assert.ok(isError(await raw('edit_board', { pageId: flowsPage, changes: [{ action: 'add', shape: { kind: 'screen', x: 0, y: 0 } }] })));
+
+  // Deleting the screen leaves a missing card, not a crash.
+  await call('delete_nodes', { ids: [home.id] });
+  const after = await call<{ items: Item[] }>('get_board', { pageId: flowsPage });
+  assert.ok(after.items.some((i) => i.kind === 'screen' && i.screen?.missing));
+  const svg = textOf(await raw('get_board', { pageId: flowsPage, svg: true }));
+  assert.match(svg, /Missing screen/);
+  void drawn;
+
+  // Section flows: the screens' section names the diagram on the other page.
+  const diagram = page.board!.find((i) => i.type === 'shape' && i.kind === 'section')!;
+  const section = await call<{ id: string; flows: { id: string; title: string; pageId: string }[] }>(
+    'create_section', { title: 'Auth', artboards: [login.id], flows: [diagram.id], pageId: screensPage });
+  assert.deepEqual(section.flows.map((f) => [f.id, f.title, f.pageId]), [[diagram.id, 'Sign in', flowsPage]]);
+  const info = await call<{ sections: { flows?: { pageId: string }[] }[] }>('get_basic_info', { pageId: screensPage });
+  assert.equal(info.sections[0]!.flows![0]!.pageId, flowsPage);
+  const listed = await call<{ sections: { flows?: { title: string }[] }[] }>('list_sections', { pageId: screensPage });
+  assert.equal(listed.sections[0]!.flows![0]!.title, 'Sign in');
+  assert.ok(isError(await raw('update_section', { id: section.id, flows: ['nope'] })));
+  await agent.close();
+});
+
+test('set_artboard_theme shows one artboard in a document theme', async () => {
+  const { emitStandalone } = await import('@playground/shared');
+  const { id, agent, call, raw } = await freshAgent('Themes');
+  await call('set_tokens', { tokens: [{ name: 'color.surface', group: 'color', values: { default: '#fafafa', dark: '#101010' } }] });
+  const a = await call<{ id: string }>('create_artboard', { name: 'Light', width: 390, height: 844 });
+  const b = await call<{ id: string; theme?: string }>('create_artboard', { name: 'Dark', width: 390, height: 844, theme: 'dark' });
+  assert.equal(b.theme, 'dark');
+  assert.match(emitStandalone(getDocument(id)!, b.id), /:root \{[^}]*--color-surface: #101010/);
+  assert.match(emitStandalone(getDocument(id)!, a.id), /:root \{[^}]*--color-surface: #fafafa/);
+
+  await call('set_artboard_theme', { id: a.id, theme: 'dark' });
+  assert.equal(getDocument(id)!.nodes[a.id]!.attrs['data-theme'], 'dark');
+  const info = await call<{ artboards: { id: string; theme?: string }[] }>('get_basic_info', {});
+  assert.equal(info.artboards.find((x) => x.id === a.id)!.theme, 'dark');
+  await call('set_artboard_theme', { id: a.id, theme: 'default' });
+  assert.equal(getDocument(id)!.nodes[a.id]!.attrs['data-theme'], undefined);
+
+  assert.ok(isError(await raw('set_artboard_theme', { id: a.id, theme: 'sepia' })));
+  assert.ok(isError(await raw('set_artboard_theme', { id: getDocument(id)!.nodes[a.id]!.children[0] ?? 'nope', theme: 'dark' })));
+  await agent.close();
+});

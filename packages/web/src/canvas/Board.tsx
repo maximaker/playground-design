@@ -11,9 +11,10 @@
  * and the agent's picture use. The canvas only decides how to paint it.
  */
 
-import { memo, useEffect, useRef } from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import {
   type BoardItem, type BoardShape, type Connector, type Point,
+  SCREEN_CARD_FOOTER, emitStandalone, getArtboardSize, resolveScreen,
   BOARD_COLORS, BOARD_LABEL_TEXT, BOARD_COLOR_NAMES, BOARD_FONT, BOARD_STYLE, arrowHead, boardOf, diamondPath, isConnector, isShape,
   connectorPathData, pathData, routeConnector, shapeLook, verdictOf,
 } from '@playground/shared';
@@ -126,6 +127,7 @@ export function BoardLayer({ part, preview, dragging }: {
 const ShapeView = memo(function ShapeView({ shape: s, zoom, selected, editing }: {
   shape: BoardShape; zoom: number; selected: boolean; editing: boolean;
 }) {
+  if (s.kind === 'screen') return <ScreenCard shape={s} zoom={zoom} selected={selected} />;
   const S = BOARD_STYLE;
   const look = shapeLook(s);
   const stroke = Math.max(1, look.strokeWidth * zoom);
@@ -187,6 +189,79 @@ const ShapeView = memo(function ShapeView({ shape: s, zoom, selected, editing }:
     </div>
   );
 });
+
+/**
+ * A screen from another page, on this board: a live thumbnail, its name and
+ * the page it lives on. Clicking the name (or double-clicking the card) goes
+ * there. If the artboard has been deleted the card stays, saying so, rather
+ * than taking its connectors with it.
+ */
+function ScreenCard({ shape: s, zoom, selected }: { shape: BoardShape; zoom: number; selected: boolean }) {
+  const version = useCanvas((st) => st.version);
+  // Rebuilding the thumbnail on every keystroke would reload its frame each
+  // time; a beat after the last change is live enough for a card.
+  const [settled, setSettled] = useState(version);
+  useEffect(() => {
+    const t = setTimeout(() => setSettled(version), 400);
+    return () => clearTimeout(t);
+  }, [version]);
+  const doc = getDoc();
+  const target = doc ? resolveScreen(doc, s.ref) : null;
+  const node = target && doc ? doc.nodes[target.id] : undefined;
+  const srcDoc = useMemo(
+    () => (doc && target ? emitStandalone(doc, target.id) : ''),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [doc, target?.id, settled],
+  );
+  const inset = 6;
+  const thumbW = (s.width - inset * 2) * zoom;
+  const thumbH = (s.height - SCREEN_CARD_FOOTER - inset) * zoom;
+  const size = node ? getArtboardSize(node) : { width: 1, height: 1 };
+  const scale = thumbW / Math.max(1, size.width);
+  const open = () => { if (target) void import('../hooks/commands.ts').then((m) => m.jumpToArtboard(target.id)); };
+
+  return (
+    <div
+      className={`board-shape board-screen${target ? '' : ' is-missing'}${selected ? ' is-selected' : ''}`}
+      data-board-id={s.id}
+      style={{
+        left: s.x * zoom, top: s.y * zoom, width: s.width * zoom, height: s.height * zoom,
+        borderRadius: 10 * zoom, boxShadow: cardShadow(zoom), fontFamily: BOARD_FONT,
+        padding: `${inset * zoom}px ${inset * zoom}px 0`,
+      }}
+    >
+      <div className="board-screen-thumb" style={{ height: thumbH, borderRadius: 6 * zoom }}>
+        {target ? (
+          <iframe
+            title={target.name}
+            srcDoc={srcDoc}
+            sandbox=""
+            tabIndex={-1}
+            style={{ width: size.width, height: size.height, transform: `scale(${scale})` }}
+          />
+        ) : (
+          <span className="board-screen-missing" style={{ fontSize: 12 * zoom }}>
+            <Icon name="warning" size={Math.max(10, 18 * zoom)} />
+          </span>
+        )}
+      </div>
+      <button
+        className="board-screen-meta"
+        style={{ height: SCREEN_CARD_FOOTER * zoom, padding: `0 ${4 * zoom}px` }}
+        title={target ? `Open ${target.name} on ${target.pageName}` : 'The artboard this card showed was deleted'}
+        onPointerDown={(e) => { if (target) e.stopPropagation(); }}
+        onClick={open}
+        disabled={!target}
+      >
+        <span className="board-screen-name" style={{ fontSize: 12 * zoom }}>{target ? target.name : 'Missing screen'}</span>
+        <span className="board-screen-page" style={{ fontSize: 11 * zoom }}>
+          {target ? <>{target.pageName} <span aria-hidden>↗</span></> : (s.text || 'artboard deleted')}
+        </span>
+      </button>
+      {selected && <span className="board-outline" />}
+    </div>
+  );
+}
 
 function ResizeHandles({ shape: s, zoom }: { shape: BoardShape; zoom: number }) {
   const w = s.width * zoom;

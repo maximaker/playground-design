@@ -31,6 +31,8 @@ export function useArtboardFrame(id: NodeId, live: boolean, opts: { register?: b
   const register = opts.register ?? true;
   const structureVersion = useCanvas((s) => s.structureVersion);
   const styleEpoch = useCanvas((s) => s.styleEpoch);
+  // The artboard's own version: its data-theme attribute picks the token values.
+  const selfVersion = useCanvas((s) => s.nodeVersions[id] ?? 0);
 
   const frameRef = useRef<HTMLIFrameElement | null>(null);
   const [body, setBody] = useState<HTMLElement | null>(null);
@@ -39,7 +41,7 @@ export function useArtboardFrame(id: NodeId, live: boolean, opts: { register?: b
   const stylesheet = useMemo(
     () => (doc ? artboardStylesheet(doc, id) : ''),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [doc, id, structureVersion, styleEpoch],
+    [doc, id, structureVersion, styleEpoch, selfVersion],
   );
   const fontsHref = useMemo(
     () => (doc ? googleFontsHref(fontFamilies(doc, id)) : null),

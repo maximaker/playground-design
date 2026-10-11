@@ -11,7 +11,7 @@ import { fontFamiliesIn, googleFontsHref } from './fonts.ts';
 import { parse as parseHtmlDom, type HTMLElement as ParsedElement } from 'node-html-parser';
 import {
   type CanvasDocument, type CanvasNode, type NodeId, type NodeType, type StyleMap,
-  contestedProperties, makeNode, newId, defaultStylesFor,
+  artboardTheme, contestedProperties, makeNode, newId, defaultStylesFor,
 } from './model.ts';
 import { type ExpandedNode, expandNode } from './components.ts';
 import {
@@ -102,7 +102,9 @@ export function emitHtml(doc: CanvasDocument, rootId: NodeId, opts: EmitOptions 
   const cssBlocks: string[] = [];
 
   if (opts.includeTokens !== false) {
-    const vars = tokenCss(doc, opts.theme ?? 'default');
+    // An artboard set to a theme resolves its tokens in that theme at :root,
+    // so a dark screen exports, screenshots and publishes dark.
+    const vars = tokenCss(doc, opts.theme ?? artboardTheme(doc, rootId), ':root');
     if (vars) cssBlocks.push(vars);
   }
 
@@ -176,7 +178,7 @@ export function emitHtml(doc: CanvasDocument, rootId: NodeId, opts: EmitOptions 
   };
 }
 
-export function tokenCss(doc: CanvasDocument, theme = 'default'): string {
+export function tokenCss(doc: CanvasDocument, theme = 'default', selector?: string): string {
   const decls = doc.tokens
     .map((t) => {
       const v = t.values[theme] ?? t.values.default;
@@ -184,7 +186,7 @@ export function tokenCss(doc: CanvasDocument, theme = 'default'): string {
     })
     .filter(Boolean);
   if (!decls.length) return '';
-  const sel = theme === 'default' ? ':root' : `:root[data-theme="${theme}"]`;
+  const sel = selector ?? (theme === 'default' ? ':root' : `:root[data-theme="${theme}"]`);
   return `${sel} {\n${decls.join('\n')}\n}`;
 }
 
