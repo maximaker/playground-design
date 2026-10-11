@@ -204,6 +204,7 @@ Artifactory's origin gets an answer that allows the session cookie.
 | `create_artboard` | New screen, placed clear of existing work, on the current page |
 | `fit_artboard` | Set an artboard's height to its rendered content, plus optional `padBottom` |
 | `create_page` / `set_current_page` / `rename_page` / `delete_page` | Pages. Each connection has its own current page. `create_page` starts empty; `withArtboard: true` adds a 1440×900 frame |
+| `create_comment` | Opens a real comment thread on a layer or page, attributed to the connection (`authorKind: "agent"`); people reply, `reply_to_comment` / `resolve_comment` with `outcome` settle it into the decisions log |
 | `list_decisions` / `add_decision` | The document's decisions log — decision, who, date, and the thread and layer it came from (`format: "markdown"` for handoff). `resolve_comment` takes `outcome` to log a thread's result; people do the same with Resolve… in a thread, and read the log under Comments → Decisions. The log travels in the document bundle export |
 | `create_section` / `update_section` | Titled groups of screens with a status. Both take `flowCard: { code, title, role, persona, goal, feedback[] }` (null removes it): the header reads "F3 · Title" and the card is drawn at the start of the section, left of the first screen; `list_sections` returns it with the `heading` |
 | `set_version_state` | Mark a page or section `current` or `superseded` (with `reason` and `replacedBy`) instead of emoji in names. The Pages panel badges the current one and dims superseded ones; `list_sections` and `list_pages` report it |
@@ -359,8 +360,11 @@ vanishes with the layer is worse than no comment.
 
 Agents read them. `list_comments` is the actual brief, more specific than anything an agent will
 infer from the design alone; `reply_to_comment` puts the answer on the pin where the question was
-asked; `resolve_comment` refuses to close a thread with no reply on it, because a thread that goes
-quiet and then closes tells the person who raised it nothing.
+asked; `resolve_comment` refuses to close a thread with no reply or outcome on it, because a thread
+that goes quiet and then closes tells the person who raised it nothing. Agents also open threads of
+their own with `create_comment` — real threads, attributed to the connection's label and marked
+`authorKind: "agent"` — so review findings land where people already look, and settle into the
+decisions log like anyone else's.
 
 A view-only link can comment — that is the reason to send one — and nothing else. Both transports run
 the same rule, and it allows only the additive parts: adding, replying, resolving. Rewriting or

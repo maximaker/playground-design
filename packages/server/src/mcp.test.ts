@@ -1337,3 +1337,20 @@ test('get_screenshots returns one contact sheet', async () => {
   }
   await agent.close();
 });
+
+test('agents open real comment threads and settle them into the decisions log', async () => {
+  const { id, agent, call } = await freshAgent('Agent threads');
+  const board = getDocument(id)!.pages[0]!.artboards[0]!;
+  const made = await call<{ id: string; author: string }>('create_comment', { nodeId: board, text: 'Contrast on the CTA is 3.1:1' });
+  assert.equal(made.author, 'Agent threads agent');
+  const c = getDocument(id)!.comments!.find((x) => x.id === made.id)!;
+  assert.equal(c.authorKind, 'agent');
+  assert.equal(c.nodeId, board);
+  const listed = await call<{ comments: { id: string; authorKind: string }[] }>('list_comments', {});
+  assert.equal(listed.comments.find((x) => x.id === made.id)!.authorKind, 'agent');
+  await call('reply_to_comment', { id: made.id, text: 'Darkened to 4.8:1' });
+  const res = await call<{ resolved: boolean; decision: { decision: string; by: string } }>('resolve_comment', { id: made.id, outcome: 'CTA uses ink-900' });
+  assert.equal(res.decision.decision, 'CTA uses ink-900');
+  assert.equal(res.decision.by, 'Agent threads agent');
+  await agent.close();
+});

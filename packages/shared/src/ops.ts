@@ -663,6 +663,7 @@ function applyComment(doc: CanvasDocument, op: Extract<Op, { t: 'comment' }>): O
       x: op.comment.x ?? 0,
       y: op.comment.y ?? 0,
       author: op.comment.author ?? 'Guest',
+      ...(op.comment.authorKind ? { authorKind: op.comment.authorKind } : {}),
       text: op.comment.text ?? '',
       resolved: op.comment.resolved ?? false,
       createdAt: op.comment.createdAt ?? Date.now(),

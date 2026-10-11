@@ -169,6 +169,11 @@ export function attachRealtime(server: Server): WebSocketServer {
  * signed in the whole time.
  */
 function attributed(op: OpEnvelope['op'], session: Session): OpEnvelope['op'] {
+  // Only the MCP path may mark a thread as an agent's; a tab cannot claim it.
+  if (op.t === 'comment' && op.action === 'add' && op.comment.authorKind) {
+    const { authorKind, ...rest } = op.comment; void authorKind;
+    op = { ...op, comment: rest };
+  }
   if (!session.peer.userId || op.t !== 'comment') return op;
   if (op.action === 'add') {
     return { ...op, comment: { ...op.comment, author: session.peer.name } };

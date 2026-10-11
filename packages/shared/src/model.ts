@@ -257,6 +257,8 @@ export interface Comment {
   x: number;
   y: number;
   author: string;
+  /** Who opened the thread: a person, or an agent through its connection. Absent means human. */
+  authorKind?: 'human' | 'agent';
   text: string;
   resolved: boolean;
   createdAt: number;
@@ -299,6 +301,7 @@ export function makeComment(partial: Partial<Comment> & { pageId: string }): Com
     x: partial.x ?? 0,
     y: partial.y ?? 0,
     author: partial.author ?? 'Guest',
+    ...(partial.authorKind ? { authorKind: partial.authorKind } : {}),
     text: partial.text ?? '',
     resolved: partial.resolved ?? false,
     createdAt: partial.createdAt ?? Date.now(),

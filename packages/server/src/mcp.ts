@@ -92,7 +92,7 @@ const TOOLSETS: Record<string, readonly string[]> = {
   handover: ['export', 'get_spec', 'mark_checkpoint', 'changes_since', 'annotate',
     'publish_page', 'unpublish_page', 'get_publication'],
   collab: ['list_notes', 'claim_note', 'respond_to_note', 'create_note', 'update_note', 'delete_note', 'list_comments',
-    'reply_to_comment', 'resolve_comment', 'start_working_on_nodes', 'finish_working_on_nodes'],
+    'create_comment', 'reply_to_comment', 'resolve_comment', 'start_working_on_nodes', 'finish_working_on_nodes'],
   diagrams: ['get_board', 'edit_board', 'write_diagram'],
 };
 
@@ -4659,6 +4659,42 @@ function registerCommentTools(server: McpServer, ctx: McpContext): void {
     });
   }));
 
+  server.registerTool('create_comment', {
+    title: 'Start a comment thread',
+    description:
+      'Opens a real comment thread — the same as a person’s, pinned on the canvas and attributed to this '
+      + 'connection — for feedback, a question, or a review finding. People can reply; you reply with '
+      + 'reply_to_comment and settle it with resolve_comment (outcome goes to the decisions log). Use '
+      + 'annotate instead for handover notes about behaviour.',
+    inputSchema: {
+      nodeId: z.string().optional().describe('The layer it is about. Omit for a page-level thread (then pass pageId or x/y).'),
+      text: z.string().min(1).max(4000),
+      pageId: z.string().optional(),
+      x: z.number().optional().describe('Canvas x for the pin; defaults to the layer’s artboard corner.'),
+      y: z.number().optional(),
+    },
+  }, async ({ nodeId, text: body, pageId, x, y }) => guard(() => {
+    const doc = requireDoc(ctx);
+    const target = nodeId ? node(doc, nodeId) : undefined;
+    const board = nodeId ? artboardOf(doc, nodeId) : null;
+    const page = (nodeId ? doc.pages.find((p) => p.artboards.includes(board ?? '')) : undefined)
+      ?? (pageId ? doc.pages.find((p) => p.id === pageId) : undefined);
+    if (pageId && !page) return fail(`No page "${pageId}". Call list_pages.`);
+    const pos = board && doc.nodes[board] ? getArtboardPosition(doc.nodes[board]!) : { x: 0, y: 0 };
+    const comment = makeComment({
+      pageId: (page ?? pageOf(ctx, doc)).id,
+      kind: 'comment',
+      ...(nodeId ? { nodeId } : {}),
+      x: x ?? pos.x + (board && doc.nodes[board] ? getArtboardSize(doc.nodes[board]!).width : 0),
+      y: y ?? pos.y,
+      author: ctx.connection.label ?? 'Agent',
+      authorKind: 'agent',
+      text: body,
+    });
+    commit(ctx, [{ t: 'comment', action: 'add', comment }]);
+    return json({ id: comment.id, author: comment.author, ...(target ? { about: { id: target.id, name: target.name } } : {}) });
+  }));
+
   server.registerTool('list_comments', {
     title: 'Read the feedback on this design',
     description:
@@ -4716,9 +4752,9 @@ function registerCommentTools(server: McpServer, ctx: McpContext): void {
     const doc = requireDoc(ctx);
     const comment = (doc.comments ?? []).find((c) => c.id === id);
     if (!comment) return fail(`No comment "${id}". Call list_comments for current ids.`);
-    if (resolved && comment.replies.length === 0) {
+    if (resolved && comment.replies.length === 0 && !outcome?.trim()) {
       return fail(
-        `Comment "${id}" has no replies. Call reply_to_comment first to say what you did — ` +
+        `Comment "${id}" has no replies. Call reply_to_comment first to say what you did, or pass an outcome — ` +
         `resolving silently leaves the person who raised it with no idea whether it was understood.`,
       );
     }
@@ -4778,6 +4814,7 @@ function describeComment(doc: CanvasDocument, c: Comment) {
   return {
     id: c.id,
     author: c.author,
+    authorKind: c.authorKind ?? 'human',
     text: c.text,
     resolved: c.resolved,
     createdAt: new Date(c.createdAt).toISOString(),
