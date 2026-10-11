@@ -378,7 +378,10 @@ export async function measureSubtree(
     // Measuring for a fit: the frame's fixed height squeezes its content (an
     // artboard is a flex column), so let it take its natural height first.
     if (opts.unbounded) {
-      await page.addStyleTag({ content: 'html, body { height: auto !important; overflow: visible !important; } body > :first-child { height: auto !important; min-height: 0 !important; max-height: none !important; overflow: visible !important; }' });
+      // Target the artboard by id: the body's first child can be a style or
+      // font tag rather than the frame.
+      const sel = `[data-node-id="${artboardId}"]`;
+      await page.addStyleTag({ content: `html, body { height: auto !important; overflow: visible !important; } ${sel} { height: auto !important; min-height: 0 !important; max-height: none !important; overflow: visible !important; }` });
     }
     return (await page.evaluate(`(() => {
       const out = {};
