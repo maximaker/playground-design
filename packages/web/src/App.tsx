@@ -44,6 +44,7 @@ import {
   type Appearance, applyAppearance, loadAppearance, saveAppearance, watchSystemTheme,
 } from './state/appearance.ts';
 import { Home } from './Home.tsx';
+import { SectionList } from './canvas/SectionLayer.tsx';
 
 type LeftTab = 'layers' | 'pages' | 'components' | 'tokens';
 
@@ -629,6 +630,7 @@ function Editor({ source, onHome, appearance, onAppearance, session }: {
                     setPage(page.id);
                   }}
                 >+ New page</button>
+                <SectionList />
               </div>
             )}
             {leftTab === 'components' && <Components />}

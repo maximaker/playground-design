@@ -16,9 +16,9 @@ import type { Op } from './ops.ts';
 
 export const SECTION_LAYOUT = {
   /** Space between the members' box and the region edge. */
-  padding: 48,
+  padding: 64,
   /** Height of the header strip above the members. */
-  header: 96,
+  header: 120,
   /** Gap between screens when a section is arranged in a row. */
   gap: 80,
 };
@@ -72,7 +72,7 @@ export function sectionTint(color: string | undefined): { bg: string; border: st
   const named = color && NOTE_COLORS[color as NoteColor];
   if (named) return { bg: named.bg, border: named.border };
   if (color) return { bg: color, border: color };
-  return { bg: 'rgba(255,255,255,0.55)', border: '#d5dde8' };
+  return { bg: 'rgba(255, 255, 255, 0.72)', border: '#d5dde8' };
 }
 
 /**

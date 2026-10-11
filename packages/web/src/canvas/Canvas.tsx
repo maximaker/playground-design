@@ -14,6 +14,8 @@ import { resolveKey, treeNodeId } from '../state/keys.ts';
 import { artboardOf } from '@playground/shared';
 import { Artboard } from './Artboard.tsx';
 import { NoteCard } from './NoteCard.tsx';
+import { SectionLayer } from './SectionLayer.tsx';
+import { sectionAt, sectionOfArtboard } from '@playground/shared';
 import { BoardLayer, type BoardHandle, type ConnectPreview } from './Board.tsx';
 import {
   boardIdAt, boardKindFor, drawnShape, endpointAt, moveChanges, movingSet, resizedBox, restoreMove,
@@ -49,6 +51,7 @@ type Drag =
   | { kind: 'move-absolute'; ids: NodeId[]; startX: number; startY: number; origins: Record<NodeId, { left: number; top: number }>; batch: string; restore: Op; candidates: Box[]; container: Box | null; size: { width: number; height: number } }
   | { kind: 'resize'; start: ResizeStart; startX: number; startY: number; batch: string; restore: Op; candidates: Box[]; container: Box | null }
   | { kind: 'draw'; startX: number; startY: number; artboardId: NodeId | null }
+  | { kind: 'move-section'; id: string; startX: number; startY: number; origins: Record<NodeId, { x: number; y: number }>; batch: string; restore: Op }
   | { kind: 'move-note'; id: string; startX: number; startY: number; origin: { x: number; y: number }; batch: string; restore: Op }
   // --- The board ---
   | { kind: 'board-maybe-move'; startX: number; startY: number; origins: Record<string, { x: number; y: number }>; clicked: string; narrow: boolean }
@@ -346,6 +349,27 @@ export function Canvas({ onContextMenu }: CanvasProps) {
       }
     }
 
+    // The header strip of a section drags the section with its screens.
+    const sectionEl = (e.target as HTMLElement).closest<HTMLElement>('[data-section-header]');
+    if (sectionEl && tool === 'move' && !e.button && !spacePanning) {
+      const id = sectionEl.dataset.sectionHeader!;
+      const section = page.sections?.find((x) => x.id === id);
+      if (section) {
+        const origins: Record<NodeId, { x: number; y: number }> = {};
+        for (const a of section.artboards) if (doc.nodes[a]) origins[a] = getArtboardPosition(doc.nodes[a]!);
+        drag.current = {
+          kind: 'move-section', id, startX: e.clientX, startY: e.clientY, origins, batch: `b_${Date.now()}`,
+          restore: {
+            t: 'attrs',
+            updates: Object.entries(origins).map(([a, o]) => ({ id: a, attrs: { 'data-x': String(o.x), 'data-y': String(o.y) } })),
+          },
+        };
+        useCanvas.getState().select(Object.keys(origins));
+        setDragging(true);
+        return;
+      }
+    }
+
     setDragging(true);
     const panning = spacePanning || tool === 'hand' || e.button === 1;
     if (panning) {
@@ -606,6 +630,16 @@ export function Canvas({ onContextMenu }: CanvasProps) {
         return;
       }
 
+      case 'move-section': {
+        dispatch([{
+          t: 'attrs',
+          updates: Object.entries(d.origins).map(([id, o]) => ({
+            id, attrs: { 'data-x': String(Math.round(o.x + dx)), 'data-y': String(Math.round(o.y + dy)) },
+          })),
+        }], { batch: d.batch, skipUndo: true });
+        return;
+      }
+
       case 'move-note': {
         dispatch([{
           t: 'note', action: 'update', pageId: page!.id,
@@ -846,7 +880,11 @@ export function Canvas({ onContextMenu }: CanvasProps) {
 
     // Intermediate frames of a drag were dispatched with skipUndo; record the
     // whole gesture as one undo entry now.
-    if (d.kind === 'move-artboards' || d.kind === 'move-absolute' || d.kind === 'resize' || d.kind === 'move-note') {
+    if (d.kind === 'move-artboards') {
+      useCanvas.getState().pushUndo([...regroupDropped(d.ids), d.restore], selection);
+      return;
+    }
+    if (d.kind === 'move-section' || d.kind === 'move-absolute' || d.kind === 'resize' || d.kind === 'move-note') {
       useCanvas.getState().pushUndo([d.restore], selection);
       return;
     }
@@ -1113,6 +1151,7 @@ export function Canvas({ onContextMenu }: CanvasProps) {
         style={{ transform: `translate(${viewport.x - origin.x}px, ${viewport.y - origin.y}px)` }}
       >
         {/* Sections under the artboards, so one can gather screens into a flow. */}
+        <SectionLayer />
         <BoardLayer part="under" />
         {page.artboards.map((id) => (
           <Artboard key={id} id={id} live={visibleArtboards.has(id)} />
@@ -1232,4 +1271,38 @@ function nodeSpecFor(tool: string, width: number, height: number) {
         styles: { ...defaultStylesFor('frame'), width: `${Math.round(width)}px`, height: `${Math.round(height)}px` },
       };
   }
+}
+
+/**
+ * After artboards are dropped: each one whose centre lands in a section joins
+ * it, and one dragged clear of its own section leaves. Returns the inverse ops,
+ * in the order undo must apply them.
+ */
+function regroupDropped(ids: NodeId[]): Op[] {
+  const doc = getDoc();
+  const page = currentPage();
+  if (!doc || !page?.sections?.length) return [];
+  const next = new Map(page.sections.map((s) => [s.id, [...s.artboards]]));
+  for (const id of ids) {
+    const node = doc.nodes[id];
+    if (!node || !page.artboards.includes(id)) continue;
+    const p = getArtboardPosition(node);
+    const size = getArtboardSize(node);
+    const current = sectionOfArtboard(page, id);
+    // A sole member carries its section with it rather than leaving it empty.
+    if (current && current.artboards.filter((a) => doc.nodes[a]).length === 1) continue;
+    const target = sectionAt(doc, page, p.x + size.width / 2, p.y + size.height / 2, id);
+    if (target?.id === current?.id) continue;
+    if (current) next.set(current.id, next.get(current.id)!.filter((a) => a !== id));
+    if (target) next.get(target.id)!.push(id);
+  }
+  const changed = page.sections.filter((s) => next.get(s.id)!.join() !== s.artboards.join());
+  if (!changed.length) return [];
+  // Leaving first, then joining, so no artboard is ever in two sections.
+  const shrinking = changed.filter((s) => next.get(s.id)!.length < s.artboards.length);
+  const growing = changed.filter((s) => !shrinking.includes(s));
+  const forward: Op[] = [...shrinking, ...growing].map((s) => ({ t: 'section', action: 'update', pageId: page.id, section: { id: s.id, artboards: next.get(s.id)! } }));
+  const inverse: Op[] = [...growing, ...shrinking].map((s) => ({ t: 'section', action: 'update', pageId: page.id, section: { id: s.id, artboards: [...s.artboards] } }));
+  useCanvas.getState().dispatch(forward, { skipUndo: true });
+  return inverse;
 }
