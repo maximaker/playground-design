@@ -1117,7 +1117,7 @@ function registerReadTools(server: McpServer, ctx: McpContext): void {
       'reflow, and structures repeated enough to deserve a component. It is also the document ' +
       'health check: fonts Google Fonts will not serve (they fall back silently), stylesheet rules from ' +
       'write_html that matched nothing or nearly every element, frames whose content is cut off ' +
-      '(measured headlessly), text contrast in each frame's own theme (pass allThemes to check every theme), ' +
+      '(measured headlessly), text contrast in each frame’s own theme (pass allThemes to check every theme), ' +
       'empty frames, and section headers that clip.\n\n' +
       'Returns JSON; each finding has rule, severity, node, artboard, page and a plain message.\n\n' +
       'Run this on your own work before handing it back. get_guide describes what good output looks ' +
