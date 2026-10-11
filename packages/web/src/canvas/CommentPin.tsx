@@ -71,7 +71,7 @@ export const CommentPin = memo(function CommentPin({ comment, scale }: {
       onPointerDown={(e) => e.stopPropagation()}
     >
       <button
-        className="comment-marker"
+        className={`comment-marker${isAgentThread(comment) ? ' is-agent' : ''}`}
         title={comment.resolved ? 'Resolved' : `${comment.author}: ${comment.text}`}
         aria-expanded={open}
         onClick={() => setOpenComment(open ? null : comment.id)}
@@ -84,7 +84,7 @@ export const CommentPin = memo(function CommentPin({ comment, scale }: {
 
       {open && (
         <Thread>
-          <Entry author={comment.author} text={comment.text} at={comment.createdAt} />
+          <Entry author={comment.author} text={comment.text} at={comment.createdAt} agent={isAgentThread(comment)} />
           {comment.replies.map((r) => (
             <Entry key={r.id} author={r.author} text={r.text} at={r.createdAt} agent={r.kind === 'agent'} />
           ))}
@@ -161,6 +161,16 @@ function Thread({ children }: { children: ReactNode }) {
     if (box.right > room.right - 8 && box.left - box.width - 40 > room.left) setLeft(true);
   }, []);
   return <div ref={ref} className={`comment-thread${left ? ' is-left' : ''}`}>{children}</div>;
+}
+
+/**
+ * Whether an agent started this thread. Replies have always said so (`kind`);
+ * threads are newer, and the field is read loosely so a document written by a
+ * server that names it differently still shows the badge rather than nothing.
+ */
+export function isAgentThread(c: Comment): boolean {
+  const x = c as Comment & { authorKind?: string; agent?: unknown; origin?: { kind?: string } };
+  return x.authorKind === 'agent' || !!x.agent || x.origin?.kind === 'agent';
 }
 
 function Entry({ author, text, at, agent }: { author: string; text: string; at: number; agent?: boolean }) {

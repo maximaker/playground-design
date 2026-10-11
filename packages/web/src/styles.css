@@ -2064,6 +2064,8 @@ code { font-family: var(--mono); font-size: 0.92em; }
 }
 .comment-marker:hover { transform: scale(1.08); }
 .comment-pin.is-resolved .comment-marker { background: var(--fg-faint); }
+/* An agent's thread reads as the agent's at a glance: inverted, not a new colour. */
+.comment-marker.is-agent { background: var(--fg); color: var(--bg); }
 
 .comment-count {
   position: absolute; top: -0.35rem; right: -0.35rem;
@@ -3357,6 +3359,21 @@ code { font-family: var(--mono); font-size: 0.92em; }
 .connect-live svg { color: var(--accent); flex: 0 0 auto; margin-top: 0.2rem; }
 .connect-create { display: flex; flex-direction: column; align-items: flex-start; gap: var(--s2); }
 .connect-create .dim { font-size: 0.82rem; }
+.connect-options {
+  display: grid; grid-template-columns: 1fr 1fr; gap: var(--s2) var(--s3);
+  margin-bottom: var(--s3);
+}
+.connect-options .field { display: flex; flex-direction: column; gap: 0.2rem; }
+.connect-options select {
+  font: inherit; font-size: 0.85rem; padding: 0.35rem 0.5rem; border-radius: 6px;
+  border: 1px solid var(--border-strong); background: transparent; color: var(--fg);
+}
+.connect-check { grid-column: 1 / -1; display: flex; gap: 0.45rem; align-items: center; font-size: 0.85rem; }
+.connect-sections { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 0.3rem; padding-left: var(--s3); }
+.connect-tag {
+  font-weight: 400; font-size: 0.72rem; margin-left: 0.4rem; padding: 0 0.4rem;
+  border-radius: 99px; border: 1px solid var(--border-strong); color: var(--fg-muted);
+}
 .connect-steps { margin: 0; padding-left: 1.3rem; display: flex; flex-direction: column; gap: var(--s3); font-size: 0.9rem; line-height: 1.5; }
 .connect-steps .snippet { margin-top: var(--s2); }
 .connect-warning { margin: 0; padding: var(--s3); border-radius: var(--radius); font-size: 0.85rem; background: color-mix(in srgb, #d97706 14%, transparent); }

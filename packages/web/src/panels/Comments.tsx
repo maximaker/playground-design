@@ -10,6 +10,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { NOTE_KIND_LABELS, commentsOf, decisionsOf, describeDecision, decisionsMarkdown } from '@playground/shared';
 import { useCanvas, getDoc, currentPage } from '../state/store.ts';
 import { Icon } from '../ui/Icon.tsx';
+import { isAgentThread } from '../canvas/CommentPin.tsx';
 
 export function Comments() {
   const version = useCanvas((s) => s.version);
@@ -116,6 +117,7 @@ export function Comments() {
                 </span>
               )}
               <strong>{c.author}</strong>
+              {isAgentThread(c) && <span className="comment-agent-tag">agent</span>}
               {c.resolved && <Icon name="check" size={11} />}
               {c.replies.length > 0 && <span className="dim">{c.replies.length} repl{c.replies.length === 1 ? 'y' : 'ies'}</span>}
             </div>
