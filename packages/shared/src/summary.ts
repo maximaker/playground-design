@@ -108,3 +108,61 @@ export function basicInfo(doc: CanvasDocument, pageId?: string): BasicInfo {
     tokenCount: doc.tokens.length,
   };
 }
+
+/** One node as a structured row: what get_tree_summary and find_nodes return. */
+export interface NodeEntry {
+  id: NodeId;
+  type: CanvasNode['type'];
+  tag: string;
+  name: string;
+  text?: string;
+  parent: NodeId | null;
+  depth: number;
+  childCount: number;
+  width?: string;
+  height?: string;
+  styles?: Record<string, string>;
+  /** The compact one-line form the text outline used. */
+  line: string;
+}
+
+export function nodeEntry(node: CanvasNode, depth: number, includeStyles = false): NodeEntry {
+  return {
+    id: node.id,
+    type: node.type,
+    tag: node.tag,
+    name: node.name,
+    ...(typeof node.text === 'string' && node.text
+      ? { text: node.text.length > 120 ? node.text.slice(0, 119) + '…' : node.text }
+      : {}),
+    parent: node.parent,
+    depth,
+    childCount: node.children.length,
+    ...(node.styles.width ? { width: node.styles.width } : {}),
+    ...(node.styles.height ? { height: node.styles.height } : {}),
+    ...(includeStyles ? { styles: { ...node.styles } } : {}),
+    line: describeNode(node, includeStyles),
+  };
+}
+
+/** The same walk as `treeSummary`, as rows. `truncated` says a limit cut it short. */
+export function treeEntries(
+  doc: CanvasDocument,
+  rootId: NodeId,
+  opts: TreeSummaryOptions = {},
+): { nodes: NodeEntry[]; truncated: boolean } {
+  const maxDepth = opts.depth ?? 6;
+  const maxNodes = opts.maxNodes ?? 400;
+  const nodes: NodeEntry[] = [];
+  let truncated = false;
+  const walk = (id: NodeId, depth: number) => {
+    const node = doc.nodes[id];
+    if (!node) return;
+    if (nodes.length >= maxNodes) { truncated = true; return; }
+    nodes.push(nodeEntry(node, depth, opts.includeStyles));
+    if (depth >= maxDepth) return;
+    for (const c of node.children) walk(c, depth + 1);
+  };
+  walk(rootId, 0);
+  return { nodes, truncated };
+}

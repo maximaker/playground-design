@@ -22,7 +22,10 @@ import {
   listDocuments, createSnapshot, listSnapshots, opsSince, restoreSnapshot, touchDocument, StoreError,
 } from './store.ts';
 import { peersOf, hasLiveTab } from './realtime.ts';
-import { createConnection, listConnections, resolveConnection, revokeConnection } from './connections.ts';
+import {
+  ConnectionError, createConnection, createProjectConnection, listConnections, projectDocuments, resolveConnection, revokeConnection,
+  type Connection,
+} from './connections.ts';
 import { handleMcpRequest } from './mcp.ts';
 import { getAsset, storeAsset, AssetError, MAX_ASSET_BYTES } from './assets.ts';
 import {
@@ -676,8 +679,32 @@ api.post('/documents/:id/connections', async (c) => {
   const doc = await requireDocument(c.req.param('id'));
   const body = await c.req.json<{ label?: string }>().catch(() => ({} as { label?: string }));
   const conn = await createConnection(doc.id, body.label);
+  return c.json(connectionSetup(conn), 201);
+});
+
+/**
+ * A connection for every document in a project. The agent starts on `docId`
+ * (or the most recently changed document) and moves with switch_document.
+ */
+api.post('/projects/:id/connections', async (c) => {
+  const body = await c.req.json<{ label?: string; docId?: string }>().catch(() => ({} as { label?: string; docId?: string }));
+  try {
+    const conn = await createProjectConnection(c.req.param('id'), body.label, body.docId);
+    return c.json({ ...connectionSetup(conn), documents: await projectDocuments(c.req.param('id')) }, 201);
+  } catch (err) {
+    return c.json({ error: err instanceof ConnectionError ? err.message : String(err) }, 400);
+  }
+});
+
+api.get('/projects/:id/connections', async (c) => {
+  const store = await persistence();
+  const rows = (await store.loadConnections()).filter((r) => r.projectId === c.req.param('id') && !r.revoked);
+  return c.json({ connections: rows.map(({ revoked, ...rest }) => { void revoked; return rest; }) });
+});
+
+function connectionSetup(conn: Connection) {
   const url = `${PUBLIC_URL}/mcp/${conn.code}`;
-  return c.json({
+  return {
     connection: conn,
     url,
     setup: {
@@ -700,8 +727,8 @@ api.post('/documents/:id/connections', async (c) => {
       vscode: { servers: { canvas: { type: 'http', url } } },
     },
     expiresIn: 'The code stops working if unused for 30 minutes before its first connection.',
-  }, 201);
-});
+  };
+}
 
 api.delete('/connections/:code', async (c) =>
   (await revokeConnection(c.req.param('code'))) ? c.json({ ok: true }) : c.json({ error: 'not found' }, 404));

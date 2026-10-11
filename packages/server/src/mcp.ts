@@ -31,7 +31,7 @@ import {
   type BoardChange, type BoardColor, type Endpoint, type DiagramGraph,
   BOARD_COLOR_NAMES, boardBounds, boardOf, danglingConnectors, deleteBoardItems, emitBoardSvg, isShape,
   layoutDiagram, makeBoardShape, makeConnector, parseMermaid, routeConnector,
-  artifactoryEmbedUrl,
+  artifactoryEmbedUrl, treeEntries, nodeEntry, type InstanceOverride,
 } from '@playground/shared';
 import {
   applyOps, getDocument, getSnapshot, listSnapshots, StoreError, createSnapshot,
@@ -39,14 +39,18 @@ import {
 } from './store.ts';
 import { persistence } from './persistence.ts';
 import { pageArtboard, slugify } from './publish.ts';
-import { callTab, notifyTabs, selectionOf, hasLiveTab, NoTabError } from './realtime.ts';
-import { renderNode, measureSubtree, rasterizeSvg } from './render.ts';
+import {
+  callTab, notifyTabs, selectionOf, hasLiveTab, NoTabError, setAgentPresence, clearAgentPresence, hasTabOnPage,
+} from './realtime.ts';
+import { renderNode, measureSubtree, rasterizeSvg, computeStyles } from './render.ts';
 import { storeAsset } from './assets.ts';
 import { GUIDES, guideList } from './guides.ts';
 import { importUrl, ImportError } from './import.ts';
 import { importUrlLive, tokenise, tokensFromVars } from './import-live.ts';
 import { getTemplate, templateSummaries } from './templates.ts';
-import { touchConnection, type Connection } from './connections.ts';
+import {
+  touchConnection, switchConnectionDocument, projectDocuments, ConnectionError, type Connection,
+} from './connections.ts';
 
 // ---------------------------------------------------------------------------
 // Helpers shared by the tool handlers
@@ -75,14 +79,14 @@ const TOOLSETS: Record<string, readonly string[]> = {
     'list_templates', 'apply_template', 'import_url', 'preview_at_width',
     'get_breakpoints', 'set_breakpoints'],
   components: ['list_components', 'create_component', 'find_repeated_shapes', 'auto_componentise',
-    'name_layers', 'componentise', 'insert_instance', 'set_override', 'get_instance',
+    'name_layers', 'componentise', 'insert_instance', 'replace_with_instance', 'set_override', 'get_instance',
     'set_component_props', 'set_variant', 'set_instance_props', 'detach_instance'],
   code: ['get_jsx', 'sync_tokens_from_code', 'export_tokens', 'check_token_drift',
     'get_code_component_guide', 'register_code_component', 'list_code_components',
     'add_code_instance', 'set_code_props', 'remove_code_component', 'get_code_usage'],
   handover: ['export', 'get_spec', 'mark_checkpoint', 'changes_since', 'annotate',
     'publish_page', 'unpublish_page', 'get_publication'],
-  collab: ['list_notes', 'claim_note', 'respond_to_note', 'create_note', 'list_comments',
+  collab: ['list_notes', 'claim_note', 'respond_to_note', 'create_note', 'update_note', 'delete_note', 'list_comments',
     'reply_to_comment', 'resolve_comment', 'start_working_on_nodes', 'finish_working_on_nodes'],
   diagrams: ['get_board', 'edit_board', 'write_diagram'],
 };
@@ -198,6 +202,7 @@ async function guard<T>(fn: () => Promise<T> | T): Promise<T | ReturnType<typeof
   } catch (err) {
     if (err instanceof NoTabError) return fail(err.message);
     if (err instanceof StoreError) return fail(`Rejected: ${err.message}`);
+    if (err instanceof ConnectionError) return fail(err.message);
     return fail(err instanceof Error ? err.message : String(err));
   }
 }
@@ -379,6 +384,90 @@ function componentisePlan(
   return { ops, componentId, definitionRoot: root.id };
 }
 
+// ---------------------------------------------------------------------------
+// Layer names and instance swaps
+// ---------------------------------------------------------------------------
+
+const ROLE_BY_TAG: Record<string, string> = {
+  button: 'Button', a: 'Link', img: 'Image', svg: 'Icon', ul: 'List', ol: 'List', li: 'Item',
+  nav: 'Nav', header: 'Header', footer: 'Footer', main: 'Main', aside: 'Sidebar', section: 'Section',
+  article: 'Card', form: 'Form', input: 'Input', textarea: 'Text area', select: 'Select', label: 'Label',
+  h1: 'Heading', h2: 'Heading', h3: 'Heading', h4: 'Heading', h5: 'Heading', h6: 'Heading',
+  p: 'Text', span: 'Text', table: 'Table', figure: 'Figure', hr: 'Divider',
+};
+
+/** Utility classes say how something looks, not what it is; skip them when naming. */
+const UTILITY_CLASS = /^(?:[a-z]{1,3}-\d|flex$|grid$|block$|hidden$|relative$|absolute$|w-|h-|p[xytrbl]?-|m[xytrbl]?-|text-|bg-|border|rounded|gap-|items-|justify-|font-|leading-|tracking-|shadow|col-|row-|sm:|md:|lg:|xl:|hover:)/;
+
+/** "Button · Save lead": the role from the authored class or tag, then the first text. */
+export function fallbackLayerName(doc: CanvasDocument, n: CanvasNode): string {
+  const cls = (n.attrs['data-class'] ?? '').split(/\s+/).find((c) => c && !UTILITY_CLASS.test(c));
+  let role = cls
+    ? cls.replace(/^(?:js-|is-|has-)/, '').split(/[-_]+|(?=[A-Z])/).filter(Boolean).join(' ')
+    : ROLE_BY_TAG[n.tag] ?? (n.styles.display?.includes('flex')
+      ? (n.styles['flex-direction']?.startsWith('column') ? 'Stack' : 'Row')
+      : n.styles.display?.includes('grid') ? 'Grid' : 'Group');
+  role = role.charAt(0).toUpperCase() + role.slice(1);
+  const words = (previewText(doc, n.id) ?? '').replace(/\s+/g, ' ').trim();
+  if (!words) return role;
+  const short = words.length > 24 ? words.slice(0, 23).trimEnd() + '…' : words;
+  return `${role} · ${short}`;
+}
+
+/**
+ * The overrides that make an instance of `defRoot` look like the subtree at
+ * `sourceRoot`.
+ *
+ * When the two trees have the same shape — same tags in the same order — they
+ * are paired node for node, as componentise does. When they do not (the
+ * common case: an element built by hand before the component existed), the
+ * roots are paired, and each piece of text goes to the first unused text part
+ * of the definition with the same tag, else the next unused one. Styles and
+ * attributes travel only where the source set them to something different.
+ */
+export function overridesFor(
+  doc: CanvasDocument, sourceRoot: NodeId, defRoot: NodeId,
+): { overrides: Record<NodeId, InstanceOverride>; unmapped: string[] } {
+  const src = subtreeIdsOf(doc, sourceRoot).map((id) => doc.nodes[id]!);
+  const def = subtreeIdsOf(doc, defRoot).map((id) => doc.nodes[id]!);
+  const pairs: [CanvasNode, CanvasNode][] = [];
+  const unmapped: string[] = [];
+
+  const sameShape = src.length === def.length && src.every((s, i) => s.tag === def[i]!.tag);
+  if (sameShape) {
+    src.forEach((s, i) => pairs.push([s, def[i]!]));
+  } else {
+    pairs.push([src[0]!, def[0]!]);
+    const used = new Set<NodeId>([def[0]!.id]);
+    const defTexts = def.filter((d) => typeof d.text === 'string');
+    for (const s of src.slice(1)) {
+      if (typeof s.text !== 'string' || !s.text.trim()) continue;
+      const target = defTexts.find((d) => !used.has(d.id) && d.tag === s.tag)
+        ?? defTexts.find((d) => !used.has(d.id));
+      if (!target) { unmapped.push(s.text); continue; }
+      used.add(target.id);
+      pairs.push([s, target]);
+    }
+  }
+
+  const overrides: Record<NodeId, InstanceOverride> = {};
+  for (const [s, d] of pairs) {
+    const o: InstanceOverride = {};
+    if (typeof s.text === 'string' && s.text !== d.text) o.text = s.text;
+    const styles: Record<string, string> = {};
+    for (const [k, v] of Object.entries(s.styles)) if (d.styles[k] !== v) styles[k] = v;
+    if (Object.keys(styles).length) o.styles = styles;
+    const attrs: Record<string, string> = {};
+    for (const [k, v] of Object.entries(s.attrs)) {
+      if (k === 'data-x' || k === 'data-y') continue;
+      if (d.attrs[k] !== v) attrs[k] = v;
+    }
+    if (Object.keys(attrs).length) o.attrs = attrs;
+    if (Object.keys(o).length) overrides[d.id] = o;
+  }
+  return { overrides, unmapped };
+}
+
 export interface McpContext {
   connection: Connection;
   baseUrl: string;
@@ -402,6 +491,24 @@ const workingPage = new Map<string, string>();
 function setWorkingPage(ctx: McpContext, pageId: string | undefined): void {
   if (pageId) workingPage.set(ctx.connection.code, pageId);
   else workingPage.delete(ctx.connection.code);
+  // Presence, never navigation: the person's editor stays where they put it.
+  setAgentPresence(ctx.connection.docId, { id: ctx.connection.code, name: ctx.connection.label ?? 'Agent' }, pageId);
+}
+
+/** The page an artboard sits on. */
+function pageOfArtboard(doc: CanvasDocument, artboardId: NodeId | null | undefined): Page | undefined {
+  return artboardId ? doc.pages.find((p) => p.artboards.includes(artboardId)) : undefined;
+}
+
+/**
+ * Whether a person's tab is showing the page these nodes are on. Only then is
+ * asking the tab to measure better than rendering headlessly: a tab on another
+ * page has nothing laid out for them, and asking it used to mean either a
+ * failure or moving the person's view.
+ */
+function tabShows(doc: CanvasDocument, artboardId: NodeId | null | undefined): boolean {
+  const page = pageOfArtboard(doc, artboardId);
+  return !!page && hasTabOnPage(doc.id, page.id, doc.pages[0]?.id);
 }
 
 /** The page a tool should act on: the one asked for, the session's, or the first. */
@@ -481,6 +588,18 @@ export function buildMcpServer(ctx: McpContext): McpServer {
   const handles = new Map<string, Handle>();
   const register = server.registerTool.bind(server);
   (server as { registerTool: typeof server.registerTool }).registerTool = ((name: string, ...rest: unknown[]) => {
+    /*
+     * Strict input. A misspelt parameter used to be dropped without a word —
+     * `pageID` instead of `pageId` quietly worked on the wrong page — so every
+     * schema now refuses keys it does not know, and the error names them.
+     */
+    const config = rest[0] as { inputSchema?: unknown } | undefined;
+    if (config && config.inputSchema && !(config.inputSchema instanceof z.ZodType)) {
+      rest[0] = {
+        ...config,
+        inputSchema: z.object(config.inputSchema as z.ZodRawShape).strict(),
+      };
+    }
     const handle = (register as (...args: unknown[]) => Handle)(name, ...rest);
     handles.set(name, handle);
     return handle;
@@ -578,6 +697,9 @@ function registerReadTools(server: McpServer, ctx: McpContext): void {
       ...basicInfo(doc, page.id),
       liveTabConnected: hasLiveTab(doc.id),
       rev: doc.rev,
+      ...(ctx.connection.projectId
+        ? { project: { id: ctx.connection.projectId, hint: 'This connection covers the whole project: list_documents and switch_document move between its documents.' } }
+        : {}),
       notes: {
         total: notes.length,
         queued: queued.length,
@@ -656,24 +778,27 @@ function registerReadTools(server: McpServer, ctx: McpContext): void {
   server.registerTool('get_tree_summary', {
     title: 'Summarize a subtree',
     description:
-      'Compact indented outline of a subtree, one line per node. This is the cheap way to understand a design — prefer it over walking get_children repeatedly.',
+      'A subtree as rows — { id, type, tag, name, text, parent, depth, childCount } — in document order. This is the cheap way to understand a design; prefer it over walking get_children repeatedly. outline: true adds the compact indented text form.',
     inputSchema: {
       id: z.string().optional().describe('Root node. Defaults to every artboard on the page.'),
       depth: z.number().int().min(1).max(20).optional().default(6),
-      includeStyles: z.boolean().optional().default(false).describe('Append notable style declarations to each line.'),
+      includeStyles: z.boolean().optional().default(false).describe('Include each node\'s authored styles.'),
+      outline: z.boolean().optional().default(false).describe('Also return the compact indented text outline.'),
     },
     annotations: { readOnlyHint: true },
-  }, async ({ id, depth, includeStyles }) => guard(() => {
+  }, async ({ id, depth, includeStyles, outline }) => guard(() => {
     const doc = requireDoc(ctx);
-    if (id) {
-      node(doc, id);
-      return text(treeSummary(doc, id, { depth, includeStyles }));
+    const roots = id ? [node(doc, id).id] : pageOf(ctx, doc).artboards;
+    if (!roots.length) {
+      return json({ nodes: [], note: `Page "${pageOf(ctx, doc).name}" has no artboards yet — create one with create_artboard.` });
     }
-    const page = pageOf(ctx, doc);
-    if (page.artboards.length === 0) {
-      return text(`(page "${page.name}" has no artboards yet — create one with create_artboard)`);
-    }
-    return text(page.artboards.map((a) => treeSummary(doc, a, { depth, includeStyles })).join('\n\n'));
+    const walked = roots.map((r) => treeEntries(doc, r, { depth, includeStyles }));
+    const nodes = walked.flatMap((w) => w.nodes);
+    return json({
+      nodes: nodes.map(({ line, ...rest }) => { void line; return rest; }),
+      ...(walked.some((w) => w.truncated) ? { truncated: true, note: 'Cut short at 400 nodes; pass an id or a lower depth.' } : {}),
+      ...(outline ? { outline: roots.map((r) => treeSummary(doc, r, { depth, includeStyles })).join('\n\n') } : {}),
+    });
   }));
 
   server.registerTool('find_nodes', {
@@ -698,10 +823,13 @@ function registerReadTools(server: McpServer, ctx: McpContext): void {
       if (type && n.type !== type) return [];
       if (tag && n.tag.toLowerCase() !== tag.toLowerCase()) return [];
       if (q && !n.name.toLowerCase().includes(q) && !(n.text ?? '').toLowerCase().includes(q)) return [];
-      return [describeNode(n)];
+      return [{ ...nodeEntry(n, 0), artboard: artboardOf(doc, n.id) }];
     });
-    if (!hits.length) return text('No matching nodes.');
-    return text(hits.slice(0, limit).join('\n') + (hits.length > limit ? `\n… ${hits.length - limit} more` : ''));
+    return json({
+      count: hits.length,
+      nodes: hits.slice(0, limit).map(({ depth, ...rest }) => { void depth; return rest; }),
+      ...(hits.length > limit ? { truncated: hits.length - limit } : {}),
+    });
   }));
 
   server.registerTool('get_html', {
@@ -738,7 +866,7 @@ function registerReadTools(server: McpServer, ctx: McpContext): void {
   server.registerTool('get_computed_styles', {
     title: 'Get computed styles',
     description:
-      'Authored styles for one or more nodes. If a browser tab is connected, also returns the browser-computed values and measured box, which is the only way to see what the layout engine actually resolved.',
+      'Authored styles for one or more nodes, plus the browser-computed values and measured box — what the layout engine actually resolved. Measured in the person\'s tab when it has the page open, otherwise rendered headlessly on the server, so it works with nobody watching.',
     inputSchema: {
       ids: z.array(z.string()).min(1).max(50),
       properties: z.array(z.string()).optional().describe('Restrict to these CSS properties.'),
@@ -754,18 +882,25 @@ function registerReadTools(server: McpServer, ctx: McpContext): void {
       return { id, authored: styles, variants: n.variants };
     });
 
-    if (!hasLiveTab(doc.id)) {
-      return json({ note: 'No browser tab connected; returning authored styles only.', nodes: authored });
+    // A person's tab measures only when it has these artboards' page open;
+    // otherwise the headless renderer lays the artboard out and measures there.
+    const artboards = [...new Set(ids.map((id) => artboardOf(doc, id)).filter((a): a is NodeId => !!a))];
+    if (artboards.length && artboards.every((a) => tabShows(doc, a))) {
+      try {
+        const measured = await callTab<Record<string, unknown>>(doc.id, 'computedStyles', { ids, properties });
+        return json({ source: 'tab', nodes: authored.map((a) => ({ ...a, computed: measured[a.id] ?? null })) });
+      } catch { /* fall through to the headless renderer */ }
     }
-    try {
-      const measured = await callTab<Record<string, unknown>>(doc.id, 'computedStyles', { ids, properties });
-      return json({ nodes: authored.map((a) => ({ ...a, computed: measured[a.id] ?? null })) });
-    } catch (err) {
-      return json({
-        note: `Browser measurement failed (${err instanceof Error ? err.message : err}); returning authored styles.`,
-        nodes: authored,
-      });
+    const computed: Record<string, unknown> = {};
+    for (const artboard of artboards) {
+      const mine = ids.filter((id) => artboardOf(doc, id) === artboard);
+      const result = await computeStyles(doc, artboard, mine, properties, ctx.baseUrl).catch(() => null);
+      if (!result) {
+        return json({ source: 'authored', note: 'No renderer is available on this server; returning authored styles only.', nodes: authored });
+      }
+      Object.assign(computed, result);
     }
+    return json({ source: 'headless', nodes: authored.map((a) => ({ ...a, computed: computed[a.id] ?? null })) });
   }));
 
   server.registerTool('get_screenshot', {
@@ -874,14 +1009,21 @@ function registerReadTools(server: McpServer, ctx: McpContext): void {
     // Rendered boxes make the tap-target check exact rather than a guess from
     // authored styles; without a tab it stays conservative.
     let measured: Record<string, { width: number; height: number }> | undefined;
-    if (hasLiveTab(doc.id)) {
-      const ids = Object.values(doc.nodes)
-        .filter((n) => n.tag === 'button' || n.tag === 'a' || n.attrs.role === 'button')
-        .map((n) => n.id)
-        .slice(0, 200);
-      if (ids.length) {
-        measured = await callTab<Record<string, { width: number; height: number }>>(doc.id, 'measure', { ids })
+    const tappable = Object.values(doc.nodes)
+      .filter((n) => n.tag === 'button' || n.tag === 'a' || n.attrs.role === 'button')
+      .filter((n) => !within || n.id === within || subtreeIdsOf(doc, within).includes(n.id))
+      .map((n) => n.id)
+      .slice(0, 200);
+    if (tappable.length) {
+      const boards = [...new Set(tappable.map((id) => artboardOf(doc, id)).filter((a): a is NodeId => !!a))];
+      if (boards.every((a) => tabShows(doc, a))) {
+        measured = await callTab<Record<string, { width: number; height: number }>>(doc.id, 'measure', { ids: tappable })
           .catch(() => undefined);
+      }
+      if (!measured && boards.length <= 6) {
+        const all: Record<string, { width: number; height: number }> = {};
+        for (const a of boards) Object.assign(all, (await measureSubtree(doc, a, ctx.baseUrl).catch(() => null)) ?? {});
+        if (Object.keys(all).length) measured = all;
       }
     }
 
@@ -1020,20 +1162,34 @@ function registerWriteTools(server: McpServer, ctx: McpContext): void {
     inputSchema: {
       name: z.string().min(1).max(80),
       switchTo: z.boolean().optional().default(true),
+      withArtboard: z.boolean().optional().default(false)
+        .describe('Also put a 1440×900 "Desktop" artboard on it. Off by default: the page starts empty, ready for create_artboard at the size you need.'),
     },
     annotations: { destructiveHint: false },
-  }, async ({ name, switchTo }) => guard(() => {
+  }, async ({ name, switchTo, withArtboard }) => guard(() => {
     const doc = requireDoc(ctx);
     if (doc.pages.some((p) => p.name === name)) {
       return fail(`This document already has a page called "${name}".`);
     }
     const page = { id: newId('p'), name, artboards: [] as NodeId[] };
-    commit(ctx, [{ t: 'page', action: 'add', page }]);
+    const ops: Op[] = [{ t: 'page', action: 'add', page }];
+    let artboardId: string | undefined;
+    if (withArtboard) {
+      const artboard = makeNode({
+        type: 'artboard', name: 'Desktop',
+        styles: { ...DEFAULT_ARTBOARD_STYLES, width: '1440px', height: '900px' },
+        attrs: { 'data-x': '0', 'data-y': '0' },
+      });
+      artboardId = artboard.id;
+      ops.push({ t: 'insert', nodes: [artboard], parent: null, index: 0, page: page.id });
+    }
+    commit(ctx, ops);
     if (switchTo) setWorkingPage(ctx, page.id);
     return json({
       pageId: page.id,
       name,
       current: switchTo,
+      ...(artboardId ? { artboardId } : {}),
       next: 'create_artboard puts a screen on it. Artboards are placed on the current page unless you pass pageId.',
     });
   }));
@@ -1151,6 +1307,35 @@ function registerWriteTools(server: McpServer, ctx: McpContext): void {
 
     commit(ctx, [{ t: 'insert', nodes: [artboard], parent: null, index: page.artboards.length, page: page.id }]);
     return json({ id: artboard.id, name: artboard.name, width, height, x: px, y: py });
+  }));
+
+  server.registerTool('fit_artboard', {
+    title: 'Fit an artboard to its content',
+    description:
+      'Sets an artboard\'s height to the height of what it renders — no more guessing frame sizes from ' +
+      'screenshots. Lays the artboard out headlessly and measures the bottom of its lowest descendant.',
+    inputSchema: {
+      id: z.string().describe('The artboard.'),
+      padBottom: z.number().min(0).max(2000).optional().default(0).describe('Extra space below the content, in px.'),
+    },
+    annotations: { destructiveHint: false },
+  }, async ({ id, padBottom }) => guard(async () => {
+    const doc = requireDoc(ctx);
+    const board = node(doc, id);
+    if (board.type !== 'artboard') return fail(`${id} is a ${board.type}; fit_artboard takes an artboard.`);
+    const boxes = await measureSubtree(doc, id, ctx.baseUrl).catch(() => null);
+    if (!boxes) return fail('No renderer is available on this server, so the content cannot be measured.');
+    let bottom = 0;
+    for (const nodeId of subtreeIdsOf(doc, id)) {
+      if (nodeId === id) continue;
+      const box = boxes[nodeId];
+      if (box && (box.width > 0 || box.height > 0)) bottom = Math.max(bottom, box.y + box.height);
+    }
+    if (bottom <= 0) return fail('The artboard renders nothing with a size, so there is no content height to fit.');
+    const from = getArtboardSize(board).height;
+    const to = Math.max(16, Math.ceil(bottom + padBottom));
+    if (to !== from) commit(ctx, [{ t: 'styles', updates: [{ id, styles: { height: `${to}px`, 'min-height': '' } }] }]);
+    return json({ id, from, to, contentBottom: Math.round(bottom * 100) / 100, padBottom });
   }));
 
   server.registerTool('list_templates', {
@@ -1931,14 +2116,23 @@ function registerWriteTools(server: McpServer, ctx: McpContext): void {
     inputSchema: {
       tokens: z.array(z.object({
         name: z.string().describe('Dot path, e.g. "color.brand.500".'),
-        group: z.enum(['color', 'space', 'radius', 'font', 'shadow', 'duration']),
-        values: z.record(z.string(), z.string()).describe('Value per theme. Must include "default".'),
+        group: z.string().regex(/^[a-z][\w-]*$/i).max(40).describe(
+          'color, space, radius, font, shadow, duration — or any group of your own (motion, z, opacity…).'),
+        values: z.record(z.string(), z.string()).describe(
+          'Value per theme. Must include "default". A value of "{color.lime}" aliases another token.'),
       })).min(1).max(200),
     },
   }, async ({ tokens }) => guard(() => {
     const doc = requireDoc(ctx);
     const missing = tokens.filter((t) => !t.values.default);
     if (missing.length) return fail(`These tokens have no "default" value: ${missing.map((t) => t.name).join(', ')}`);
+
+    // An alias must point at a token that will exist once this call lands.
+    const names = new Set([...doc.tokens.map((t) => t.name), ...tokens.map((t) => t.name)]);
+    const dangling = tokens.flatMap((t) => Object.values(t.values).flatMap((v) =>
+      [...v.matchAll(/\{\s*([\w.-]+)\s*\}/g)].map((m) => m[1]!).filter((ref) => !names.has(ref))
+        .map((ref) => `${t.name} → {${ref}}`)));
+    if (dangling.length) return fail(`These aliases point at tokens that do not exist: ${dangling.join(', ')}`);
 
     const merged = [...doc.tokens];
     for (const t of tokens) {
@@ -2166,6 +2360,52 @@ function registerNoteTools(server: McpServer, ctx: McpContext): void {
     return json({ id: note.id, x: note.x, y: note.y });
   }));
 
+  /** A note by id on whichever page holds it — ids are unique across the document. */
+  const findNote = (doc: CanvasDocument, id: string, pageId?: string) => {
+    for (const page of pageId ? doc.pages.filter((p) => p.id === pageId) : doc.pages) {
+      const note = (page.notes ?? []).find((n) => n.id === id);
+      if (note) return { page, note };
+    }
+    throw new Error(`No note with id "${id}". Call list_notes for current ids.`);
+  };
+
+  server.registerTool('update_note', {
+    title: 'Edit or move a note',
+    description: 'Changes a note\'s text, colour or position on the canvas. Give only what changes.',
+    inputSchema: {
+      id: z.string(),
+      text: z.string().min(1).max(2000).optional(),
+      x: z.number().optional(),
+      y: z.number().optional(),
+      color: z.enum(['yellow', 'blue', 'green', 'pink', 'purple']).optional(),
+      pageId: z.string().optional().describe('Only needed to disambiguate; notes are found on any page.'),
+    },
+  }, async ({ id, text: body, x, y, color, pageId }) => guard(() => {
+    const doc = requireDoc(ctx);
+    const { page } = findNote(doc, id, pageId);
+    const patch = {
+      ...(body !== undefined ? { text: body } : {}),
+      ...(x !== undefined ? { x } : {}),
+      ...(y !== undefined ? { y } : {}),
+      ...(color !== undefined ? { color } : {}),
+    };
+    if (!Object.keys(patch).length) return fail('Nothing to change: give text, x, y or color.');
+    commit(ctx, [{ t: 'note', action: 'update', pageId: page.id, note: { id, ...patch } }]);
+    const after = findNote(requireDoc(ctx), id, page.id).note;
+    return json({ id, pageId: page.id, text: after.text, x: after.x, y: after.y, color: after.color });
+  }));
+
+  server.registerTool('delete_note', {
+    title: 'Delete a note',
+    description: 'Removes a note from the canvas. Undoable from the editor like any other change.',
+    inputSchema: { id: z.string(), pageId: z.string().optional() },
+  }, async ({ id, pageId }) => guard(() => {
+    const doc = requireDoc(ctx);
+    const { page } = findNote(doc, id, pageId);
+    commit(ctx, [{ t: 'note', action: 'remove', pageId: page.id, note: { id } }]);
+    return json({ deleted: id, pageId: page.id });
+  }));
+
   // --- The board: diagrams on the canvas between artboards -------------------
 
   /** Artboards on the page, by id or by name, for connectors that end on a screen. */
@@ -2199,6 +2439,7 @@ function registerNoteTools(server: McpServer, ctx: McpContext): void {
   };
 
   const Color = z.enum(BOARD_COLOR_NAMES as [BoardColor, ...BoardColor[]]);
+  const Waypoint = z.object({ x: z.number(), y: z.number() });
 
   /** What an agent reads back: every item, with connectors' real paths. */
   const describeBoard = (doc: CanvasDocument, page: Page) => {
@@ -2283,6 +2524,8 @@ function registerNoteTools(server: McpServer, ctx: McpContext): void {
             dashed: z.boolean().optional(),
             fromSide: z.enum(['left', 'right', 'top', 'bottom']).optional(),
             toSide: z.enum(['left', 'right', 'top', 'bottom']).optional(),
+            waypoints: z.array(Waypoint).max(20).optional()
+              .describe('Canvas points the route must pass through, in order. Elbows bend at each.'),
             id: z.string().optional(),
           }).optional(),
         }),
@@ -2304,6 +2547,8 @@ function registerNoteTools(server: McpServer, ctx: McpContext): void {
             fromSide: z.enum(['left', 'right', 'top', 'bottom']).nullable().optional()
               .describe('Which side the connector leaves from; null goes back to working it out.'),
             toSide: z.enum(['left', 'right', 'top', 'bottom']).nullable().optional(),
+            waypoints: z.array(Waypoint).max(20).nullable().optional()
+              .describe('Points the route passes through; null goes back to automatic routing.'),
           }),
         }),
         z.object({ action: z.literal('remove'), id: z.string() }),
@@ -2332,7 +2577,7 @@ function registerNoteTools(server: McpServer, ctx: McpContext): void {
             ...(k.id ? { id: k.id } : {}),
             from: toEndpoint(doc, page, k.from, known), to: toEndpoint(doc, page, k.to, known),
             route: k.route, arrow: k.arrow, label: k.label, color: k.color, dashed: k.dashed,
-            fromSide: k.fromSide, toSide: k.toSide,
+            fromSide: k.fromSide, toSide: k.toSide, waypoints: k.waypoints,
           });
           known.add(connector.id);
           added.push(connector.id);
@@ -2388,6 +2633,8 @@ function registerNoteTools(server: McpServer, ctx: McpContext): void {
       edges: z.array(z.object({
         from: z.string(), to: z.string(), label: z.string().max(200).optional(),
         dashed: z.boolean().optional(), arrow: z.enum(['end', 'both', 'none']).optional(),
+        waypoints: z.array(Waypoint).max(20).optional()
+          .describe('Canvas points this edge must pass through, for routes the layout gets wrong.'),
       })).max(600).optional(),
       groups: z.array(z.object({
         label: z.string().max(200), members: z.array(z.string()), color: Color.optional(),
@@ -2460,6 +2707,18 @@ function registerNoteTools(server: McpServer, ctx: McpContext): void {
 
     const existing = new Set(boardOf(page).map((i) => i.id));
     for (const id of replaced) if (!existing.has(id)) throw new Error(`No board item "${id}" to replace.`);
+
+    // Waypoints ride on the edge they were given for: match the laid-out
+    // connector by the two ends the layout placed for that edge.
+    const endKey = (e: Endpoint | undefined) => (!e ? '' : e.kind === 'point' ? `p${e.x},${e.y}` : `${e.kind}:${e.id}`);
+    for (const edge of args.edges ?? []) {
+      if (!edge.waypoints?.length) continue;
+      const from = endKey(layout.placed[edge.from]);
+      const to = endKey(layout.placed[edge.to]);
+      const match = layout.items.find((i) => i.type === 'connector' && !i.waypoints
+        && endKey(i.from) === from && endKey(i.to) === to);
+      if (match && match.type === 'connector') match.waypoints = edge.waypoints.map((p) => ({ x: p.x, y: p.y }));
+    }
     const route = args.route;
     const changes: BoardChange[] = [
       ...deleteBoardItems(doc, page, [...replaced]),
@@ -2868,7 +3127,8 @@ function registerComponentTools(server: McpServer, ctx: McpContext): void {
     description:
       'Renames layers that are still called after their tag — "Div", "Span", "Section" — using what '
       + 'they contain. An imported or generated page is full of them, and a layer tree of two hundred '
-      + 'Divs is unusable for the person who inherits it. Needs a client that offers sampling.',
+      + 'Divs is unusable for the person who inherits it. Uses your model when the client offers '
+      + 'sampling; otherwise names each layer from its class or tag and first text, e.g. "Button · Save lead".',
     inputSchema: {
       id: z.string().describe('Rename the layers inside this node.'),
       limit: z.number().int().min(1).max(200).optional().default(60),
@@ -2904,17 +3164,15 @@ function registerComponentTools(server: McpServer, ctx: McpContext): void {
       .filter((n) => typeof n?.id === 'string' && typeof n?.name === 'string' && n.name.trim()
         && described.some((d) => d.id === n.id));
 
-    if (!names.length) {
-      return json({
-        renamed: 0,
-        candidates: described,
-        note: 'Your client did not answer a sampling request. Rename them with rename_nodes.',
-      });
-    }
-    if (dryRun) return json({ wouldRename: names });
+    // No sampling, or no usable answer: name them from what they are — the
+    // authored class, else the tag — and what they say. Deterministic, so the
+    // same tree always gets the same names.
+    const source = names.length ? 'model' : 'fallback';
+    const chosen = names.length ? names : generic.map((n) => ({ id: n.id, name: fallbackLayerName(doc, n) }));
+    if (dryRun) return json({ source, wouldRename: chosen });
 
-    commit(ctx, [{ t: 'rename', updates: names.map((n) => ({ id: n.id, name: n.name.trim().slice(0, 60) })) }]);
-    return json({ renamed: names.length, names: names.slice(0, 20) });
+    commit(ctx, [{ t: 'rename', updates: chosen.map((n) => ({ id: n.id, name: n.name.trim().slice(0, 60) })) }]);
+    return json({ source, renamed: chosen.length, names: chosen.slice(0, 20) });
   }));
 
   server.registerTool('componentise', {
@@ -2976,7 +3234,57 @@ function registerComponentTools(server: McpServer, ctx: McpContext): void {
       t: 'insert', nodes: instances, parent: parentId,
       index: index ?? parent.children.length,
     }]);
-    return json({ created: instances.map((i) => i.id) });
+    const ids = instances.map((i) => i.id);
+    return json({ id: ids[0], ids, created: ids });
+  }));
+
+  server.registerTool('replace_with_instance', {
+    title: 'Swap built elements for a component',
+    description:
+      'Replaces hand-built elements with instances of a component, in place: the same parent and ' +
+      'position, each element\'s text mapped onto the matching part of the definition, and styles and ' +
+      'attributes it set differently from the definition carried as overrides. The originals are deleted. ' +
+      'One undoable step for any number of nodes.',
+    inputSchema: {
+      nodeId: z.string().optional().describe('The element to replace.'),
+      nodeIds: z.array(z.string()).min(1).max(100).optional().describe('Several elements, all with the same component.'),
+      componentId: z.string(),
+    },
+  }, async ({ nodeId, nodeIds, componentId }) => guard(() => {
+    const doc = requireDoc(ctx);
+    const def = doc.components?.[componentId];
+    if (!def) return fail(`No component "${componentId}". Call list_components.`);
+    const targets = [...new Set([...(nodeId ? [nodeId] : []), ...(nodeIds ?? [])])];
+    if (!targets.length) return fail('Give nodeId or nodeIds.');
+    const defIds = subtreeIdsOf(doc, def.root);
+
+    const ops: Op[] = [];
+    const replaced: { from: NodeId; id: NodeId; overrides: number; unmapped: string[] }[] = [];
+    for (const target of targets) {
+      const n = node(doc, target);
+      if (n.type === 'artboard') return fail(`${target} is an artboard; replace the elements inside it.`);
+      if (!n.parent) return fail(`${target} has no parent to put the instance in.`);
+      if (defIds.includes(target)) return fail(`${target} is part of the component's own definition.`);
+      const parent = doc.nodes[n.parent]!;
+      const { overrides, unmapped } = overridesFor(doc, target, def.root);
+      const instance = makeNode({
+        type: 'instance', name: def.name, componentRef: componentId,
+        ...(Object.keys(overrides).length ? { overrides } : {}),
+      });
+      // Remove then insert at the same index: the parent's other children are
+      // exactly where they were, so the index still means the same slot.
+      ops.push({ t: 'remove', ids: [target] });
+      ops.push({ t: 'insert', nodes: [instance], parent: parent.id, index: parent.children.indexOf(target) });
+      replaced.push({ from: target, id: instance.id, overrides: Object.keys(overrides).length, unmapped });
+    }
+    commit(ctx, ops);
+    return json({
+      replaced,
+      ids: replaced.map((r) => r.id),
+      ...(replaced.some((r) => r.unmapped.length)
+        ? { note: 'Some text had no matching part in the definition and was not carried over (see unmapped). get_instance shows the parts; set_override fills them.' }
+        : {}),
+    });
   }));
 
   server.registerTool('set_override', {
@@ -3653,6 +3961,46 @@ function describeComment(doc: CanvasDocument, c: Comment) {
 // ---------------------------------------------------------------------------
 
 function registerSessionTools(server: McpServer, ctx: McpContext): void {
+  server.registerTool('list_documents', {
+    title: 'List the project\'s documents',
+    description:
+      'The documents this connection can work on. A project connection covers every document in the ' +
+      'project; a document connection covers just the one.',
+    inputSchema: {},
+    annotations: { readOnlyHint: true },
+  }, async () => guard(async () => {
+    const current = ctx.connection.docId;
+    if (!ctx.connection.projectId) {
+      return json({
+        projectId: null,
+        current,
+        documents: [{ id: current, name: ctx.connection.docName, current: true }],
+        note: 'This connection is for one document. Connect to a project to move between documents.',
+      });
+    }
+    const docs = await projectDocuments(ctx.connection.projectId);
+    return json({
+      projectId: ctx.connection.projectId,
+      current,
+      documents: docs.map((d) => ({ ...d, current: d.id === current })),
+    });
+  }));
+
+  server.registerTool('switch_document', {
+    title: 'Work on another document',
+    description:
+      'Moves this connection to another document in the same project. Every tool acts on that ' +
+      'document from now on, including after reconnecting. Call get_basic_info next.',
+    inputSchema: { docId: z.string().describe('A document id from list_documents.') },
+  }, async ({ docId }) => guard(async () => {
+    const before = ctx.connection.docId;
+    if (docId === before) return json({ current: docId, name: ctx.connection.docName, switched: false });
+    await switchConnectionDocument(ctx.connection, docId);
+    clearAgentPresence(before, ctx.connection.code);
+    workingPage.delete(ctx.connection.code);
+    return json({ current: ctx.connection.docId, name: ctx.connection.docName, switched: true, previous: before });
+  }));
+
   server.registerTool('start_working_on_nodes', {
     title: 'Mark artboards as being worked on',
     description:
@@ -3664,8 +4012,12 @@ function registerSessionTools(server: McpServer, ctx: McpContext): void {
   }, async ({ ids, summary }) => guard(() => {
     const doc = requireDoc(ctx);
     const artboards = [...new Set(ids.map((id) => { node(doc, id); return artboardOf(doc, id); }).filter(Boolean))];
+    const pageIds = [...new Set(artboards.map((a) => pageOfArtboard(doc, a)?.id).filter(Boolean))];
+    if (pageIds[0]) setWorkingPage(ctx, pageIds[0]);
     notifyTabs(doc.id, {
-      kind: 'agent-working', active: true, artboards,
+      kind: 'agent-working', active: true, artboards, pageIds,
+      // Where the agent is, for the person to follow if they choose to.
+      navigate: false,
       agent: ctx.connection.label ?? 'Agent', summary: summary ?? null,
     });
     void createSnapshot(doc.id, `Before: ${summary ?? ctx.connection.label ?? 'agent edit'}`).catch(() => {});

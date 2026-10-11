@@ -261,8 +261,60 @@ function teardown(session: Session): void {
 function broadcastPeers(docId: string): void {
   const set = byDoc.get(docId);
   if (!set) return;
-  const peers = [...set].map((s) => s.peer);
+  const peers = [...[...set].map((s) => s.peer), ...agentPeers(docId)];
   for (const s of set) send(s.ws, { type: 'peers', peers });
+}
+
+/**
+ * Agents, as presence.
+ *
+ * An agent switching pages used to read, to the person watching, as being
+ * moved to another page. Where an agent is working is now a peer like any
+ * other — a page in the peer list the editor can show — and never a
+ * navigation: following it is the person's choice.
+ */
+const agents = new Map<string, Map<string, Peer & { at: number }>>();
+const AGENT_PRESENCE_MS = 10 * 60_000;
+
+function agentPeers(docId: string): Peer[] {
+  const byCode = agents.get(docId);
+  if (!byCode) return [];
+  const now = Date.now();
+  for (const [code, peer] of byCode) if (now - peer.at > AGENT_PRESENCE_MS) byCode.delete(code);
+  return [...byCode.values()].map(({ at, ...peer }) => { void at; return peer; });
+}
+
+/** Records which page an agent is on, and tells the tabs — as presence only. */
+export function setAgentPresence(docId: string, agent: { id: string; name: string }, pageId: string | undefined): void {
+  let byCode = agents.get(docId);
+  if (!byCode) agents.set(docId, (byCode = new Map()));
+  const existing = byCode.get(agent.id);
+  byCode.set(agent.id, {
+    clientId: `agent:${agent.id.slice(0, 6)}`,
+    name: agent.name,
+    color: existing?.color ?? '#8b5cf6',
+    kind: 'agent',
+    selection: [],
+    pageId,
+    at: Date.now(),
+  });
+  broadcastPeers(docId);
+}
+
+/** Drops an agent's presence, e.g. when its connection moves to another document. */
+export function clearAgentPresence(docId: string, agentId: string): void {
+  if (agents.get(docId)?.delete(agentId)) broadcastPeers(docId);
+}
+
+/**
+ * Whether a person has this page open: the only case where measuring in their
+ * tab is better than measuring headlessly. A tab that has not said which page
+ * it is on is on the first one.
+ */
+export function hasTabOnPage(docId: string, pageId: string, firstPageId?: string): boolean {
+  return [...(byDoc.get(docId) ?? [])].some((s) => s.peer.kind === 'human'
+    && s.ws.readyState === WebSocket.OPEN
+    && (s.peer.pageId ?? firstPageId) === pageId);
 }
 
 function send(ws: WebSocket, msg: unknown): void {
@@ -278,7 +330,7 @@ export function hasLiveTab(docId: string): boolean {
 }
 
 export function peersOf(docId: string): Peer[] {
-  return [...(byDoc.get(docId) ?? [])].map((s) => s.peer);
+  return [...[...(byDoc.get(docId) ?? [])].map((s) => s.peer), ...agentPeers(docId)];
 }
 
 /** Union of every human peer's selection — what `get_selection` reports. */

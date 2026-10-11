@@ -105,6 +105,14 @@ Then ask your agent to *"describe what's on the Canvas artboard"* — or just *"
 page"*. Setup snippets for Codex, Claude Desktop, Cursor and VS Code are in the same panel — Codex
 gets both the `codex mcp add` line and the `~/.codex/config.toml` block.
 
+A code can also cover a **whole project** rather than one document: `POST /api/projects/:id/connections`
+(optionally with `docId` to start on) mints one, and the agent moves between the project's documents
+with `list_documents` and `switch_document`. It can never reach a document outside the project, and
+per-document codes work exactly as before.
+
+Every tool returns JSON, and every input schema is strict: an unknown parameter is refused with
+an error naming it, rather than silently ignored.
+
 Two scripts show the shape of an agent session end to end:
 
 ```bash
@@ -117,8 +125,10 @@ node scripts/headless-demo.mjs             # creates and builds a document with 
 ## The agent surface
 
 Most tools run against the server's copy of the document, so they work with **no browser tab open**
-— an agent can create a document, build in it, render it, and hand back a URL. Only the tools that
-need a real layout engine reach into a connected tab, and they say so plainly when there isn't one.
+— an agent can create a document, build in it, render it, and hand back a URL. Tools that need a
+layout engine (computed styles, fitting, tap-target linting) measure in a person's tab only when it
+has that page open, and otherwise render headlessly on the server. An agent changing page shows up as
+presence in the editor; it never moves a person's view.
 
 **Artifactory**
 
@@ -140,6 +150,8 @@ Artifactory's origin gets an answer that allows the session cookie.
 | `claim_note` | Take a card, so a second agent does not duplicate the work |
 | `respond_to_note` | Record what you did; the answer appears on the card |
 | `create_note` | Leave a note for the human where they will see it, next to the design |
+| `update_note` | Change a note's text, colour or position |
+| `delete_note` | Remove a note |
 
 **Components**
 
@@ -147,7 +159,9 @@ Artifactory's origin gets an answer that allows the session cookie.
 |---|---|
 | `list_components` | Components, with instance counts, slots and structure |
 | `create_component` | Turn a subtree into a component and replace it with an instance |
-| `insert_instance` | Place instances |
+| `insert_instance` | Place instances; returns `{ id, ids }` |
+| `replace_with_instance` | Swap hand-built elements (`nodeId` or `nodeIds`) for instances in place: same parent and index, text mapped onto the definition's parts, differing styles and attributes kept as overrides |
+| `name_layers` | Rename tag-named layers. Uses the client's model when it offers sampling, otherwise a deterministic name from the class or tag and first text — "Button · Save lead" |
 | `get_instance` | What an instance renders, and which parts can be overridden |
 | `set_override` | Change one instance without touching the others |
 | `detach_instance` | Convert an instance back to ordinary layers |
@@ -160,12 +174,12 @@ Artifactory's origin gets an answer that allows the session cookie.
 | Tool | What it gives you |
 |---|---|
 | `get_basic_info` | Pages, node count, artboards with sizes and canvas positions. Call this first |
-| `get_tree_summary` | Compact indented outline of a subtree — the cheap way to understand a design |
+| `get_tree_summary` | A subtree as rows `{ id, type, tag, name, text, parent, depth, childCount }` — the cheap way to understand a design. `outline: true` adds the compact text form |
 | `get_node_info` | One node in full: styles, variants, attributes, text, parent, children |
 | `get_children` | One level down: ids, names, types, child counts |
-| `find_nodes` | Search by name, text, tag or type |
+| `find_nodes` | Search by name, text, tag or type; returns `{ count, nodes: [{ id, type, tag, name, text, artboard, … }] }` |
 | `get_selection` | What the human has selected right now |
-| `get_computed_styles` | Authored styles, plus browser-resolved values and measured boxes when a tab is open |
+| `get_computed_styles` | Authored styles, plus browser-resolved values and measured boxes — from the person's tab when it shows the page, otherwise rendered headlessly (`source` says which) |
 | `get_screenshot` | PNG of any node, so the agent can see its own work |
 | `get_html` / `get_jsx` | HTML+CSS, or JSX in Tailwind or inline-style form |
 | `get_fill_image` | The bytes behind an image node |
@@ -182,9 +196,10 @@ Artifactory's origin gets an answer that allows the session cookie.
 
 | Tool | Notes |
 |---|---|
-| `write_html` | The main creation tool. HTML in, editable layers out |
+| `write_html` | The main creation tool. HTML in, editable layers out. Each element's class list is kept as `data-class` |
 | `create_artboard` | New screen, placed clear of existing work, on the current page |
-| `create_page` / `set_current_page` / `rename_page` / `delete_page` | Pages. Each connection has its own current page |
+| `fit_artboard` | Set an artboard's height to its rendered content, plus optional `padBottom` |
+| `create_page` / `set_current_page` / `rename_page` / `delete_page` | Pages. Each connection has its own current page. `create_page` starts empty; `withArtboard: true` adds a 1440×900 frame |
 | `publish_page` / `unpublish_page` / `get_publication` | Put an artboard on the public web, or take it down |
 | `mark_checkpoint` | Save a named version to compare against later |
 | `annotate` | A typed note on a layer — behaviour, data, constraint, accessibility, to-do |
@@ -195,12 +210,21 @@ Artifactory's origin gets an answer that allows the session cookie.
 | `move_nodes` | Reparent and reorder, preserving ids |
 | `duplicate_nodes` | Deep clone; returns a full old→new id map |
 | `delete_nodes` | Cascades to descendants |
-| `set_tokens` | Add or update tokens |
+| `set_tokens` | Add or update tokens. Any group name works beyond the built-in six, and a value of `{color.lime}` aliases another token (emitted as `var(--color-lime)`) |
 | `set_selection` | Select nodes in the human's browser and scroll them into view |
 | `export` | PNG, JPG, SVG or standalone HTML, returned as download URLs |
 | `import_url` | Fetch a public webpage and turn it into editable layers |
 | `apply_template` | Merge a starter design system's tokens and foundations sheet |
 | `start_working_on_nodes` / `finish_working_on_nodes` | Live "agent working" indicator, and a restore point |
+
+**Diagrams and documents**
+
+| Tool | Notes |
+|---|---|
+| `get_board` | Shapes and connectors on the canvas, with each connector's real path |
+| `edit_board` | Add, change and remove shapes and connectors. Connectors take optional `waypoints`; automatic elbows route around artboards and shapes and fan into separate lanes |
+| `write_diagram` | Lay out a diagram from Mermaid or nodes/edges; edges take optional `waypoints` |
+| `list_documents` / `switch_document` | The documents a project connection covers, and moving between them |
 
 **Code components**
 

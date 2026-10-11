@@ -397,3 +397,62 @@ export async function measureSubtree(
 export async function shutdownRenderer(): Promise<void> {
   await closeBrowser();
 }
+
+/** What get_computed_styles reports when no property list is given. */
+const DEFAULT_COMPUTED = [
+  'display', 'position', 'width', 'height', 'padding', 'margin', 'gap',
+  'flex-direction', 'align-items', 'justify-content',
+  'font-family', 'font-size', 'font-weight', 'line-height', 'letter-spacing',
+  'color', 'background-color', 'border', 'border-radius', 'box-shadow', 'opacity', 'overflow',
+];
+
+/**
+ * Browser-computed styles and boxes for nodes on one artboard, rendered
+ * headlessly — what a connected tab would report, for when no tab has the
+ * page open. Null when the renderer is unavailable.
+ */
+export async function computeStyles(
+  doc: CanvasDocument,
+  artboardId: NodeId,
+  ids: NodeId[],
+  properties?: string[],
+  baseUrl?: string,
+): Promise<Record<string, { box: { width: number; height: number; x: number; y: number }; styles: Record<string, string> } | null> | null> {
+  const pw = await tryLoadPlaywright();
+  if (!pw) return null;
+
+  const { width, height } = sizeOf(doc, artboardId);
+  const browser = await getBrowser(pw);
+  const context = await browser.newContext({
+    viewport: { width: Math.ceil(width), height: Math.ceil(height) },
+    deviceScaleFactor: 1,
+  });
+  const page = await context.newPage();
+  try {
+    await load(page, doc, artboardId, baseUrl, false, { includeNodeIds: true });
+    const script = `((ids, props) => {
+      const out = {};
+      const root = document.body.firstElementChild;
+      const origin = root ? root.getBoundingClientRect() : { left: 0, top: 0 };
+      for (const id of ids) {
+        const el = document.querySelector('[data-node-id="' + CSS.escape(id) + '"]');
+        if (!el) { out[id] = null; continue; }
+        const r = el.getBoundingClientRect();
+        const cs = getComputedStyle(el);
+        const styles = {};
+        for (const p of props) styles[p] = cs.getPropertyValue(p);
+        out[id] = {
+          box: {
+            width: Math.round(r.width * 100) / 100, height: Math.round(r.height * 100) / 100,
+            x: Math.round((r.left - origin.left) * 100) / 100, y: Math.round((r.top - origin.top) * 100) / 100,
+          },
+          styles,
+        };
+      }
+      return out;
+    })(${JSON.stringify(ids)}, ${JSON.stringify(properties?.length ? properties : DEFAULT_COMPUTED)})`;
+    return (await page.evaluate(script as unknown as () => unknown)) as Record<string, { box: { width: number; height: number; x: number; y: number }; styles: Record<string, string> } | null>;
+  } finally {
+    await context.close();
+  }
+}

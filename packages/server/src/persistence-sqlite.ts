@@ -139,6 +139,11 @@ export class SqlitePersistence implements Persistence {
         PRIMARY KEY (doc_id, key)
       );
     `);
+    // Project-scoped connections arrived later; older databases lack the column.
+    try {
+      const cols = this.db.prepare("PRAGMA table_info('connections')").all() as { name: string }[];
+      if (!cols.some((c) => c.name === 'project_id')) this.db.exec('ALTER TABLE connections ADD COLUMN project_id TEXT');
+    } catch { /* fresh database: created below or above with the column */ }
   }
 
   async loadDocument(id: string): Promise<CanvasDocument | null> {
@@ -176,11 +181,12 @@ export class SqlitePersistence implements Persistence {
 
   async saveConnection(c: StoredConnection): Promise<void> {
     this.db.prepare(`
-      INSERT INTO connections (code, doc_id, label, created_at, redeemed_at, last_used_at, revoked)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO connections (code, doc_id, label, created_at, redeemed_at, last_used_at, revoked, project_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(code) DO UPDATE SET redeemed_at = excluded.redeemed_at,
-        last_used_at = excluded.last_used_at, revoked = excluded.revoked
-    `).run(c.code, c.docId, c.label, c.createdAt, c.redeemedAt, c.lastUsedAt, c.revoked ? 1 : 0);
+        last_used_at = excluded.last_used_at, revoked = excluded.revoked,
+        doc_id = excluded.doc_id, project_id = excluded.project_id
+    `).run(c.code, c.docId, c.label, c.createdAt, c.redeemedAt, c.lastUsedAt, c.revoked ? 1 : 0, c.projectId ?? null);
   }
 
   async loadConnections(docId?: string): Promise<StoredConnection[]> {
@@ -418,6 +424,7 @@ function toConnection(row: Record<string, unknown>): StoredConnection {
     redeemedAt: row.redeemed_at === null ? null : Number(row.redeemed_at),
     lastUsedAt: row.last_used_at === null ? null : Number(row.last_used_at),
     revoked: Number(row.revoked) === 1,
+    projectId: (row.project_id as string | null | undefined) ?? null,
   };
 }
 
