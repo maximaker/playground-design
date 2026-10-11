@@ -12,7 +12,7 @@
   --ui-base: 13px;
   --ui-scale: 1;
 
-  --font: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font: 'Outfit', 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
   --font-display: 'Orbitron', 'Inter', system-ui, sans-serif;
   --mono: ui-monospace, 'SF Mono', Menlo, monospace;
 
@@ -32,11 +32,11 @@
    * read as three things. The rule that keeps it from drifting is that a
    * child's radius is at most its parent's minus the padding between them.
    */
-  --radius-xs: 0.3rem;
-  --radius-sm: 0.45rem;
-  --radius: 0.65rem;
-  --radius-lg: 0.95rem;
-  --radius-xl: 1.4rem;
+  --radius-xs: 0.35rem;
+  --radius-sm: 0.55rem;
+  --radius: 0.85rem;
+  --radius-lg: 1.3rem;
+  --radius-xl: 1.9rem;
   --radius-pill: 999px;
 
   --rail: 19rem;
@@ -62,21 +62,24 @@
 :root[data-theme='light'] {
   color-scheme: light;
 
-  --bg-sunken: #e4e4e6;
-  --bg: #ededef;
-  --bg-plate: #f7f7f8;
+  /* Cool blue-grey ground with white cards on it — the airy clinical look of
+     the reference dashboards. */
+  --bg-sunken: #d8dfe6;
+  --bg: #e2e8ee;
+  --bg-plate: #eef2f6;
   --bg-raised: #ffffff;
   --bg-panel: #ffffff;
   --bg-input: #ffffff;
-  --bg-hover: rgba(17, 17, 20, 0.045);
-  --bg-active: rgba(17, 17, 20, 0.08);
+  --bg-hover: rgba(20, 33, 61, 0.05);
+  --bg-active: rgba(20, 33, 61, 0.09);
 
-  --border: #e8e8ec;
-  --border-strong: #d6d6dc;
+  --border: #e5eaf0;
+  --border-strong: #d2dae4;
 
-  --fg: #16161a;
-  --fg-muted: #5f5f6b;
-  --fg-faint: #8c8c99;
+  /* Navy ink: text, and the primary action. */
+  --fg: #16223d;
+  --fg-muted: #66728a;
+  --fg-faint: #9aa4b5;
 
   /* Green is state: selection, agents, progress, anything live. It is never
      decoration, which is what keeps it meaningful where it appears. */
@@ -100,17 +103,17 @@
 
   /* Two-part shadows: a broad ambient one plus a 1px contact shadow, which is
      what makes a surface look placed rather than airbrushed. */
-  --shadow-sm: 0 1px 2px rgba(17, 17, 20, 0.06);
-  --shadow: 0 1px 2px rgba(17, 17, 20, 0.05), 0 8px 24px rgba(17, 17, 20, 0.07);
-  --shadow-lg: 0 1px 3px rgba(17, 17, 20, 0.06), 0 24px 56px rgba(17, 17, 20, 0.11);
-  --shadow-pill: 0 1px 2px rgba(17, 17, 20, 0.07), 0 2px 8px rgba(17, 17, 20, 0.05);
+  --shadow-sm: 0 1px 2px rgba(22, 34, 61, 0.04);
+  --shadow: 0 1px 2px rgba(22, 34, 61, 0.04), 0 10px 30px rgba(22, 34, 61, 0.06);
+  --shadow-lg: 0 2px 4px rgba(22, 34, 61, 0.05), 0 28px 60px rgba(22, 34, 61, 0.12);
+  --shadow-pill: 0 1px 2px rgba(22, 34, 61, 0.05), 0 4px 12px rgba(22, 34, 61, 0.05);
   --shadow-inset: inset 0 1px 0 rgba(255, 255, 255, 0.7);
   --artboard-shadow: 0 1px 2px rgba(17, 17, 20, 0.08), 0 10px 32px rgba(17, 17, 20, 0.1);
 
   --focus-ring: 0 0 0 2px rgba(30, 158, 98, 0.35);
 
-  --logo-from: #16161a;
-  --logo-to: #4a4a55;
+  --logo-from: #16223d;
+  --logo-to: #4a5a7a;
 }
 
 /* --- Dark theme ---------------------------------------------------------- */
@@ -118,21 +121,21 @@
 :root[data-theme='dark'] {
   color-scheme: dark;
 
-  --bg-sunken: #08080b;
-  --bg: #0e0e13;
-  --bg-plate: #16161d;
-  --bg-raised: #1b1b23;
-  --bg-panel: #1b1b23;
-  --bg-input: #22222c;
+  --bg-sunken: #070b14;
+  --bg: #0c111d;
+  --bg-plate: #121827;
+  --bg-raised: #182033;
+  --bg-panel: #182033;
+  --bg-input: #1f2840;
   --bg-hover: rgba(255, 255, 255, 0.055);
   --bg-active: rgba(255, 255, 255, 0.09);
 
-  --border: #262630;
-  --border-strong: #38384a;
+  --border: #243049;
+  --border-strong: #34425f;
 
-  --fg: #ecedf2;
-  --fg-muted: #9a9aab;
-  --fg-faint: #6c6c7d;
+  --fg: #eef2f8;
+  --fg-muted: #9ba6bb;
+  --fg-faint: #6b7690;
 
   --accent: #35c48b;
   --accent-hover: #4bd69d;
@@ -995,8 +998,8 @@ code { font-family: var(--mono); font-size: 0.92em; }
  * a button that levitates under the cursor reads as a card being picked up.
  */
 .button {
-  background: var(--bg-panel); border: 1px solid var(--border); border-radius: var(--radius);
-  padding: 0.35rem var(--s4); text-decoration: none; display: inline-flex;
+  background: var(--bg-panel); border: 1px solid var(--border); border-radius: var(--radius-pill);
+  padding: 0.42rem var(--s5); text-decoration: none; display: inline-flex;
   align-items: center; gap: var(--s2); color: var(--fg); white-space: nowrap;
   box-shadow: var(--shadow-pill);
   transition: background var(--transition), border-color var(--transition),
@@ -1016,8 +1019,8 @@ code { font-family: var(--mono); font-size: 0.92em; }
 .button.full { width: 100%; justify-content: center; }
 
 .icon-button {
-  background: none; border: 0; color: var(--fg-muted); padding: 0.3rem;
-  border-radius: var(--radius-sm); display: grid; place-items: center;
+  background: none; border: 0; color: var(--fg-muted); padding: 0.35rem;
+  border-radius: var(--radius-pill); display: grid; place-items: center;
   transition: background var(--transition), color var(--transition);
 }
 .icon-button.is-active { color: var(--accent); background: var(--accent-soft); }
@@ -3298,3 +3301,17 @@ code { font-family: var(--mono); font-size: 0.92em; }
 .connect-steps .snippet { margin-top: var(--s2); }
 .connect-warning { margin: 0; padding: var(--s3); border-radius: var(--radius); font-size: 0.85rem; background: color-mix(in srgb, #d97706 14%, transparent); }
 .connect-list summary { cursor: pointer; font-size: 0.85rem; color: var(--fg-muted); margin-bottom: var(--s2); }
+
+/* --- Reference polish --------------------------------------------------------
+ * Round white icon buttons in the top bar and on home, roomier cards and a
+ * lighter heading weight — the soft, rounded dashboard look.
+ */
+.topbar .icon-button, .home-actions .icon-button {
+  width: 2.3rem; height: 2.3rem; background: var(--bg-panel);
+  border: 1px solid var(--border); box-shadow: var(--shadow-pill);
+}
+.topbar .icon-button:hover, .home-actions .icon-button:hover { background: var(--bg-panel); color: var(--fg); border-color: var(--border-strong); }
+.rail-panel { box-shadow: var(--shadow); border-color: transparent; }
+.maker, .home-card, .doc-card { box-shadow: var(--shadow); border-color: transparent; }
+.makers-head h2, .home-section-title { font-weight: 500; font-size: 1.45rem; letter-spacing: -0.015em; }
+.modal { border-radius: var(--radius-xl); }
