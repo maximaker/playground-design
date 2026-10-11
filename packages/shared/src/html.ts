@@ -10,8 +10,8 @@ import { sanitizeMarkup } from './sanitize.ts';
 import { fontFamiliesIn, googleFontsHref } from './fonts.ts';
 import { parse as parseHtmlDom, type HTMLElement as ParsedElement } from 'node-html-parser';
 import {
-  type CanvasDocument, type CanvasNode, type NodeId, type NodeType, type StyleMap,
-  artboardTheme, contestedProperties, makeNode, newId, defaultStylesFor,
+  type CanvasDocument, type CanvasNode, type ComponentDef, type InstanceOverride, type NodeId, type NodeType, type StyleMap,
+  SLOT_ATTR, artboardTheme, contestedProperties, makeNode, newId, defaultStylesFor,
 } from './model.ts';
 import { type ExpandedNode, expandNode } from './components.ts';
 import {
@@ -253,6 +253,10 @@ export interface ParseResult {
    */
   styleRules: StyleRuleStat[];
   elements: number;
+  /** Component instances created from component tags. */
+  instances?: number;
+  /** `<repeat>` blocks expanded. */
+  repeats?: number;
 }
 
 export interface StyleRuleStat {
@@ -269,6 +273,54 @@ export interface ParseOptions {
   baseStyles?: StyleMap;
   /** Drop <script>; on by default and not configurable off for safety. */
   keepComments?: boolean;
+  /**
+   * The document's components. With them, `<Button variant="primary">Save</Button>`
+   * and `<component name="Tab bar / Home" />` become real instances rather than
+   * markup that only looks like one.
+   */
+  components?: Record<string, ComponentDef>;
+  /** Definition nodes, to find a component's slots and main text. */
+  defNodes?: Record<NodeId, CanvasNode>;
+}
+
+/** Marks a frame produced by `<repeat>`; holds the data it was expanded from. */
+export const REPEAT_DATA_ATTR = 'data-repeat';
+export const REPEAT_TEMPLATE_ATTR = 'data-repeat-template';
+export const REPEAT_STYLE_ATTR = 'data-repeat-style';
+
+const lookupPath = (item: unknown, path: string, index: number): unknown => {
+  if (path === '@index') return index;
+  if (path === '@number') return index + 1;
+  if (path === '.' || path === 'this') return item;
+  let cur: unknown = item;
+  for (const key of path.split('.')) {
+    if (cur === null || typeof cur !== 'object' || !(key in (cur as object))) return undefined;
+    cur = (cur as Record<string, unknown>)[key];
+  }
+  return cur;
+};
+
+/**
+ * Fills a row template once per item. `{{field}}`, `{{a.b}}`, `{{@index}}`,
+ * `{{@number}}` and `{{.}}` are replaced, HTML-escaped; a placeholder whose
+ * field the item does not have is left alone, so a nested `<repeat>` keeps its own.
+ */
+export function expandRepeat(template: string, data: unknown[]): string {
+  return data.map((item, i) => template.replace(/\{\{\s*([@\w.]+)\s*\}\}/g, (m, path: string) => {
+    const v = lookupPath(item, path, i);
+    if (v === undefined) return m;
+    return escapeAttr(typeof v === 'object' && v !== null ? JSON.stringify(v) : String(v));
+  })).join('\n');
+}
+
+/** "Tab bar / Home", "TabBarHome" and "tab-bar-home" all name the same thing. */
+export function componentKey(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+function isComponentTag(raw: string): boolean {
+  // `Button` or `TabBar`, not `DIV` from shouting legacy markup.
+  return /^[A-Z]/.test(raw) && raw !== raw.toUpperCase();
 }
 
 /**
@@ -320,7 +372,9 @@ export function parseHtml(html: string, opts: ParseOptions = {}): ParseResult {
 
   // Collect and remove <style> blocks before walking the tree.
   const rules = [] as ReturnType<typeof parseStylesheet>;
+  const styleText: string[] = [];
   for (const styleEl of root.querySelectorAll('style')) {
+    styleText.push(styleEl.textContent ?? '');
     rules.push(...parseStylesheet(styleEl.textContent ?? ''));
     styleEl.remove();
   }
@@ -334,10 +388,143 @@ export function parseHtml(html: string, opts: ParseOptions = {}): ParseResult {
   const ruleHits = new Map<string, number>();
   for (const r of rules) for (const part of r.selector.split(',')) if (part.trim()) ruleHits.set(part.trim(), 0);
   let elements = 0;
+  let instances = 0;
+  let repeats = 0;
+
+  const byKey = new Map<string, ComponentDef>();
+  for (const def of Object.values(opts.components ?? {})) byKey.set(componentKey(def.name), def);
+  const defNodes = opts.defNodes ?? {};
+
+  const walkInstance = (el: ParsedElement, def: ComponentDef, parent: NodeId | null): NodeId => {
+    const instance = makeNode({ type: 'instance', id: newId(), name: def.name, componentRef: def.id, parent });
+    const props: Record<string, string> = {};
+    const overrides: Record<NodeId, InstanceOverride> = {};
+    // Definition nodes in order, for slots and for text addressed by layer name.
+    const defOrder: CanvasNode[] = [];
+    const collect = (id: NodeId) => {
+      const n = defNodes[id];
+      if (!n) return;
+      defOrder.push(n);
+      for (const c of n.children) collect(c);
+    };
+    collect(def.root);
+    const textNodes = defOrder.filter((n) => n.type === 'text');
+    const hasSlot = defOrder.some((n) => n.attrs[SLOT_ATTR] !== undefined);
+
+    for (const [rawKey, value] of Object.entries(el.attributes ?? {})) {
+      const key = rawKey.toLowerCase();
+      if (key === 'name' && el.rawTagName.toLowerCase() === 'component') continue;
+      if (key === 'id') { instance.attrs.id = String(value); continue; }
+      if (key === 'style' || key === 'class') {
+        warnings.push(`<${el.rawTagName}>: ${key} is ignored on a component instance; use a variant prop, or set_override afterwards.`);
+        continue;
+      }
+      const prop = def.props?.find((p) => p.name.toLowerCase() === key);
+      if (prop) {
+        const v = prop.values.find((x) => x.toLowerCase() === String(value).toLowerCase());
+        if (v) props[prop.name] = v;
+        else warnings.push(`"${def.name}" has no ${prop.name}="${value}"; values are ${prop.values.join(', ')}. Left at "${prop.default}".`);
+        continue;
+      }
+      // An attribute named after a text layer sets that layer: <Card title="..." />.
+      const named = textNodes.find((n) => componentKey(n.name) === componentKey(key));
+      if (named) { overrides[named.id] = { text: String(value) }; continue; }
+      warnings.push(`"${def.name}" has no prop or text layer "${rawKey}"${def.props?.length ? ` (props: ${def.props.map((p) => p.name).join(', ')})` : ''}; ignored.`);
+    }
+
+    const kids = el.childNodes;
+    const elementKids = kids.filter(isElement) as ParsedElement[];
+    const inner = decodeEntities(el.textContent ?? '').replace(/\s+/g, ' ').trim();
+    if (hasSlot) {
+      // Children fill the definition's slots; `slot="footer"` picks a named one.
+      for (const child of kids) {
+        if (isElement(child)) {
+          const c = child as ParsedElement;
+          const slot = c.getAttribute('slot');
+          if (slot) c.removeAttribute('slot');
+          const cid = walk(c, instance.id);
+          if (cid) {
+            if (slot) { const cn = nodes.find((n) => n.id === cid); if (cn) cn.attrs['data-slot-target'] = slot; }
+            instance.children.push(cid);
+          }
+        } else {
+          const raw = decodeEntities(String(child.rawText ?? '')).replace(/\s+/g, ' ').trim();
+          if (!raw) continue;
+          const t = makeNode({ type: 'text', id: newId(), tag: 'span', name: truncate(raw, 24), styles: {}, parent: instance.id, text: raw });
+          nodes.push(t);
+          instance.children.push(t.id);
+        }
+      }
+    } else if (elementKids.length) {
+      warnings.push(`"${def.name}" has no data-slot, so the elements inside <${el.rawTagName}> were dropped; only its text was used.`);
+      if (inner && textNodes[0]) overrides[textNodes[0].id] = { text: inner };
+    } else if (inner) {
+      const main = textNodes[0];
+      if (main) overrides[main.id] = { ...overrides[main.id], text: inner };
+      else warnings.push(`"${def.name}" has no text layer or slot for "${truncate(inner, 24)}"; it was dropped.`);
+    }
+
+    if (Object.keys(props).length) instance.props = props;
+    if (Object.keys(overrides).length) instance.overrides = overrides;
+    instances++;
+    nodes.push(instance);
+    if (parent === null) roots.push(instance.id);
+    return instance.id;
+  };
+
+  const walkRepeat = (el: ParsedElement, parent: NodeId | null): NodeId => {
+    const rawData = el.getAttribute('data') ?? '[]';
+    let data: unknown[] = [];
+    try {
+      const parsed = JSON.parse(rawData);
+      if (Array.isArray(parsed)) data = parsed;
+      else warnings.push('<repeat data> must be a JSON array; nothing was repeated.');
+    } catch {
+      warnings.push(`<repeat data> is not valid JSON (single-quote the attribute: data='[{"a":1}]'); nothing was repeated.`);
+    }
+    const template = el.innerHTML;
+    const { base } = resolveStyles(el, rules, ruleHits);
+    const css = styleText.join('\n').trim();
+    const frame = makeNode({
+      type: 'frame', id: newId(), tag: 'div', parent,
+      name: el.getAttribute('name') ?? 'Repeat',
+      styles: { display: 'block', ...base },
+      attrs: {
+        [REPEAT_DATA_ATTR]: JSON.stringify(data),
+        [REPEAT_TEMPLATE_ATTR]: template,
+        ...(css ? { [REPEAT_STYLE_ATTR]: css } : {}),
+      },
+    });
+    const expanded = parseHtmlDom(expandRepeat(template, data), {
+      lowerCaseTagName: false, comment: false,
+      blockTextElements: { script: false, noscript: false, style: true, pre: true },
+    });
+    for (const sc of expanded.querySelectorAll('script')) sc.remove();
+    for (const child of expanded.childNodes) {
+      if (!isElement(child)) continue;
+      const cid = walk(child as ParsedElement, frame.id);
+      if (cid) frame.children.push(cid);
+    }
+    repeats++;
+    nodes.push(frame);
+    if (parent === null) roots.push(frame.id);
+    return frame.id;
+  };
 
   const walk = (el: ParsedElement, parent: NodeId | null): NodeId | null => {
-    const tag = el.rawTagName?.toLowerCase();
+    const raw = el.rawTagName;
+    let tag = raw?.toLowerCase();
     if (!tag) return null;
+    if (tag === 'repeat') return walkRepeat(el, parent);
+    if (tag === 'component' || isComponentTag(raw)) {
+      const name = tag === 'component' ? el.getAttribute('name') ?? '' : raw;
+      const def = byKey.get(componentKey(name));
+      if (def) return walkInstance(el, def, parent);
+      const known = [...byKey.values()].map((d) => d.name);
+      warnings.push(`No component named "${name}"${known.length ? ` (have: ${known.slice(0, 12).join(', ')})` : ''}; rendered as plain markup.`);
+      el.setAttribute('data-component', name);
+      tag = 'div';
+    }
 
     const childEls = el.childNodes.filter(isElement);
     const hasElementChildren = childEls.length > 0;
@@ -443,7 +630,7 @@ export function parseHtml(html: string, opts: ParseOptions = {}): ParseResult {
   }
 
   const styleRules = [...ruleHits].map(([selector, matched]) => ({ selector, matched, total: elements, root: roots[0] }));
-  return { nodes, roots, warnings, styleRules, elements };
+  return { nodes, roots, warnings, styleRules, elements, instances, repeats };
 }
 
 function isElement(n: unknown): n is ParsedElement {

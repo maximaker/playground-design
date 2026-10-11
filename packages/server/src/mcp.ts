@@ -1758,7 +1758,8 @@ function registerWriteTools(server: McpServer, ctx: McpContext): void {
   server.registerTool('write_html', {
     title: 'Write HTML into the document',
     description:
-      'The main creation tool. Parses an HTML fragment into editable layers: elements become nodes, inline styles and <style> rules become node styles, :hover and @media rules become variants. Write ordinary, well-structured HTML with flexbox — read get_guide("layout") first.',
+      'The main creation tool. Parses an HTML fragment into editable layers: elements become nodes, inline styles and <style> rules become node styles, :hover and @media rules become variants. Write ordinary, well-structured HTML with flexbox — read get_guide("layout") first. '
+      + 'Components: a tag named after a component inserts a real instance — <Button variant="primary">Save</Button> or <component name="Tab bar / Home" /> — attributes set variant props (or text layers by name), text fills the main text layer, child elements fill data-slot(s) (slot="name" for named ones).',
     inputSchema: {
       html: z.string().describe('HTML fragment. May include a <style> block. <script> is stripped.'),
       targetId: z.string().describe('Node to write into or replace.'),
@@ -1771,7 +1772,7 @@ function registerWriteTools(server: McpServer, ctx: McpContext): void {
     const doc = requireDoc(ctx);
     const target = node(doc, targetId);
 
-    const parsed = parseHtml(html);
+    const parsed = parseHtml(html, { components: doc.components, defNodes: doc.nodes });
     if (parsed.nodes.length === 0) return fail('The HTML produced no nodes. Check that it contains elements.');
 
     const ops: Op[] = [];
@@ -1810,6 +1811,8 @@ function registerWriteTools(server: McpServer, ctx: McpContext): void {
     return json({
       created: parsed.roots.length,
       totalNodes: parsed.nodes.length,
+      ...(parsed.instances ? { instances: parsed.instances } : {}),
+      ...(parsed.repeats ? { repeats: parsed.repeats } : {}),
       roots: parsed.roots.map((id) => {
         const n = parsed.nodes.find((x) => x.id === id)!;
         return { id, name: n.name, type: n.type, tag: n.tag };

@@ -1161,3 +1161,35 @@ test('componentise match "role" groups by class and tag, carrying style differen
   assert.ok(swapped.replaced[0]!.overrides >= 1, 'text and padding travel as overrides');
   await client.callTool({ name: 'delete_nodes', arguments: { ids: written.roots.map((r) => r.id) } });
 });
+
+test('write_html turns component tags into real instances', async () => {
+  const { id, agent, call } = await freshAgent('Component tags');
+  const board = getDocument(id)!.pages[0]!.artboards[0]!;
+  const def = await call<{ roots: { id: string }[] }>('write_html', {
+    targetId: board, html: '<button style="padding:8px"><span>Label</span></button>' });
+  const { componentId } = await call<{ componentId: string }>('create_component', { id: def.roots[0]!.id, name: 'Button' });
+  await call('set_component_props', { componentId, props: [{ name: 'variant', values: ['primary', 'ghost'], default: 'ghost' }] });
+  const tab = await call<{ roots: { id: string }[] }>('write_html', { targetId: board, html: '<nav><b>Home</b></nav>' });
+  await call('create_component', { id: tab.roots[0]!.id, name: 'Tab bar / Home' });
+
+  const res = await call<{ roots: { id: string; type: string }[]; warnings: string[]; instances: number }>('write_html', {
+    targetId: board,
+    html: '<div style="display:flex"><Button variant="primary">Save</Button><Button variant="nope">X</Button>'
+      + '<component name="Tab bar / Home" /><Fancy>hi</Fancy></div>',
+  });
+  assert.equal(res.instances, 3);
+  const doc = getDocument(id)!;
+  const row = doc.nodes[res.roots[0]!.id]!;
+  const [save, bad, tabbar, fancy] = row.children.map((c) => doc.nodes[c]!);
+  assert.equal(save!.type, 'instance');
+  assert.equal(save!.componentRef, componentId);
+  assert.deepEqual(save!.props, { variant: 'primary' });
+  assert.ok(Object.values(save!.overrides ?? {}).some((o) => o.text === 'Save'), 'text goes to the main text layer');
+  assert.equal(bad!.type, 'instance');
+  assert.equal(tabbar!.type, 'instance');
+  assert.equal(fancy!.type, 'frame', 'unknown names render as plain markup');
+  assert.equal(fancy!.attrs['data-component'], 'Fancy');
+  assert.ok(res.warnings.some((w) => /no variant="nope"/.test(w)));
+  assert.ok(res.warnings.some((w) => /No component named "Fancy"/.test(w)));
+  await agent.close();
+});
