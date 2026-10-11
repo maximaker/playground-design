@@ -21,6 +21,10 @@ body { overflow: hidden; }
 /* Editing chrome must not shift layout, so it is drawn with outlines only. */
 [data-node-id] { outline-offset: -1px; }
 [contenteditable] { outline: 2px solid #3b82f6; outline-offset: 1px; }
+/* A double-click on the canvas is a gesture, not a text selection: without
+   this the browser highlighted words — and greyed the whole frame — first. */
+body { -webkit-user-select: none; user-select: none; }
+[contenteditable], [contenteditable] * { -webkit-user-select: text; user-select: text; }
 `;
 
 export function useArtboardFrame(id: NodeId, live: boolean, opts: { register?: boolean } = {}) {

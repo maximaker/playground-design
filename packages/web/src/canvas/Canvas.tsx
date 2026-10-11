@@ -1045,8 +1045,23 @@ export function Canvas({ onContextMenu }: CanvasProps) {
     // so it has to be resolved rather than looked up directly.
     const resolved = resolveKey(getDoc(), hit.nodeId);
     if (!resolved?.node) return;
-    select([hit.nodeId]);
-    if (resolved.node.type === 'text') setEditingText(hit.nodeId);
+    // One level at a time, as in every design tool: each double-click steps
+    // from the current selection one layer closer to what is under the
+    // cursor, and only text that is itself reached starts editing. Jumping
+    // straight to the deepest layer made it impossible to pick a group.
+    const doc = getDoc();
+    const path: string[] = [];
+    for (let id: string | null = hit.nodeId; id && doc?.nodes[id]; id = doc.nodes[id]!.parent) {
+      if (doc.nodes[id]!.type === 'artboard') break;
+      path.push(id);
+    }
+    const current = useCanvas.getState().selection[0];
+    const at = current ? path.indexOf(current) : -1;
+    const next = at > 0 ? path[at - 1]! : at === 0 ? hit.nodeId : path[path.length - 1] ?? hit.nodeId;
+    // Composite keys (inside an instance) are not in the parent chain; edit directly.
+    const target = path.length ? next : hit.nodeId;
+    select([target]);
+    if (target === hit.nodeId && resolved.node.type === 'text') setEditingText(hit.nodeId);
   }, [select, setEditingText]);
 
   if (!page) return <div className="canvas-empty">No page</div>;
