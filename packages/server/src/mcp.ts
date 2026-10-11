@@ -2098,12 +2098,15 @@ function registerWriteTools(server: McpServer, ctx: McpContext): void {
   server.registerTool('move_nodes', {
     title: 'Move or reparent nodes',
     description:
-      'Repositions nodes in the tree, preserving their ids so your existing references stay valid. For artboards, pass x/y to move them on the canvas instead.',
+      'Repositions nodes in the tree, preserving their ids so your existing references stay valid. For artboards, '
+      + 'pass x/y to move them on the canvas and pageId to move them to another page (placed clear of what is '
+      + 'there unless you give x/y). Returns { ids, map } — map is identity, since ids are kept.',
     inputSchema: {
       moves: z.array(z.object({
         id: z.string(),
         parentId: z.string().nullable().optional().describe('New parent. null moves an artboard to page root.'),
         index: z.number().int().optional().describe('Position among siblings. Defaults to the end.'),
+        pageId: z.string().optional().describe('Artboards only: the page to move it to.'),
         x: z.number().optional().describe('Artboards only: canvas x.'),
         y: z.number().optional().describe('Artboards only: canvas y.'),
       })).min(1).max(100),
@@ -2112,19 +2115,33 @@ function registerWriteTools(server: McpServer, ctx: McpContext): void {
     const doc = requireDoc(ctx);
     const ops: Op[] = [];
     const attrUpdates: { id: NodeId; attrs: Record<string, string | null> }[] = [];
-    const treeMoves: { id: NodeId; parent: NodeId | null; index: number }[] = [];
+    const treeMoves: { id: NodeId; parent: NodeId | null; index: number; page?: string }[] = [];
+    // Right edge of each target page as this call fills it, so several land side by side.
+    const edges = new Map<string, number>();
 
     for (const m of moves) {
       const n = node(doc, m.id);
-      if (m.x !== undefined || m.y !== undefined) {
-        if (n.type !== 'artboard') {
-          return fail(`x/y only apply to artboards; ${m.id} is a ${n.type}. Position it with CSS via update_styles.`);
-        }
-        const attrs: Record<string, string | null> = {};
-        if (m.x !== undefined) attrs['data-x'] = String(m.x);
-        if (m.y !== undefined) attrs['data-y'] = String(m.y);
-        attrUpdates.push({ id: m.id, attrs });
+      const isBoard = n.type === 'artboard';
+      if ((m.x !== undefined || m.y !== undefined || m.pageId) && !isBoard) {
+        return fail(`x/y/pageId only apply to artboards; ${m.id} is a ${n.type}. To move it to another page, pass a parentId on that page.`);
       }
+      const attrs: Record<string, string | null> = {};
+      if (m.pageId) {
+        const page = doc.pages.find((p) => p.id === m.pageId);
+        if (!page) return fail(`No page "${m.pageId}". Call list_pages.`);
+        const from = pageOfArtboard(doc, m.id);
+        if (from?.id !== page.id) {
+          const edge = edges.get(page.id) ?? (page.artboards.length ? rightmostEdge(doc, page.artboards) + 120 : getArtboardPosition(n).x);
+          const px = m.x ?? edge;
+          if (m.x === undefined) attrs['data-x'] = String(px);
+          edges.set(page.id, px + getArtboardSize(n).width + 120);
+        }
+        treeMoves.push({ id: m.id, parent: null, index: m.index ?? page.artboards.length, page: page.id });
+      }
+      if (m.x !== undefined) attrs['data-x'] = String(m.x);
+      if (m.y !== undefined) attrs['data-y'] = String(m.y);
+      if (Object.keys(attrs).length) attrUpdates.push({ id: m.id, attrs });
+      if (m.pageId) continue;
       if (m.parentId !== undefined) {
         const parent = m.parentId;
         if (parent) {
@@ -2140,41 +2157,68 @@ function registerWriteTools(server: McpServer, ctx: McpContext): void {
 
     if (treeMoves.length) ops.push({ t: 'move', moves: treeMoves });
     if (attrUpdates.length) ops.push({ t: 'attrs', updates: attrUpdates });
-    if (!ops.length) return fail('Nothing to do: each move needs parentId, index, or x/y.');
+    if (!ops.length) return fail('Nothing to do: each move needs parentId, index, pageId, or x/y.');
     commit(ctx, ops);
-    return json({ moved: moves.length });
+    const ids = moves.map((m) => m.id);
+    return json({ moved: moves.length, ids, map: Object.fromEntries(ids.map((i) => [i, i])) });
   }));
 
   server.registerTool('duplicate_nodes', {
     title: 'Duplicate nodes',
     description:
-      'Deep-clones nodes. Returns the new root ids and a full old→new id map for every descendant, so you can restyle the copy precisely without re-reading the tree.',
+      'Deep-clones nodes. Artboards can be copied to another page with pageId (and placed with x/y). Returns '
+      + '{ ids, map }: the new root ids, and one old→new id map covering every descendant, so you can restyle '
+      + 'the copy precisely without re-reading the tree.',
     inputSchema: {
       ids: z.array(z.string()).min(1).max(50),
       parentId: z.string().optional().describe('Where to put the copies. Defaults to the original’s parent.'),
+      pageId: z.string().optional().describe('Artboards only: the page to put the copies on.'),
+      x: z.number().optional().describe('Artboards only: canvas x of the (first) copy; later copies sit to its right.'),
+      y: z.number().optional().describe('Artboards only: canvas y of the copies.'),
       offset: z.object({ x: z.number(), y: z.number() }).optional().describe('Artboards only: canvas offset for the copy.'),
     },
-  }, async ({ ids, parentId, offset }) => guard(() => {
+  }, async ({ ids, parentId, pageId, x, y, offset }) => guard(() => {
     const doc = requireDoc(ctx);
     const ops: Op[] = [];
     const results: { source: string; newId: string; idMap: Record<string, string> }[] = [];
+    const targetPage = pageId ? doc.pages.find((p) => p.id === pageId) : undefined;
+    if (pageId && !targetPage) return fail(`No page "${pageId}". Call list_pages.`);
+    const edges = new Map<string, number>();
+    const edgeOf = (page: Page, fallback: number) =>
+      edges.get(page.id) ?? (page.artboards.length ? rightmostEdge(doc, page.artboards) + 120 : fallback);
+    let nextX = x;
 
     for (const id of ids) {
       const src = node(doc, id);
+      if ((pageId || x !== undefined || y !== undefined) && src.type !== 'artboard') {
+        return fail(`pageId/x/y only apply to artboards; ${id} is a ${src.type}. Pass a parentId to copy it elsewhere.`);
+      }
       const { nodes, idMap } = cloneSubtree(doc, id);
       const root = nodes[0]!;
 
       if (src.type === 'artboard' && !parentId) {
         const pos = getArtboardPosition(src);
         const size = getArtboardSize(src);
-        root.attrs = {
-          ...root.attrs,
-          'data-x': String(pos.x + (offset?.x ?? size.width + 120)),
-          'data-y': String(pos.y + (offset?.y ?? 0)),
-        };
-        root.name = `${src.name} copy`;
-        const page = doc.pages.find((p) => p.artboards.includes(id)) ?? pageOf(ctx, doc);
-        ops.push({ t: 'insert', nodes, parent: null, index: page.artboards.length, page: page.id });
+        const fromPage = doc.pages.find((p) => p.artboards.includes(id)) ?? pageOf(ctx, doc);
+        const page = targetPage ?? fromPage;
+        let px: number;
+        let py: number;
+        if (nextX !== undefined || y !== undefined) {
+          px = nextX ?? edgeOf(page, pos.x);
+          py = y ?? pos.y;
+          if (nextX !== undefined) nextX += size.width + 120;
+        } else if (page.id !== fromPage.id) {
+          // On another page, sit clear of what is already there.
+          px = edgeOf(page, pos.x);
+          py = pos.y;
+        } else {
+          px = pos.x + (offset?.x ?? size.width + 120);
+          py = pos.y + (offset?.y ?? 0);
+        }
+        root.attrs = { ...root.attrs, 'data-x': String(px), 'data-y': String(py) };
+        if (page.id === fromPage.id) root.name = `${src.name} copy`;
+        ops.push({ t: 'insert', nodes, parent: null, index: Number.MAX_SAFE_INTEGER, page: page.id });
+        edges.set(page.id, Math.max(edgeOf(page, px), px + size.width + 120));
       } else {
         const target = parentId ?? src.parent;
         if (!target) return fail(`Node ${id} has no parent; pass parentId to say where the copy should go.`);
@@ -2185,7 +2229,11 @@ function registerWriteTools(server: McpServer, ctx: McpContext): void {
     }
 
     commit(ctx, ops);
-    return json({ duplicated: results });
+    return json({
+      ids: results.map((r) => r.newId),
+      map: Object.assign({}, ...results.map((r) => r.idMap)) as Record<string, string>,
+      duplicated: results,
+    });
   }));
 
   server.registerTool('delete_nodes', {
