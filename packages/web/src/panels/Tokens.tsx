@@ -37,7 +37,7 @@ export function Tokens() {
     <div className="tokens" key={version}>
       <div className="tokens-themes">
         {doc.themes.map((t) => (
-          <button key={t} className={theme === t ? 'is-active' : ''} onClick={() => setTheme(t)}>{t}</button>
+          <button key={t} className={theme === t ? 'is-active' : ''} onClick={() => setTheme(t)}>{t === 'default' ? 'Main' : t}</button>
         ))}
         <button
           className="add-variant"
@@ -55,10 +55,15 @@ export function Tokens() {
 
       {GROUPS.map((group) => {
         const rows = doc.tokens.filter((t) => t.group === group);
+        // Sizes read smallest to largest; colours keep the order they were made in.
+        if (group !== 'color') {
+          const size = (t: (typeof rows)[number]) => parseFloat(t.values.default ?? '') || 0;
+          rows.sort((a, b) => size(a) - size(b));
+        }
         if (!rows.length) return null;
         return (
           <div key={group} className="token-group">
-            <h4>{group}</h4>
+            <h4>{GROUP_LABELS[group] ?? group}</h4>
             {rows.map((t) => (
               <div key={t.name} className="token-row">
                 {group === 'color' && (
@@ -70,7 +75,9 @@ export function Tokens() {
                     />
                   </label>
                 )}
-                <span className="token-name" title={`var(${tokenToCssVar(t.name)})`}>{t.name}</span>
+                <span className="token-name" title={`${t.name} — var(${tokenToCssVar(t.name)})`}>
+                  {t.name.startsWith(`${group}.`) ? t.name.slice(group.length + 1) : t.name}
+                </span>
                 <input
                   className="input is-mono"
                   defaultValue={t.values[theme] ?? ''}
@@ -89,14 +96,13 @@ export function Tokens() {
       })}
 
       {adding ? <AddToken onAdd={add} onCancel={() => setAdding(false)} /> : (
-        <button className="button subtle full" onClick={() => setAdding(true)}>+ New token</button>
+        <button className="button subtle full" onClick={() => setAdding(true)}>+ Add a style</button>
       )}
 
       <TokenSync />
 
       <p className="panel-hint">
-        Tokens become CSS custom properties. Reference one anywhere a value goes, as
-        <code> var(--color-brand)</code>. Exported code carries them too.
+        Change a value here and it updates everywhere it is used.
       </p>
     </div>
   );
@@ -125,3 +131,9 @@ function AddToken({ onAdd, onCancel }: { onAdd: (n: string, g: TokenGroup, v: st
 function normalizeHex(v: string): string {
   return /^#[0-9a-f]{6}$/i.test(v) ? v : '#000000';
 }
+
+/** The groups as people say them. */
+const GROUP_LABELS: Record<string, string> = {
+  color: 'Colours', radius: 'Corners', space: 'Spacing', font: 'Fonts',
+  shadow: 'Shadows', size: 'Sizes', type: 'Text',
+};

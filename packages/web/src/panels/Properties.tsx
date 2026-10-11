@@ -162,7 +162,11 @@ export function Properties() {
       <div className="prop-header">
         <div className="prop-title">
           {nodes.length === 1 ? first.name : `${nodes.length} selected`}
-          <span className="prop-type">{nodes.length === 1 ? `${first.type} · ${first.tag}` : 'multiple'}</span>
+          <span className="prop-type">
+            {nodes.length === 1
+              ? (simple ? kindLabel(first.type) : `${kindLabel(first.type)} · <${first.tag}>`)
+              : 'several things'}
+          </span>
         </div>
       </div>
 
@@ -979,4 +983,12 @@ function SimpleEdit({ read, set, isText, tokens }: {
       <p className="panel-hint simple-tip">Need layout, sizes or hover effects? Switch to <strong>All controls</strong>.</p>
     </div>
   );
+}
+
+/** What a layer is, in the words someone would use for it. */
+function kindLabel(type: string): string {
+  return ({
+    artboard: 'Page', frame: 'Box', text: 'Text', image: 'Image', vector: 'Shape',
+    instance: 'Component copy', code: 'Code component', note: 'Note',
+  } as Record<string, string>)[type] ?? type;
 }

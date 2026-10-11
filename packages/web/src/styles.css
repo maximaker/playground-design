@@ -3324,3 +3324,47 @@ code { font-family: var(--mono); font-size: 0.92em; }
 .panel-help summary { cursor: pointer; width: fit-content; }
 .panel-help ul { margin: var(--s2) 0 0; padding-left: 1.1rem; display: flex; flex-direction: column; gap: 0.3rem; line-height: 1.45; }
 .panel-empty { font-size: 0.88rem; }
+
+/* --- Editor refinement -----------------------------------------------------------
+ * Calmer, easier to scan: one accent for state, navy for "this is chosen",
+ * fewer borders, and controls that only show their edges when you reach for them.
+ */
+/* Panel tabs: a quiet track, readable labels. */
+.rail-tabs { background: var(--bg-hover); border-color: transparent; }
+.rail-tabs button { color: var(--fg-muted); }
+.rail-tabs button.is-active { color: var(--fg); font-weight: 500; }
+
+/* Toolbar: the current tool is a navy circle, not a green slab. */
+.toolbar button { border-radius: var(--radius-pill); }
+.toolbar button.is-active { background: var(--fg); color: var(--bg-panel); }
+
+/* Theme chips read as a segmented choice. */
+.tokens-themes { background: var(--bg-hover); padding: 0.15rem; border-radius: var(--radius-pill); width: fit-content; gap: 0.1rem; }
+.tokens-themes button { border: 0; background: none; border-radius: var(--radius-pill); padding: 0.25rem 0.8rem; }
+.tokens-themes button.is-active { background: var(--bg-panel); color: var(--fg); border-color: transparent; box-shadow: var(--shadow-pill); }
+.tokens-themes .add-variant { color: var(--fg-faint); }
+
+/* Style rows: compact, the value only looks like a field on hover or focus. */
+.token-group h4 { font-size: 0.72rem; letter-spacing: 0.04em; text-transform: none; font-weight: 600; color: var(--fg-muted); }
+.token-row { gap: var(--s2); margin: 0; padding: 0.15rem 0.2rem; border-radius: var(--radius-sm); }
+.token-row:hover { background: var(--bg-hover); }
+.token-row .swatch { width: 1.35rem; height: 1.35rem; border-radius: 999px; border-color: var(--border); }
+.token-name { font-size: 0.84rem; color: var(--fg); }
+.token-row .input {
+  width: 5.6rem; background: none; border-color: transparent; font-size: 0.78rem;
+  color: var(--fg-muted); padding: 0.2rem 0.4rem; border-radius: var(--radius-sm); text-align: right;
+}
+.token-row:hover .input, .token-row .input:focus { background: var(--bg-input); border-color: var(--border); color: var(--fg); }
+.token-row .icon-button { opacity: 0; padding: 0.2rem; }
+.token-row:hover .icon-button, .token-row .icon-button:focus-visible { opacity: 1; }
+
+/* Section headings in panels: sentence weight, not shouting capitals. */
+.rail-heading { text-transform: none; letter-spacing: 0; font-size: 0.82rem; font-weight: 600; color: var(--fg); padding-top: var(--s4); }
+.components-section-title { text-transform: none; letter-spacing: 0; font-size: 0.75rem; color: var(--fg-muted); }
+
+/* The tabs above are labelled now, so the heading repeating them goes. */
+.rail-heading { display: none; }
+.rail-panel { padding-top: var(--s2); }
+/* The drag-to-change handle looked like a "go" arrow: hidden until you reach for the field. */
+.scrub { opacity: 0; cursor: ew-resize !important; transition: opacity var(--transition); }
+:hover > .scrub, .scrub.is-scrubbing, :focus-within > .scrub { opacity: 1; }
