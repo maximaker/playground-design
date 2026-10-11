@@ -119,6 +119,7 @@ export function emitHtml(doc: CanvasDocument, rootId: NodeId, opts: EmitOptions 
     const attrs: string[] = [];
     for (const [k, v] of Object.entries(node.attrs)) {
       if (k.startsWith('data-x') || k.startsWith('data-y')) continue; // canvas-space only
+      if (k.startsWith('data-repeat')) continue; // editor-side memory of a <repeat>
       attrs.push(`${k}="${escapeAttr(v)}"`);
     }
 

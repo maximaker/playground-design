@@ -1222,3 +1222,34 @@ test('find_nodes filters by style and restyle_matching changes every match in on
   assert.equal((await call<{ count: number }>('find_nodes', { styles: { color: '#111' } })).count, 0);
   await agent.close();
 });
+
+test('<repeat> expands rows from data and update_repeat_data re-renders them', async () => {
+  const { id, agent, call, raw } = await freshAgent('Repeat');
+  const board = getDocument(id)!.pages[0]!.artboards[0]!;
+  const res = await call<{ roots: { id: string }[]; repeats: number }>('write_html', {
+    targetId: board,
+    html: `<style>.row{padding:4px}</style><repeat data='[{"name":"Ana","role":{"t":"Lead"}},{"name":"Bo &lt;x&gt;"}]' style="display:flex;gap:8px">`
+      + '<div class="row"><b>{{name}}</b><span>{{role.t}} #{{@number}}</span></div></repeat>',
+  });
+  assert.equal(res.repeats, 1);
+  let doc = getDocument(id)!;
+  const frame = doc.nodes[res.roots[0]!.id]!;
+  assert.equal(frame.styles.display, 'flex');
+  assert.equal(frame.children.length, 2);
+  const first = doc.nodes[frame.children[0]!]!;
+  assert.equal(first.styles.padding, '4px', 'stylesheet rules reach the rows');
+  assert.equal(doc.nodes[first.children[0]!]!.text, 'Ana');
+  assert.equal(doc.nodes[first.children[1]!]!.text, 'Lead #1');
+
+  const upd = await call<{ rows: number }>('update_repeat_data', { id: frame.id, data: [{ name: 'X' }, { name: 'Y' }, { name: 'Z' }] });
+  assert.equal(upd.rows, 3);
+  doc = getDocument(id)!;
+  const again = doc.nodes[frame.id]!;
+  assert.equal(again.children.length, 3);
+  const z = doc.nodes[again.children[2]!]!;
+  assert.equal(doc.nodes[z.children[0]!]!.text, 'Z');
+  assert.equal(z.styles.padding, '4px', 'the stylesheet is remembered');
+  assert.deepEqual(JSON.parse(again.attrs['data-repeat']!), [{ name: 'X' }, { name: 'Y' }, { name: 'Z' }]);
+  assert.ok(isError(await raw('update_repeat_data', { id: board, data: [] })));
+  await agent.close();
+});

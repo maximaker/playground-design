@@ -1867,7 +1867,8 @@ function registerWriteTools(server: McpServer, ctx: McpContext): void {
     title: 'Write HTML into the document',
     description:
       'The main creation tool. Parses an HTML fragment into editable layers: elements become nodes, inline styles and <style> rules become node styles, :hover and @media rules become variants. Write ordinary, well-structured HTML with flexbox — read get_guide("layout") first. '
-      + 'Components: a tag named after a component inserts a real instance — <Button variant="primary">Save</Button> or <component name="Tab bar / Home" /> — attributes set variant props (or text layers by name), text fills the main text layer, child elements fill data-slot(s) (slot="name" for named ones).',
+      + 'Components: a tag named after a component inserts a real instance — <Button variant="primary">Save</Button> or <component name="Tab bar / Home" /> — attributes set variant props (or text layers by name), text fills the main text layer, child elements fill data-slot(s) (slot="name" for named ones). '
+      + 'Lists: <repeat data=\'[{"name":"Ana"}]\' style="display:flex;gap:8px"><div>{{name}}</div></repeat> expands the row once per item ({{a.b}}, {{@index}}, {{@number}}); change the data later with update_repeat_data.',
     inputSchema: {
       html: z.string().describe('HTML fragment. May include a <style> block. <script> is stripped.'),
       targetId: z.string().describe('Node to write into or replace.'),
@@ -1928,6 +1929,32 @@ function registerWriteTools(server: McpServer, ctx: McpContext): void {
       warnings: [...parsed.warnings, ...selectorWarnings],
       next: 'Call get_screenshot on the artboard to check the result.',
     });
+  }));
+
+  server.registerTool('update_repeat_data', {
+    title: 'Re-render a repeated list with new data',
+    description:
+      'A <repeat data=\'[…]\'>row template with {{field}}</repeat> written with write_html remembers its '
+      + 'data and template. Pass new data (and optionally a new template) to rebuild its rows in one undoable step. '
+      + 'Rows are regenerated, so edits made by hand inside them are replaced.',
+    inputSchema: {
+      id: z.string().describe('The repeat frame (write_html returns it as a root, or find_nodes { styles: {} } … name "Repeat").'),
+      data: z.array(z.unknown()).max(1000),
+      template: z.string().optional().describe('A new row template; defaults to the one it was written with.'),
+    },
+  }, async ({ id, data, template }) => guard(() => {
+    const doc = requireDoc(ctx);
+    const frame = node(doc, id);
+    const tpl = template ?? frame.attrs[REPEAT_TEMPLATE_ATTR];
+    if (tpl === undefined) return fail(`${id} is not a <repeat> block. Write one with write_html: <repeat data='[...]'>…{{field}}…</repeat>.`);
+    const css = frame.attrs[REPEAT_STYLE_ATTR];
+    const parsed = parseHtml(`${css ? `<style>${css}</style>` : ''}${expandRepeat(tpl, data)}`, { components: doc.components, defNodes: doc.nodes });
+    const ops: Op[] = [];
+    if (frame.children.length) ops.push({ t: 'remove', ids: [...frame.children] });
+    if (parsed.nodes.length) ops.push({ t: 'insert', nodes: parsed.nodes, parent: id, index: 0 });
+    ops.push({ t: 'attrs', updates: [{ id, attrs: { [REPEAT_DATA_ATTR]: JSON.stringify(data), ...(template !== undefined ? { [REPEAT_TEMPLATE_ATTR]: template } : {}) } }] });
+    commit(ctx, ops);
+    return json({ id, rows: parsed.roots.length, rowIds: parsed.roots, warnings: parsed.warnings.filter((w) => !/No elements found/.test(w)) });
   }));
 
   server.registerTool('update_styles', {
