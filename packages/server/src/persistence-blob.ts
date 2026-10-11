@@ -376,6 +376,9 @@ export class BlobPersistence implements Persistence {
     } catch { return null; }
   }
 
+  async saveHistory(docId: string, entries: unknown[]) { await this.putJson(`history/${docId}.json`, entries); }
+  async loadHistory(docId: string) { return (await this.getJson<unknown[]>(`history/${docId}.json`)) ?? []; }
+
   async saveSnapshot(s: StoredSnapshot) { await this.putJson(`snapshots/${s.docId}/${s.id}.json`, s); }
 
   async loadSnapshots(docId: string) {

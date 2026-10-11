@@ -109,6 +109,10 @@ export class MemoryPersistence implements Persistence {
   async saveAsset(asset: StoredAsset) { this.assets.set(asset.id, asset); }
   async loadAsset(id: string) { return this.assets.get(id) ?? null; }
 
+  private history = new Map<string, unknown[]>();
+  async saveHistory(docId: string, entries: unknown[]) { this.history.set(docId, entries); }
+  async loadHistory(docId: string) { return this.history.get(docId) ?? []; }
+
   async saveSnapshot(s: StoredSnapshot) { this.snapshots.set(s.id, s); }
   async loadSnapshots(docId: string) {
     return [...this.snapshots.values()]

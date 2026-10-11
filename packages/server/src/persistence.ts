@@ -234,6 +234,9 @@ export interface Persistence {
   saveThumbnail(thumb: StoredThumbnail): Promise<void>;
   loadThumbnail(docId: string, key: string): Promise<StoredThumbnail | null>;
 
+  /** The document's activity log (what was done, by whom, when). Kept so it survives restarts. */
+  saveHistory(docId: string, entries: unknown[]): Promise<void>;
+  loadHistory(docId: string): Promise<unknown[]>;
   saveSnapshot(snapshot: StoredSnapshot): Promise<void>;
   loadSnapshots(docId: string): Promise<Omit<StoredSnapshot, 'data'>[]>;
   loadSnapshot(docId: string, id: string): Promise<StoredSnapshot | null>;

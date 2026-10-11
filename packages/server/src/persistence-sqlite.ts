@@ -81,6 +81,11 @@ export class SqlitePersistence implements Persistence {
       );
       CREATE INDEX IF NOT EXISTS snapshots_doc ON snapshots(doc_id, ts DESC);
 
+      CREATE TABLE IF NOT EXISTS history (
+        doc_id TEXT PRIMARY KEY REFERENCES documents(id) ON DELETE CASCADE,
+        data TEXT NOT NULL
+      );
+
       CREATE TABLE IF NOT EXISTS users (
         id TEXT PRIMARY KEY,
         email TEXT NOT NULL UNIQUE COLLATE NOCASE,
@@ -393,6 +398,16 @@ export class SqlitePersistence implements Persistence {
       docId: r.doc_id, key: r.key, stamp: r.stamp, mime: r.mime,
       bytes: Buffer.from(r.bytes), createdAt: r.created_at,
     } : null;
+  }
+
+  async saveHistory(docId: string, entries: unknown[]): Promise<void> {
+    this.db.prepare('INSERT INTO history (doc_id, data) VALUES (?, ?) ON CONFLICT(doc_id) DO UPDATE SET data = excluded.data')
+      .run(docId, JSON.stringify(entries));
+  }
+
+  async loadHistory(docId: string): Promise<unknown[]> {
+    const row = this.db.prepare('SELECT data FROM history WHERE doc_id = ?').get(docId) as { data?: string } | undefined;
+    try { return row?.data ? JSON.parse(row.data) : []; } catch { return []; }
   }
 
   async saveSnapshot(s: StoredSnapshot): Promise<void> {

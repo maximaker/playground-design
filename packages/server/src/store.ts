@@ -60,7 +60,15 @@ export async function ensureLoaded(id: string): Promise<CanvasDocument | null> {
   const load = (async () => {
     const store = await persistence();
     const doc = await store.loadDocument(id);
-    if (doc) cache.set(id, doc);
+    if (doc) {
+      cache.set(id, doc);
+      // The activity log comes back with the document, so a restart or deploy
+      // no longer empties the history strip.
+      if (!history_.has(id)) {
+        const saved = await store.loadHistory(id).catch(() => []);
+        if (saved.length) history_.set(id, saved as HistoryEntry[]);
+      }
+    }
     inflight.delete(id);
     return doc;
   })();
@@ -92,7 +100,13 @@ export async function flushAll(): Promise<void> {
     dirty.delete(id);
     const doc = cache.get(id);
     if (doc) await store.saveDocument(doc).catch((err) => console.error('[playground] save failed', err));
+    await saveHistoryOf(store, id);
   }
+}
+
+async function saveHistoryOf(store: Awaited<ReturnType<typeof persistence>>, id: string): Promise<void> {
+  const entries = history_.get(id);
+  if (entries?.length) await store.saveHistory(id, entries).catch((err) => console.error('[playground] history save failed', err));
 }
 
 /**
@@ -104,6 +118,7 @@ async function markDirty(id: string): Promise<void> {
   if (store.kind === 'blob') {
     const doc = cache.get(id);
     if (doc) await store.saveDocument(doc).catch((err) => console.error('[playground] save failed', err));
+    await saveHistoryOf(store, id);
     return;
   }
   dirty.add(id);
