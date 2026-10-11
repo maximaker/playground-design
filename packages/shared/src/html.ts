@@ -16,7 +16,7 @@ import {
 import { type ExpandedNode, expandNode } from './components.ts';
 import {
   parseDeclarations, inlineDeclarations, serializeDeclarations, parseStylesheet,
-  specificity, tokenToCssVar,
+  specificity, tokenToCssVar, resolveTokenAliases,
 } from './css.ts';
 
 const VOID_TAGS = new Set(['img', 'br', 'hr', 'input', 'source', 'track', 'wbr', 'meta', 'link']);
@@ -180,7 +180,7 @@ export function tokenCss(doc: CanvasDocument, theme = 'default'): string {
   const decls = doc.tokens
     .map((t) => {
       const v = t.values[theme] ?? t.values.default;
-      return v ? `  ${tokenToCssVar(t.name)}: ${v};` : '';
+      return v ? `  ${tokenToCssVar(t.name)}: ${resolveTokenAliases(v)};` : '';
     })
     .filter(Boolean);
   if (!decls.length) return '';
@@ -326,6 +326,11 @@ export function parseHtml(html: string, opts: ParseOptions = {}): ParseResult {
       if (k === 'style' || k === 'class') continue;
       attrs[k] = String(v);
     }
+    // The authored class list is gone once its rules are resolved into styles,
+    // and with it the only record of what the element *is* ("btn primary").
+    // Kept so layers can be named and matched by role later.
+    const classList = (el.getAttribute('class') ?? '').trim().replace(/\s+/g, ' ');
+    if (classList && !attrs['data-class']) attrs['data-class'] = classList;
 
     const { base, variants } = resolveStyles(el, rules);
     const styles: StyleMap = { ...(parent === null ? opts.baseStyles ?? {} : {}), ...base };

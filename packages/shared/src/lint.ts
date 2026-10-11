@@ -15,6 +15,7 @@ import {
   ancestors, artboardOf, descendants,
 } from './model.ts';
 import { expandNode } from './components.ts';
+import { literalTokenValue } from './css.ts';
 import { contrastRatio, formatRatio, parseColor, requiredContrast, type Rgb } from './color.ts';
 
 export type Severity = 'error' | 'warning' | 'info';
@@ -341,7 +342,7 @@ function colorTokenIndex(doc: CanvasDocument, theme = 'default', restrictTo?: Se
   for (const token of doc.tokens as Token[]) {
     if (token.group !== 'color') continue;
     if (restrictTo && !restrictTo.has(token.name)) continue;
-    const parsed = parseColor(token.values[theme] ?? token.values.default ?? '');
+    const parsed = parseColor(literalTokenValue(doc.tokens, token.name, theme) ?? '');
     if (!parsed) continue;
     const key = normaliseColor(parsed);
     byValue.set(key, [...(byValue.get(key) ?? []), token.name]);
@@ -394,7 +395,7 @@ function spacingScale(doc: CanvasDocument, theme = 'default'): Set<number> {
   const scale = new Set<number>();
   for (const token of doc.tokens) {
     if (token.group !== 'space') continue;
-    const px = parseFloat(token.values[theme] ?? token.values.default ?? '');
+    const px = parseFloat(literalTokenValue(doc.tokens, token.name, theme) ?? '');
     if (Number.isFinite(px)) scale.add(px);
   }
   return scale;

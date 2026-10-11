@@ -331,3 +331,44 @@ test('the SVG draws every shape, connector and label', () => {
   assert.match(svg, />go</);
   assert.match(svg, /<path d="M/);
 });
+
+// --- Waypoints and obstacles -------------------------------------------------
+
+/** A page with nothing on it but the board: the starter artboard is not in the way. */
+function bare(items: BoardItem[]): { doc: CanvasDocument; page: Page } {
+  const f = fixture(items);
+  f.page.artboards = [];
+  return f;
+}
+
+test('an elbow bends at each waypoint, in order', () => {
+  const c = makeConnector({ id: 'c', from: { kind: 'shape', id: 'a' }, to: { kind: 'shape', id: 'b' }, waypoints: [{ x: 300, y: 300 }] });
+  const { doc, page } = bare([rect('a', 0, 0), rect('b', 600, 0), c]);
+  const pts = routeConnector(doc, page, c)!.points;
+  assert.ok(pts.some((p) => p.x === 300 && p.y === 300), 'passes through the waypoint');
+  for (let i = 1; i < pts.length; i++) {
+    assert.ok(pts[i]!.x === pts[i - 1]!.x || pts[i]!.y === pts[i - 1]!.y, 'every segment is orthogonal');
+  }
+});
+
+test('an elbow routes around a shape that sits between its ends', () => {
+  // a and b on one row with a wide block in between, covering the middle line.
+  const c = makeConnector({ id: 'c', from: { kind: 'shape', id: 'a' }, to: { kind: 'shape', id: 'b' } });
+  const block = rect('block', 200, -100, 200, 300);
+  const { doc, page } = bare([rect('a', 0, 0), rect('b', 600, 40), block, c]);
+  const pts = routeConnector(doc, page, c)!.points;
+  for (let i = 1; i < pts.length; i++) {
+    const p = pts[i - 1]!, q = pts[i]!;
+    const hits = Math.max(p.x, q.x) > 200.5 && Math.min(p.x, q.x) < 399.5
+      && Math.max(p.y, q.y) > -99.5 && Math.min(p.y, q.y) < 199.5;
+    assert.ok(!hits, `segment ${i} runs through the block: ${JSON.stringify([p, q])}`);
+  }
+});
+
+test('elbows fanning into one shape get their own lanes', () => {
+  const c1 = makeConnector({ id: 'c1', from: { kind: 'shape', id: 'a' }, to: { kind: 'shape', id: 't' } });
+  const c2 = makeConnector({ id: 'c2', from: { kind: 'shape', id: 'b' }, to: { kind: 'shape', id: 't' } });
+  const { doc, page } = bare([rect('a', 0, 0), rect('b', 0, 200), rect('t', 500, 100), c1, c2]);
+  const midX = (c: Connector) => routeConnector(doc, page, c)!.points[1]!.x;
+  assert.notEqual(midX(c1), midX(c2));
+});

@@ -13,7 +13,7 @@
 
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { persistence, type StoredConnection } from './persistence.ts';
-import { ensureLoaded, getDocument } from './store.ts';
+import { ensureLoaded, getDocument, listDocuments } from './store.ts';
 
 /** Minutes a freshly minted code stays valid before anyone redeems it. */
 const UNREDEEMED_TTL_MS = 30 * 60 * 1000;
@@ -28,6 +28,8 @@ export interface Connection {
   createdAt: number;
   redeemedAt: number | null;
   lastUsedAt: number | null;
+  /** Set when the connection covers a whole project; `docId` is the document it is on now. */
+  projectId: string | null;
 }
 
 // Unambiguous alphabet: no O/0, I/1, so a code read off a screen types correctly.
@@ -53,7 +55,65 @@ export async function createConnection(docId: string, label?: string): Promise<C
     code, docId, label: label ?? null, createdAt,
     redeemedAt: null, lastUsedAt: null, revoked: false,
   });
-  return { code, docId, docName: doc.name, label: label ?? null, createdAt, redeemedAt: null, lastUsedAt: null };
+  return { code, docId, docName: doc.name, label: label ?? null, createdAt, redeemedAt: null, lastUsedAt: null, projectId: null };
+}
+
+export class ConnectionError extends Error {}
+
+/** The documents filed in a project, most recently changed first. */
+export async function projectDocuments(projectId: string): Promise<{ id: string; name: string; updatedAt: number }[]> {
+  return (await listDocuments())
+    .filter((d) => d.projectId === projectId)
+    .sort((a, b) => b.updatedAt - a.updatedAt)
+    .map((d) => ({ id: d.id, name: d.name, updatedAt: d.updatedAt }));
+}
+
+/**
+ * A connection for a whole project.
+ *
+ * Building an app is rarely one document — screens, a design system, a deck —
+ * and a code per document meant reconnecting the agent for each. A project
+ * connection starts on one document (the one asked for, or the most recent)
+ * and the agent moves between the project's documents with switch_document.
+ * It can never reach a document outside the project.
+ */
+export async function createProjectConnection(projectId: string, label?: string, docId?: string): Promise<Connection> {
+  const docs = await projectDocuments(projectId);
+  if (!docs.length) throw new ConnectionError('This project has no documents yet. File one into it first.');
+  const start = docId ? docs.find((d) => d.id === docId) : docs[0];
+  if (!start) throw new ConnectionError(`Document ${docId} is not in this project.`);
+  await ensureLoaded(start.id);
+  const code = randomCode();
+  const createdAt = Date.now();
+  const store = await persistence();
+  await store.saveConnection({
+    code, docId: start.id, label: label ?? null, createdAt,
+    redeemedAt: null, lastUsedAt: null, revoked: false, projectId,
+  });
+  return { code, docId: start.id, docName: start.name, label: label ?? null, createdAt, redeemedAt: null, lastUsedAt: null, projectId };
+}
+
+/**
+ * Moves a project connection onto another of the project's documents. The
+ * choice is stored, so it holds across requests and reconnections.
+ */
+export async function switchConnectionDocument(connection: Connection, docId: string): Promise<Connection> {
+  if (!connection.projectId) {
+    throw new ConnectionError('This connection is for one document. Ask for a project connection to move between documents.');
+  }
+  const docs = await projectDocuments(connection.projectId);
+  if (!docs.some((d) => d.id === docId)) {
+    throw new ConnectionError(`Document "${docId}" is not in this project. list_documents shows the ones that are.`);
+  }
+  await ensureLoaded(docId);
+  const doc = getDocument(docId);
+  if (!doc) throw new ConnectionError(`Document "${docId}" no longer exists.`);
+  const store = await persistence();
+  const row = await store.loadConnection(connection.code);
+  if (row) await store.saveConnection({ ...row, docId });
+  connection.docId = docId;
+  connection.docName = doc.name;
+  return connection;
 }
 
 /**
@@ -95,6 +155,7 @@ export async function resolveConnection(code: string): Promise<Connection | null
   return {
     code: row.code, docId: row.docId, docName: doc.name, label: row.label,
     createdAt: row.createdAt, redeemedAt: row.redeemedAt, lastUsedAt: row.lastUsedAt,
+    projectId: row.projectId ?? null,
   };
 }
 
@@ -109,7 +170,7 @@ export async function listConnections(docId: string): Promise<Omit<Connection, '
   return (await store.loadConnections(docId))
     .filter((c) => !c.revoked)
     .sort((a, b) => b.createdAt - a.createdAt)
-    .map(({ revoked, ...rest }) => { void revoked; return rest; });
+    .map(({ revoked, ...rest }) => { void revoked; return { ...rest, projectId: rest.projectId ?? null }; });
 }
 
 export async function revokeConnection(code: string): Promise<boolean> {

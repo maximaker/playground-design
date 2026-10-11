@@ -129,25 +129,49 @@ test('write_html creates an editable tree with styles and variants', async () =>
   assert.ok(button.variants.some((v) => v.selector === ':hover'));
 });
 
-test('get_tree_summary is compact and includes the new content', async () => {
-  const out = textOf(await client.callTool({ name: 'get_tree_summary', arguments: { depth: 6 } }));
-  assert.match(out, /artboard#/);
-  assert.match(out, /Ship faster/);
-  assert.ok(out.split('\n').length < 20, 'summary should stay compact');
+test('get_tree_summary returns rows, with the text outline on request', async () => {
+  type Row = { id: string; type: string; name: string; text?: string; depth: number; parent: string | null };
+  const res = jsonOf<{ nodes: Row[]; outline?: string }>(
+    await client.callTool({ name: 'get_tree_summary', arguments: { depth: 6 } }));
+  assert.equal(res.nodes[0]!.type, 'artboard');
+  assert.equal(res.nodes[0]!.depth, 0);
+  assert.ok(res.nodes.some((n) => n.text === 'Ship faster'));
+  assert.ok(res.nodes.length < 20, 'summary should stay compact');
+  assert.equal(res.outline, undefined);
+  const withOutline = jsonOf<{ outline: string }>(
+    await client.callTool({ name: 'get_tree_summary', arguments: { depth: 6, outline: true } }));
+  assert.match(withOutline.outline, /artboard#/);
 });
 
-test('find_nodes locates by text and by type', async () => {
-  const byText = textOf(await client.callTool({ name: 'find_nodes', arguments: { query: 'Ship faster' } }));
-  assert.match(byText, /text#/);
-  const byType = textOf(await client.callTool({ name: 'find_nodes', arguments: { type: 'artboard' } }));
-  assert.match(byType, /artboard#/);
-  const none = textOf(await client.callTool({ name: 'find_nodes', arguments: { query: 'nonexistent-xyz' } }));
-  assert.match(none, /No matching nodes/);
+type Hit = { id: string; type: string; tag: string; name: string; text?: string; artboard: string | null; line: string };
+async function find(args: Record<string, unknown>): Promise<{ count: number; nodes: Hit[] }> {
+  return jsonOf(await client.callTool({ name: 'find_nodes', arguments: args }));
+}
+
+test('find_nodes returns structured rows by text and by type', async () => {
+  const byText = await find({ query: 'Ship faster' });
+  assert.equal(byText.nodes[0]!.type, 'text');
+  assert.equal(byText.nodes[0]!.text, 'Ship faster');
+  assert.ok(byText.nodes[0]!.artboard, 'each hit says which artboard it is on');
+  assert.match(byText.nodes[0]!.line, /text#/, 'the compact line is still there');
+  const byType = await find({ type: 'artboard' });
+  assert.ok(byType.count >= 1);
+  assert.ok(byType.nodes.every((n) => n.type === 'artboard'));
+  const none = await find({ query: 'nonexistent-xyz' });
+  assert.deepEqual(none, { count: 0, nodes: [] });
+});
+
+test('unknown parameters are rejected with the name of the key', async () => {
+  const res = await client.callTool({ name: 'find_nodes', arguments: { query: 'Ship', typo: 'x' } });
+  assert.ok(isError(res));
+  assert.match(textOf(res), /typo/);
+  const { tools } = await client.listTools();
+  const schema = tools.find((t) => t.name === 'find_nodes')!.inputSchema as { additionalProperties?: boolean };
+  assert.equal(schema.additionalProperties, false);
 });
 
 test('update_styles batches and supports variant selectors', async () => {
-  const hit = textOf(await client.callTool({ name: 'find_nodes', arguments: { tag: 'button' } }));
-  const id = /text#(\S+)|frame#(\S+)/.exec(hit)?.[0].split('#')[1] ?? '';
+  const id = (await find({ tag: 'button' })).nodes[0]?.id ?? '';
   assert.ok(id, 'should find the button node');
 
   await client.callTool({
@@ -294,14 +318,18 @@ test('get_selection is empty and honest when no tab is connected', async () => {
   assert.equal(res.selection.length, 0);
 });
 
-test('get_computed_styles falls back to authored styles without a tab', async () => {
+test('get_computed_styles measures headlessly when no tab shows the page', async () => {
   const doc = getDocument(docId)!;
   const hero = Object.values(doc.nodes).find((n) => n.tag === 'section')!;
-  const res = jsonOf<{ note?: string; nodes: { authored: Record<string, string> }[] }>(
-    await client.callTool({ name: 'get_computed_styles', arguments: { ids: [hero.id] } }),
-  );
-  assert.match(res.note ?? '', /No browser tab/);
+  const res = jsonOf<{
+    source: string; note?: string;
+    nodes: { authored: Record<string, string>; computed: { box: { width: number; height: number }; styles: Record<string, string> } | null }[];
+  }>(await client.callTool({ name: 'get_computed_styles', arguments: { ids: [hero.id], properties: ['display'] } }));
   assert.equal(res.nodes[0]!.authored.display, 'flex');
+  if (res.source === 'authored') return; // no renderer on this machine
+  assert.equal(res.source, 'headless');
+  assert.equal(res.nodes[0]!.computed!.styles.display, 'flex');
+  assert.ok(res.nodes[0]!.computed!.box.width > 0);
 });
 
 test('stale node ids produce a recoverable error', async () => {
@@ -649,4 +677,218 @@ test('a new document can be seeded with HTML at a given artboard size', async ()
   assert.equal(board.styles.width, '1840px');
   assert.equal(board.styles.height, '1200px');
   assert.equal(board.children.length, 1);
+});
+
+// ---------------------------------------------------------------------------
+// Gaps an agent hit building a whole app through MCP
+// ---------------------------------------------------------------------------
+
+type Call = <T>(tool: string, args?: Record<string, unknown>) => Promise<T>;
+type Raw = (tool: string, args?: Record<string, unknown>) => Promise<unknown>;
+
+/** A fresh document with its own agent connection, so a test cannot disturb the others. */
+async function freshAgent(name: string): Promise<{ id: string; agent: Client; call: Call; raw: Raw }> {
+  const id = (await createDocument(name)).id;
+  const conn = await createConnection(id, `${name} agent`);
+  const agent = new Client({ name: 'test', version: '1.0.0' });
+  await agent.connect(new StreamableHTTPClientTransport(new URL(`${base}/mcp/${conn.code}`)));
+  const raw: Raw = (tool, args = {}) => agent.callTool({ name: tool, arguments: args });
+  const call: Call = async <T>(tool: string, args: Record<string, unknown> = {}): Promise<T> => {
+    const res = await raw(tool, args);
+    if (isError(res)) throw new Error(`${tool}: ${textOf(res)}`);
+    return jsonOf<T>(res);
+  };
+  return { id, agent, call, raw };
+}
+
+test('update_note and delete_note edit and remove a note in place', async () => {
+  const { id, agent, call, raw } = await freshAgent('Notes');
+  const made = await call<{ id: string }>('create_note', { text: 'First', x: 10, y: 10 });
+  const moved = await call<{ text: string; x: number; y: number; color: string }>(
+    'update_note', { id: made.id, text: 'Second', x: 400, color: 'green' });
+  assert.deepEqual([moved.text, moved.x, moved.y, moved.color], ['Second', 400, 10, 'green']);
+  const note = getDocument(id)!.pages[0]!.notes!.find((n) => n.id === made.id)!;
+  assert.equal(note.text, 'Second');
+  assert.ok(isError(await raw('update_note', { id: made.id })), 'nothing to change is an error');
+  await call('delete_note', { id: made.id });
+  assert.equal(getDocument(id)!.pages[0]!.notes!.some((n) => n.id === made.id), false);
+  assert.ok(isError(await raw('delete_note', { id: made.id })));
+  await agent.close();
+});
+
+test('create_page starts empty unless asked, and the agent page is presence only', async () => {
+  const { peersOf } = await import('./realtime.ts');
+  const { id, agent, call } = await freshAgent('Pages');
+  const empty = await call<{ pageId: string }>('create_page', { name: 'Flows' });
+  assert.deepEqual(getDocument(id)!.pages.find((p) => p.id === empty.pageId)!.artboards, []);
+  const withBoard = await call<{ pageId: string; artboardId: string }>('create_page', { name: 'Screens', withArtboard: true });
+  assert.deepEqual(getDocument(id)!.pages.find((p) => p.id === withBoard.pageId)!.artboards, [withBoard.artboardId]);
+  // The agent shows up as a peer on the page it moved to; nothing tells a tab to go there.
+  const agentPeer = peersOf(id).find((p) => p.kind === 'agent');
+  assert.equal(agentPeer?.pageId, withBoard.pageId);
+  await agent.close();
+});
+
+test('fit_artboard sets the height to the rendered content', async () => {
+  const { id, agent, call, raw } = await freshAgent('Fit');
+  const board = getDocument(id)!.pages[0]!.artboards[0]!;
+  await call('update_styles', { updates: [{ id: board, styles: { height: '2000px', display: 'block', padding: '0' } }] });
+  await call('write_html', { targetId: board, html: '<div style="height:300px;margin:0">Tall</div><div style="height:100px">More</div>' });
+  const res = await raw('fit_artboard', { id: board, padBottom: 20 });
+  if (isError(res) && /renderer/.test(textOf(res))) { await agent.close(); return; }
+  const fitted = jsonOf<{ from: number; to: number }>(res);
+  assert.equal(fitted.from, 2000);
+  assert.equal(fitted.to, 420);
+  assert.equal(getDocument(id)!.nodes[board]!.styles.height, '420px');
+  assert.ok(isError(await raw('fit_artboard', { id: getDocument(id)!.nodes[board]!.children[0]! })), 'only artboards');
+  await agent.close();
+});
+
+test('replace_with_instance swaps built elements for instances, carrying text and styles', async () => {
+  const { id, agent, call } = await freshAgent('Swap');
+  const board = getDocument(id)!.pages[0]!.artboards[0]!;
+  const def = await call<{ roots: { id: string }[] }>('write_html', {
+    targetId: board, html: '<a href="#go" style="display:inline-flex;padding:8px"><span>Go</span></a>' });
+  const component = await call<{ componentId: string; definitionRoot: string }>('create_component', { id: def.roots[0]!.id, name: 'Action' });
+
+  const built = await call<{ roots: { id: string }[] }>('write_html', {
+    targetId: board,
+    html: '<a href="#save" style="display:inline-flex;padding:12px"><span>Save lead</span></a>'
+      + '<div style="display:flex"><p>Other shape</p></div>',
+  });
+  const [same, other] = built.roots.map((r) => r.id);
+  const index = getDocument(id)!.nodes[board]!.children.indexOf(same!);
+
+  const res = await call<{ replaced: { from: string; id: string; unmapped: string[] }[]; ids: string[] }>(
+    'replace_with_instance', { nodeIds: [same, other], componentId: component.componentId });
+  const after = getDocument(id)!;
+  assert.equal(after.nodes[same!], undefined, 'the original is gone');
+  assert.equal(after.nodes[other!], undefined);
+  const instance = after.nodes[res.ids[0]!]!;
+  assert.equal(instance.type, 'instance');
+  assert.equal(after.nodes[board]!.children[index], instance.id, 'same parent, same index');
+
+  const defSpan = after.nodes[component.definitionRoot]!.children[0]!;
+  assert.equal(instance.overrides![defSpan]!.text, 'Save lead');
+  assert.equal(instance.overrides![component.definitionRoot]!.styles!.padding, '12px');
+  assert.equal(instance.overrides![component.definitionRoot]!.attrs!.href, '#save');
+  // A different shape still maps its text onto the definition's text part.
+  assert.equal(after.nodes[res.ids[1]!]!.overrides![defSpan]!.text, 'Other shape');
+  await agent.close();
+});
+
+test('insert_instance returns { id, ids }', async () => {
+  const { id, agent, call } = await freshAgent('Insert');
+  const board = getDocument(id)!.pages[0]!.artboards[0]!;
+  const def = await call<{ roots: { id: string }[] }>('write_html', { targetId: board, html: '<span>Tag</span>' });
+  const { componentId } = await call<{ componentId: string }>('create_component', { id: def.roots[0]!.id, name: 'Tag' });
+  const res = await call<{ id: string; ids: string[] }>('insert_instance', { componentId, parentId: board, count: 2 });
+  assert.equal(res.ids.length, 2);
+  assert.equal(res.id, res.ids[0]);
+  await agent.close();
+});
+
+test('connectors take waypoints in edit_board and write_diagram', async () => {
+  const { agent, call } = await freshAgent('Routes');
+  await call('edit_board', { changes: [
+    { action: 'add', shape: { id: 'a', kind: 'rect', x: 3000, y: 0 } },
+    { action: 'add', shape: { id: 'b', kind: 'rect', x: 3600, y: 0 } },
+    { action: 'add', connector: { id: 'ab', from: { shape: 'a' }, to: { shape: 'b' }, waypoints: [{ x: 3300, y: 400 }] } },
+  ] });
+  type Board = { items: { id: string; path?: [number, number][] | null }[] };
+  let board = await call<Board>('get_board');
+  assert.ok(board.items.find((i) => i.id === 'ab')!.path!.some(([x, y]) => x === 3300 && y === 400));
+  await call('edit_board', { changes: [{ action: 'update', id: 'ab', patch: { waypoints: null } }] });
+  board = await call<Board>('get_board');
+  assert.ok(!board.items.find((i) => i.id === 'ab')!.path!.some(([, y]) => y === 400), 'null restores automatic routing');
+
+  const drawn = await call<{ ids: string[] }>('write_diagram', {
+    nodes: [{ id: 'x', label: 'X' }, { id: 'y', label: 'Y' }],
+    edges: [{ from: 'x', to: 'y', waypoints: [{ x: 9000, y: 9000 }] }],
+  });
+  board = await call<Board>('get_board');
+  const edge = board.items.find((i) => drawn.ids.includes(i.id) && i.path)!;
+  assert.ok(edge.path!.some(([x, y]) => x === 9000 && y === 9000));
+  await agent.close();
+});
+
+test('write_html keeps class lists, and name_layers names layers without sampling', async () => {
+  const { id, agent, call } = await freshAgent('Names');
+  const board = getDocument(id)!.pages[0]!.artboards[0]!;
+  const built = await call<{ roots: { id: string }[] }>('write_html', {
+    targetId: board,
+    html: '<div><button class="btn primary">Save lead</button></div>',
+  });
+  const button = Object.values(getDocument(id)!.nodes).find((n) => n.tag === 'button')!;
+  assert.equal(button.attrs['data-class'], 'btn primary');
+
+  const named = await call<{ source: string }>('name_layers', { id: board });
+  assert.equal(named.source, 'fallback');
+  assert.equal(getDocument(id)!.nodes[built.roots[0]!.id]!.name, 'Group · Save lead');
+  const again = await call<{ renamed: number }>('name_layers', { id: board });
+  assert.equal(again.renamed, 0, 'renamed layers are no longer generic');
+  await agent.close();
+});
+
+test('tokens can alias other tokens and use groups of their own', async () => {
+  const { id, agent, call, raw } = await freshAgent('Tokens');
+  await call('set_tokens', { tokens: [
+    { name: 'color.lime', group: 'color', values: { default: '#a3e635' } },
+    { name: 'color.accent', group: 'color', values: { default: '{color.lime}' } },
+    { name: 'motion.fast', group: 'motion', values: { default: '120ms' } },
+  ] });
+  assert.ok(isError(await raw('set_tokens', { tokens: [{ name: 'color.x', group: 'color', values: { default: '{color.nope}' } }] })),
+    'an alias to nothing is refused');
+  const doc = getDocument(id)!;
+  assert.equal(doc.tokens.find((t) => t.name === 'motion.fast')!.group, 'motion');
+  const { emitStandalone } = await import('@playground/shared');
+  assert.match(emitStandalone(doc, doc.pages[0]!.artboards[0]!), /--color-accent: var\(--color-lime\)/);
+  await agent.close();
+});
+
+test('a project connection lists and switches between the documents in the project', async () => {
+  const project = (await (await api('/api/projects', {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'App' }),
+  })).json() as { project: { id: string } }).project;
+  const first = (await createDocument('Screens')).id;
+  const second = (await createDocument('Design system')).id;
+  const outside = (await createDocument('Elsewhere')).id;
+  for (const doc of [first, second]) {
+    await api(`/api/documents/${doc}/project`, {
+      method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ projectId: project.id }),
+    });
+  }
+  const made = await api(`/api/projects/${project.id}/connections`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ label: 'Builder', docId: first }),
+  });
+  assert.equal(made.status, 201);
+  const { connection } = await made.json() as { connection: { code: string; docId: string; projectId: string } };
+  assert.equal(connection.docId, first);
+  assert.equal(connection.projectId, project.id);
+
+  const agent = new Client({ name: 'test', version: '1.0.0' });
+  await agent.connect(new StreamableHTTPClientTransport(new URL(`${base}/mcp/${connection.code}`)));
+  const call = (name: string, args: Record<string, unknown> = {}) => agent.callTool({ name, arguments: args });
+
+  const listed = jsonOf<{ documents: { id: string; current: boolean }[] }>(await call('list_documents'));
+  assert.deepEqual(listed.documents.map((d) => d.id).sort(), [first, second].sort());
+  assert.equal(listed.documents.find((d) => d.current)!.id, first);
+
+  const switched = jsonOf<{ current: string; switched: boolean }>(await call('switch_document', { docId: second }));
+  assert.deepEqual([switched.current, switched.switched], [second, true]);
+  assert.equal(jsonOf<{ documentName: string }>(await call('get_basic_info')).documentName, 'Design system');
+  assert.ok(isError(await call('switch_document', { docId: outside })), 'never outside the project');
+  await agent.close();
+
+  // The choice is stored: a new session on the same code starts where the last one left off.
+  const again = new Client({ name: 'test', version: '1.0.0' });
+  await again.connect(new StreamableHTTPClientTransport(new URL(`${base}/mcp/${connection.code}`)));
+  assert.equal(jsonOf<{ documentName: string }>(await again.callTool({ name: 'get_basic_info', arguments: {} })).documentName, 'Design system');
+  await again.close();
+
+  // A document connection stays scoped to its document.
+  const single = jsonOf<{ projectId: null; documents: unknown[] }>(await client.callTool({ name: 'list_documents', arguments: {} }));
+  assert.equal(single.projectId, null);
+  assert.equal(single.documents.length, 1);
+  assert.ok(isError(await client.callTool({ name: 'switch_document', arguments: { docId: second } })));
 });

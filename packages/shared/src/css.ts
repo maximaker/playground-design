@@ -149,6 +149,32 @@ export function tokenRef(name: string): string {
   return `var(${tokenToCssVar(name)})`;
 }
 
+/** `{color.lime}` inside a token value -> `var(--color-lime)`. Anything else is left alone. */
+export function resolveTokenAliases(value: string): string {
+  return value.replace(/\{\s*([\w.-]+)\s*\}/g, (_, name: string) => tokenRef(name));
+}
+
+/**
+ * A token's literal value for a theme, following `{alias}` chains to the
+ * end. Used where a value has to be read rather than emitted (contrast checks).
+ */
+export function literalTokenValue(
+  tokens: readonly { name: string; values: Record<string, string> }[], name: string, theme = 'default',
+): string | undefined {
+  const seen = new Set<string>();
+  let current = name;
+  for (;;) {
+    if (seen.has(current)) return undefined;
+    seen.add(current);
+    const t = tokens.find((x) => x.name === current);
+    const v = t ? (t.values[theme] ?? t.values.default) : undefined;
+    if (v === undefined) return undefined;
+    const m = /^\{\s*([\w.-]+)\s*\}$/.exec(v.trim());
+    if (!m) return v;
+    current = m[1]!;
+  }
+}
+
 /** Extracts the token name from `var(--color-brand)`, if the value is a ref. */
 export function parseTokenRef(value: string): string | null {
   const m = /^var\(\s*--([\w-]+)\s*(?:,.*)?\)$/.exec(value.trim());

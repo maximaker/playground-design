@@ -33,6 +33,12 @@ export interface StoredConnection {
   redeemedAt: number | null;
   lastUsedAt: number | null;
   revoked: boolean;
+  /**
+   * Set for a connection scoped to a project rather than one document: the
+   * agent may switch among the project's documents, and `docId` is whichever
+   * one it is on now.
+   */
+  projectId?: string | null;
 }
 
 export type ShareRole = 'view';

@@ -65,6 +65,12 @@ export interface Connector {
    */
   fromSide?: BoardSide;
   toSide?: BoardSide;
+  /**
+   * Points the route must pass through, in order, in canvas coordinates. An
+   * elbow bends at each one; a straight connector becomes a polyline through
+   * them. For the cases automatic routing gets wrong.
+   */
+  waypoints?: Point[];
 }
 
 export type BoardSide = 'left' | 'right' | 'top' | 'bottom';
@@ -202,6 +208,7 @@ export function makeConnector(partial: Partial<Connector> & { from: Endpoint; to
     ...(partial.dashed ? { dashed: true } : {}),
     ...(partial.fromSide ? { fromSide: partial.fromSide } : {}),
     ...(partial.toSide ? { toSide: partial.toSide } : {}),
+    ...(partial.waypoints?.length ? { waypoints: partial.waypoints.map((p) => ({ x: p.x, y: p.y })) } : {}),
   };
 }
 
@@ -418,6 +425,24 @@ export function routeConnector(doc: CanvasDocument, page: Page, connector: Conne
   const cb = centre(b.box);
 
   let points: Point[];
+  if (connector.waypoints?.length && connector.route !== 'curved') {
+    const via = connector.waypoints;
+    const first = connector.fromSide && a.outline !== 'point' ? sidePoint(a, connector.fromSide) : boundaryToward(a, via[0]!);
+    const last = connector.toSide && b.outline !== 'point' ? sidePoint(b, connector.toSide) : boundaryToward(b, via[via.length - 1]!);
+    const chain = [first, ...via, last];
+    if (connector.route === 'straight') points = chain;
+    else {
+      // Orthogonal between each pair: along x first, then y.
+      points = [chain[0]!];
+      for (let i = 1; i < chain.length; i++) {
+        const prev = chain[i - 1]!;
+        const next = chain[i]!;
+        if (Math.abs(prev.x - next.x) > 0.5 && Math.abs(prev.y - next.y) > 0.5) points.push({ x: next.x, y: prev.y });
+        points.push(next);
+      }
+    }
+    return { points, label: pointAlong(points, 0.5) };
+  }
   if (connector.route === 'straight') {
     points = [
       connector.fromSide && a.outline !== 'point' ? sidePoint(a, connector.fromSide) : boundaryToward(a, cb),
@@ -454,12 +479,19 @@ export function routeConnector(doc: CanvasDocument, page: Page, connector: Conne
     const gapX = Math.max(b.box.x - (a.box.x + a.box.width), a.box.x - (b.box.x + b.box.width));
     const gapY = Math.max(b.box.y - (a.box.y + a.box.height), a.box.y - (b.box.y + b.box.height));
     const horizontal = gapX >= gapY;
+    const lane = laneOffset(page, connector);
     if (horizontal) {
       const rightward = cb.x >= ca.x;
-      points = elbowBetween(a, rightward ? 'right' : 'left', b, rightward ? 'left' : 'right');
+      points = elbowBetween(a, rightward ? 'right' : 'left', b, rightward ? 'left' : 'right', lane);
     } else {
       const downward = cb.y >= ca.y;
-      points = elbowBetween(a, downward ? 'bottom' : 'top', b, downward ? 'top' : 'bottom');
+      points = elbowBetween(a, downward ? 'bottom' : 'top', b, downward ? 'top' : 'bottom', lane);
+    }
+    const obstacles = obstaclesFor(doc, page, connector);
+    if (obstacles.length && collides(points, obstacles)) {
+      points = horizontal
+        ? avoid(points, obstacles) ?? points
+        : (avoid(points.map(flip), obstacles.map(flipBox))?.map(flip) ?? points);
     }
   }
   return { points, label: pointAlong(points, 0.5) };
@@ -496,7 +528,7 @@ const STUB = 24;
  * face the same way (right to right) go round the outside of both, which is
  * what a loop back up a flow looks like.
  */
-function elbowBetween(a: ResolvedEnd, sa: Side, b: ResolvedEnd, sb: Side): Point[] {
+function elbowBetween(a: ResolvedEnd, sa: Side, b: ResolvedEnd, sb: Side, lane = 0): Point[] {
   const p0 = a.outline === 'point' ? centre(a.box) : sidePoint(a, sa);
   const p3 = b.outline === 'point' ? centre(b.box) : sidePoint(b, sb);
   const na = NORMAL[sa];
@@ -507,14 +539,14 @@ function elbowBetween(a: ResolvedEnd, sa: Side, b: ResolvedEnd, sb: Side): Point
 
   if (horizontalA && horizontalB) {
     let x: number;
-    if (na.x === -nb.x && (p3.x - p0.x) * na.x > 0) x = (p0.x + p3.x) / 2;          // facing, with room between
+    if (na.x === -nb.x && (p3.x - p0.x) * na.x > 0) x = clampLane((p0.x + p3.x) / 2, lane, p0.x, p3.x);          // facing, with room between
     else if (na.x === nb.x) x = na.x > 0 ? Math.max(p0.x, p3.x) + STUB : Math.min(p0.x, p3.x) - STUB; // same side: round the outside
     else x = p0.x + na.x * STUB;                                                       // facing, but overlapping
     return dedupe([p0, { x, y: p0.y }, { x, y: p3.y }, p3]);
   }
   if (!horizontalA && !horizontalB) {
     let y: number;
-    if (na.y === -nb.y && (p3.y - p0.y) * na.y > 0) y = (p0.y + p3.y) / 2;
+    if (na.y === -nb.y && (p3.y - p0.y) * na.y > 0) y = clampLane((p0.y + p3.y) / 2, lane, p0.y, p3.y);
     else if (na.y === nb.y) y = na.y > 0 ? Math.max(p0.y, p3.y) + STUB : Math.min(p0.y, p3.y) - STUB;
     else y = p0.y + na.y * STUB;
     return dedupe([p0, { x: p0.x, y }, { x: p3.x, y }, p3]);
@@ -530,6 +562,118 @@ function elbowBetween(a: ResolvedEnd, sa: Side, b: ResolvedEnd, sb: Side): Point
   const p2 = { x: p3.x + nb.x * STUB, y: p3.y + nb.y * STUB };
   const mid = horizontalA ? { x: p1.x, y: p2.y } : { x: p2.x, y: p1.y };
   return dedupe([p0, p1, mid, p2, p3]);
+}
+
+// ---------------------------------------------------------------------------
+// Keeping elbows apart and out of the way
+// ---------------------------------------------------------------------------
+
+/** Spacing between parallel elbows that would otherwise share a line. */
+const LANE = 12;
+/** Clearance kept between a detour and the box it goes round. */
+const CLEARANCE = 16;
+
+/** The middle line, shifted by a lane, but never past either end's stub. */
+function clampLane(mid: number, lane: number, from: number, to: number): number {
+  const lo = Math.min(from, to) + STUB;
+  const hi = Math.max(from, to) - STUB;
+  if (lo > hi) return mid;
+  return Math.min(hi, Math.max(lo, mid + lane));
+}
+
+const endKey = (e: Endpoint): string => (e.kind === 'point' ? `p:${e.x},${e.y}` : `${e.kind}:${e.id}`);
+
+/**
+ * Elbows that fan into (or out of) the same box all turn on the line halfway
+ * between — drawn on top of each other they read as one arrow. Each gets its
+ * own lane, centred on the shared line, in the order they were drawn.
+ */
+function laneOffset(page: Page, connector: Connector): number {
+  const auto = boardOf(page).filter((i): i is Connector =>
+    isConnector(i) && i.route === 'elbow' && !i.fromSide && !i.toSide && !i.waypoints?.length);
+  const sameTo = auto.filter((c) => endKey(c.to) === endKey(connector.to));
+  const sameFrom = auto.filter((c) => endKey(c.from) === endKey(connector.from));
+  const group = sameTo.length >= sameFrom.length ? sameTo : sameFrom;
+  if (group.length < 2) return 0;
+  const k = group.findIndex((c) => c.id === connector.id);
+  return k < 0 ? 0 : (k - (group.length - 1) / 2) * LANE;
+}
+
+/** Everything an elbow should not run through: artboards and shapes other than its own ends. */
+function obstaclesFor(doc: CanvasDocument, page: Page, connector: Connector): BoardBox[] {
+  const ends = new Set([endKey(connector.from), endKey(connector.to)]);
+  const out: BoardBox[] = [];
+  for (const id of page.artboards) {
+    const n = doc.nodes[id];
+    if (!n || ends.has(`artboard:${id}`)) continue;
+    out.push({ ...getArtboardPosition(n), ...getArtboardSize(n) });
+  }
+  for (const item of boardOf(page)) {
+    // A section is a backdrop things sit on, and text is a caption; neither is in the way.
+    if (!isShape(item) || item.kind === 'section' || item.kind === 'text' || ends.has(`shape:${item.id}`)) continue;
+    out.push({ x: item.x, y: item.y, width: item.width, height: item.height });
+  }
+  return out;
+}
+
+function segmentHits(p: Point, q: Point, box: BoardBox): boolean {
+  const x1 = Math.min(p.x, q.x), x2 = Math.max(p.x, q.x);
+  const y1 = Math.min(p.y, q.y), y2 = Math.max(p.y, q.y);
+  return x2 > box.x + 0.5 && x1 < box.x + box.width - 0.5 && y2 > box.y + 0.5 && y1 < box.y + box.height - 0.5;
+}
+
+/** True when any segment of the path crosses the inside of any box. */
+export function routeCollides(points: Point[], boxes: BoardBox[]): boolean {
+  for (let i = 1; i < points.length; i++) {
+    for (const box of boxes) if (segmentHits(points[i - 1]!, points[i]!, box)) return true;
+  }
+  return false;
+}
+const collides = routeCollides;
+
+const flip = (p: Point): Point => ({ x: p.y, y: p.x });
+const flipBox = (b: BoardBox): BoardBox => ({ x: b.y, y: b.x, width: b.height, height: b.width });
+
+function lengthOf(points: Point[]): number {
+  let total = 0;
+  for (let i = 1; i < points.length; i++) total += Math.abs(points[i]!.x - points[i - 1]!.x) + Math.abs(points[i]!.y - points[i - 1]!.y);
+  return total;
+}
+
+/**
+ * A clear route for a horizontal elbow (one that leaves and arrives through
+ * left/right sides), or null when none of the candidates is clear.
+ *
+ * Two families are tried: moving the vertical run to either side of each box
+ * in the way, and a detour above or below everything between the two ends.
+ * The shortest clear one wins, so a route bends further only when it must.
+ */
+function avoid(points: Point[], boxes: BoardBox[]): Point[] | null {
+  const p0 = points[0]!;
+  const p3 = points[points.length - 1]!;
+  const dir = p3.x >= p0.x ? 1 : -1;
+  const x1 = p0.x + dir * STUB;
+  const x2 = p3.x - dir * STUB;
+  const candidates: Point[][] = [];
+
+  const lo = Math.min(x1, x2), hi = Math.max(x1, x2);
+  const xs = boxes.flatMap((b) => [b.x - CLEARANCE, b.x + b.width + CLEARANCE]).filter((x) => x >= lo && x <= hi);
+  for (const x of xs) candidates.push([p0, { x, y: p0.y }, { x, y: p3.y }, p3]);
+
+  const spanX1 = Math.min(p0.x, p3.x), spanX2 = Math.max(p0.x, p3.x);
+  const between = boxes.filter((b) => b.x < spanX2 && b.x + b.width > spanX1);
+  if (between.length) {
+    const top = Math.min(p0.y, p3.y, ...between.map((b) => b.y)) - CLEARANCE * 2;
+    const bottom = Math.max(p0.y, p3.y, ...between.map((b) => b.y + b.height)) + CLEARANCE * 2;
+    for (const y of [top, bottom]) {
+      candidates.push([p0, { x: x1, y: p0.y }, { x: x1, y }, { x: x2, y }, { x: x2, y: p3.y }, p3]);
+    }
+  }
+
+  const clear = candidates.filter((c) => !collides(c, boxes));
+  if (!clear.length) return null;
+  clear.sort((m, n) => lengthOf(m) - lengthOf(n));
+  return clear[0]!.filter((p, i, all) => i === 0 || Math.abs(p.x - all[i - 1]!.x) > 0.5 || Math.abs(p.y - all[i - 1]!.y) > 0.5);
 }
 
 /** The point a fraction of the way along a polyline, by length. */

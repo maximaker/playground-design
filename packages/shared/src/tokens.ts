@@ -196,14 +196,14 @@ function toCss(doc: CanvasDocument): string {
 }
 
 function toTailwindConfig(doc: CanvasDocument): string {
-  const groups: Record<TokenGroup, string> = {
+  const groups: Record<string, string> = {
     color: 'colors', space: 'spacing', radius: 'borderRadius',
     font: 'fontSize', shadow: 'boxShadow', duration: 'transitionDuration',
   };
 
   const theme: Record<string, unknown> = {};
   for (const token of doc.tokens) {
-    const section = groups[token.group];
+    const section = groups[token.group] ?? token.group;
     const path = token.name.split('.');
     // Drop the group prefix: `color.brand.500` sits at colors.brand.500.
     const keys = path.length > 1 ? path.slice(1) : path;
@@ -227,7 +227,7 @@ export default {
 
 function toDesignTokensJson(doc: CanvasDocument): Record<string, unknown> {
   const out: Record<string, unknown> = {};
-  const typeFor: Record<TokenGroup, string> = {
+  const typeFor: Record<string, string> = {
     color: 'color', space: 'dimension', radius: 'dimension',
     font: 'fontFamily', shadow: 'shadow', duration: 'duration',
   };
@@ -239,7 +239,7 @@ function toDesignTokensJson(doc: CanvasDocument): Record<string, unknown> {
       cursor = (cursor[keys[i]!] ??= {}) as Record<string, unknown>;
     }
     cursor[keys[keys.length - 1]!] = {
-      $type: typeFor[token.group],
+      $type: typeFor[token.group] ?? token.group,
       $value: token.values.default ?? '',
       ...(Object.keys(token.values).length > 1
         ? { $extensions: { 'playground.themes': token.values } }
