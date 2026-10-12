@@ -3766,3 +3766,8 @@ code { font-family: var(--mono); font-size: 0.92em; }
 .topbar .logotype-word { font-size: 15px !important; font-weight: 600; }
 .crumb-sep { color: var(--fg-muted); font-size: 14px; padding: 0 0.15rem; }
 .doc-name { font-weight: 600; }
+.crumb-project { color: var(--fg-muted); font-size: 14px; white-space: nowrap; max-width: 12rem; overflow: hidden; text-overflow: ellipsis; }
+/* The fallback tile under a thumbnail that has not rendered yet: neutrals, not a hue. */
+.home-card-face, [data-theme='dark'] .home-card-face {
+  background: var(--bg); color: var(--fg-muted); border: 1px solid var(--border);
+}

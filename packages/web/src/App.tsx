@@ -201,6 +201,19 @@ function Editor({ source, onHome, appearance, onAppearance, session }: {
   const pageId = useCanvas((s) => s.pageId);
   const setPage = useCanvas((s) => s.setPage);
   const peers = useCanvas((s) => s.peers);
+  // The project crumb in the header. Projects are library metadata, read over
+  // REST; a viewer on a share link has no access, so a failure just hides it.
+  const projectId = doc?.projectId;
+  const [projectName, setProjectName] = useState<string | null>(null);
+  useEffect(() => {
+    if (!projectId) { setProjectName(null); return; }
+    let live = true;
+    fetch('/api/projects')
+      .then((r) => (r.ok ? r.json() as Promise<{ projects: { id: string; name: string }[] }> : { projects: [] }))
+      .then((j) => { if (live) setProjectName(j.projects.find((p) => p.id === projectId)?.name ?? null); })
+      .catch(() => { if (live) setProjectName(null); });
+    return () => { live = false; };
+  }, [projectId]);
   const transport = useCanvas((s) => s.transport);
   const agentActivity = useCanvas((s) => s.agentActivity);
   const dispatch = useCanvas((s) => s.dispatch);
@@ -418,6 +431,12 @@ function Editor({ source, onHome, appearance, onAppearance, session }: {
 
         {/* Family breadcrumb: mark, app name, then the document. */}
         {mode !== 'narrow' && <span className="crumb-sep" aria-hidden>/</span>}
+        {mode !== 'narrow' && projectName && (
+          <>
+            <span className="crumb-project">{projectName}</span>
+            <span className="crumb-sep" aria-hidden>/</span>
+          </>
+        )}
 
         {!viewing && <button
           className="icon-button"
