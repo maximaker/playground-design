@@ -12,7 +12,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Logo } from './ui/Logo.tsx';
+import { FamilyTopBar } from './ui/FamilyTopBar.tsx';
 import { useLayoutMode } from './hooks/useLayout.ts';
 import { Icon } from './ui/Icon.tsx';
 import { Settings } from './ui/Settings.tsx';
@@ -264,17 +264,45 @@ export function Home({ onOpen, appearance, onAppearance, session }: {
     : projects.find((p) => p.id === filter)?.name ?? 'Project';
 
   return (
-    <div className="home">
-      <header className="home-head">
-        <div className="home-identity">
-          <h1><Logo size={30} variant={layout === 'narrow' ? 'mark' : 'full'} /></h1>
-          <p>Design a page and put it online — on your own, or with an AI agent helping.</p>
+    <div className="home-shell">
+    <FamilyTopBar
+      middle={
+        <label className="library-search family-search">
+          <Icon name="search" size={13} />
+          <input
+            type="search"
+            value={query}
+            placeholder="Search documents"
+            aria-label="Search documents"
+            onChange={(e) => setQuery(e.target.value)}
+          />
+        </label>
+      }
+      end={
+        <div className="home-account">
+          <button
+            className="icon-button"
+            title="Appearance"
+            aria-label="Appearance"
+            onClick={() => setShowSettings((v) => !v)}
+          ><Icon name="settings" size={15} /></button>
+          {showSettings && (
+            <Settings appearance={appearance} onChange={onAppearance} onClose={() => setShowSettings(false)} />
+          )}
+          {session.user && (
+            <AccountMenu user={session.user} onSignedOut={() => { void session.refresh(); }} />
+          )}
         </div>
-        <div className="home-actions">
-          <button className="button home-new" onClick={() => void create()} disabled={creating}>
-            <Icon name="plus" size={14} /> <span className="home-action-label">Blank page</span>
-          </button>
-
+      }
+    />
+    <div className="home">
+      <section className="makers" aria-labelledby="makers-title">
+        <div className="makers-head">
+          <div>
+            <h1 id="makers-title">What are you making?</h1>
+            <p className="dim">Design a page and put it online, on your own or with an agent helping. Every word, picture and colour can be changed.</p>
+          </div>
+          <div className="home-actions">
           {/*
             * A label rather than a button: a file input cannot be opened from
             * script without a user gesture on it, and hiding the input behind a
@@ -297,27 +325,12 @@ export function Home({ onOpen, appearance, onAppearance, session }: {
               }}
             />
           </label>
-          <button
-            className="icon-button"
-            title="Appearance"
-            aria-label="Appearance"
-            onClick={() => setShowSettings((v) => !v)}
-          ><Icon name="settings" size={15} /></button>
-          {showSettings && (
-            <Settings appearance={appearance} onChange={onAppearance} onClose={() => setShowSettings(false)} />
-          )}
-          {session.user && (
-            <AccountMenu user={session.user} onSignedOut={() => { void session.refresh(); }} />
-          )}
-        </div>
-      </header>
-
-      <section className="makers" aria-labelledby="makers-title">
-        <div className="makers-head">
-          <div>
-            <h2 id="makers-title">What are you making?</h2>
-            <p className="dim">Pick a starting point. Every word, picture and colour can be changed.</p>
+            <button className="button primary home-new" onClick={() => void create()} disabled={creating}>
+              <Icon name="plus" size={14} /> <span className="home-action-label">Blank page</span>
+            </button>
           </div>
+        </div>
+        <div className="makers-style">
           {templates.length > 0 && (
             <div className="style-picker" role="radiogroup" aria-label="Style">
               <span className="dim">Style</span>
@@ -455,16 +468,6 @@ export function Home({ onOpen, appearance, onAppearance, session }: {
               </div>
 
               <div className="library-tools">
-                <label className="library-search">
-                  <Icon name="search" size={13} />
-                  <input
-                    type="search"
-                    value={query}
-                    placeholder="Search documents"
-                    aria-label="Search documents"
-                    onChange={(e) => setQuery(e.target.value)}
-                  />
-                </label>
 
                 <label className="library-sort">
                   <span className="sr-only">Sort by</span>
@@ -602,6 +605,7 @@ export function Home({ onOpen, appearance, onAppearance, session }: {
           </section>
         </div>
       )}
+    </div>
     </div>
   );
 }

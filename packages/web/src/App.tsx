@@ -416,6 +416,9 @@ function Editor({ source, onHome, appearance, onAppearance, session }: {
           </span>
         )}
 
+        {/* Family breadcrumb: mark, app name, then the document. */}
+        {mode !== 'narrow' && <span className="crumb-sep" aria-hidden>/</span>}
+
         {!viewing && <button
           className="icon-button"
           title={`Search and commands (${MOD}K)`}

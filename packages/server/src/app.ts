@@ -1315,6 +1315,19 @@ if (SERVE_CLIENT && existsSync(WEB_DIST)) {
   // serveStatic resolves `root` against the process working directory, so hand
   // it a relative path computed from wherever the server was actually started.
   const relRoot = relative(process.cwd(), WEB_DIST) || '.';
+  // Without an explicit header Cloudflare applies its own four-hour browser
+  // TTL, so a deploy stayed invisible until a hard reload. The shell is
+  // revalidated on every load; Vite's hashed bundles never change under the
+  // same name. Routes that set their own header keep it.
+  app.use('/*', async (c, next) => {
+    await next();
+    if (c.res.headers.has('cache-control')) return;
+    if (c.req.path.startsWith('/assets/app/')) {
+      c.res.headers.set('cache-control', 'public, max-age=31536000, immutable');
+    } else if (c.res.headers.get('content-type')?.startsWith('text/html')) {
+      c.res.headers.set('cache-control', 'no-cache');
+    }
+  });
   app.use('/assets/app/*', serveStatic({ root: relRoot }));
   app.use('/*', serveStatic({ root: relRoot }));
   // The editor is a SPA: every unmatched path serves the shell so /d/:id works

@@ -12,9 +12,10 @@
   --ui-base: 13px;
   --ui-scale: 1;
 
-  --font: 'Outfit', 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
-  --font-display: 'Orbitron', 'Inter', system-ui, sans-serif;
-  --mono: ui-monospace, 'SF Mono', Menlo, monospace;
+  /* The heymax family: Inter only, JetBrains Mono for small figures. */
+  --font: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-display: 'Inter', system-ui, sans-serif;
+  --mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
 
   /* Spacing scale, in rem so it tracks the UI scale. */
   --s1: 0.25rem;
@@ -32,11 +33,12 @@
    * read as three things. The rule that keeps it from drifting is that a
    * child's radius is at most its parent's minus the padding between them.
    */
-  --radius-xs: 0.35rem;
-  --radius-sm: 0.55rem;
-  --radius: 0.85rem;
-  --radius-lg: 1.3rem;
-  --radius-xl: 1.9rem;
+  /* Family shape: 8px controls, 14px panels and cards. */
+  --radius-xs: 5px;
+  --radius-sm: 8px;
+  --radius: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 18px;
   --radius-pill: 999px;
 
   --rail: 19rem;
@@ -62,96 +64,100 @@
 :root[data-theme='light'] {
   color-scheme: light;
 
-  /* Cool blue-grey ground with white cards on it — the airy clinical look of
-     the reference dashboards. */
-  --bg-sunken: #d8dfe6;
-  --bg: #e2e8ee;
-  --bg-plate: #eef2f6;
+  /* The shared warm neutral ground with white panels on it. */
+  --bg-sunken: #ebebe7;
+  --bg: #f5f5f3;
+  --bg-plate: #fafaf9;
   --bg-raised: #ffffff;
   --bg-panel: #ffffff;
   --bg-input: #ffffff;
-  --bg-hover: rgba(20, 33, 61, 0.05);
-  --bg-active: rgba(20, 33, 61, 0.09);
+  --bg-hover: rgba(22, 24, 29, 0.05);
+  --bg-active: rgba(22, 24, 29, 0.09);
 
-  --border: #e5eaf0;
-  --border-strong: #d2dae4;
+  --border: #e4e4e0;
+  --border-strong: #d4d4cf;
 
-  /* Navy ink: text, and the primary action. */
-  --fg: #16223d;
-  --fg-muted: #66728a;
-  --fg-faint: #9aa4b5;
+  /* The shared ink. */
+  --fg: #16181d;
+  --fg-muted: #6b6f76;
+  --fg-faint: #8a8d93;
 
-  /* Green is state: selection, agents, progress, anything live. It is never
-     decoration, which is what keeps it meaningful where it appears. */
-  --accent: #1e9e62;
-  --accent-hover: #178351;
+  /* Playground blue: selection, agents, progress, and the primary action. */
+  --accent: #3d6bff;
+  --accent-hover: #2a52d9;
   --accent-fg: #ffffff;
-  --accent-soft: rgba(30, 158, 98, 0.12);
-  --accent-line: rgba(30, 158, 98, 0.55);
+  --accent-soft: rgba(61, 107, 255, 0.12);
+  --accent-line: rgba(61, 107, 255, 0.55);
 
-  /* Brand orange belongs to the landing, auth and identity marks — never to
-     the editor, where it would compete with the design being edited. */
-  --brand: #f0451f;
-  --brand-hi: #ff6a3d;
+  /* Identity (landing, auth, marks) is the same blue now — one hue per app. */
+  --brand: #3d6bff;
+  --brand-hi: #86a3ff;
   --brand-fg: #ffffff;
 
-  --danger: #b3261e;
-  --success: #1e9e62;
+  --danger: #c0262d;
+  --success: #15784a;
   --warning: #b4690e;
-  --info: #0b6fb8;
+  --info: #2a52d9;
   --guide: #e11d48;
 
-  /* Two-part shadows: a broad ambient one plus a 1px contact shadow, which is
-     what makes a surface look placed rather than airbrushed. */
-  --shadow-sm: 0 1px 2px rgba(22, 34, 61, 0.04);
-  --shadow: 0 1px 2px rgba(22, 34, 61, 0.04), 0 10px 30px rgba(22, 34, 61, 0.06);
-  --shadow-lg: 0 2px 4px rgba(22, 34, 61, 0.05), 0 28px 60px rgba(22, 34, 61, 0.12);
-  --shadow-pill: 0 1px 2px rgba(22, 34, 61, 0.05), 0 4px 12px rgba(22, 34, 61, 0.05);
+  /* Notes yellow, for prompt cards and canvas notes: 50 ground, 300 edge, 800 text. */
+  --note-bg: #fdf6d8;
+  --note-line: #ffd84d;
+  --note-fg: #4a3800;
+
+  --shadow-sm: 0 1px 2px rgba(22, 24, 29, 0.04);
+  --shadow: 0 1px 2px rgba(22, 24, 29, 0.04), 0 10px 30px rgba(22, 24, 29, 0.06);
+  --shadow-lg: 0 2px 4px rgba(22, 24, 29, 0.05), 0 28px 60px rgba(22, 24, 29, 0.12);
+  --shadow-pill: 0 1px 2px rgba(22, 24, 29, 0.05), 0 4px 12px rgba(22, 24, 29, 0.05);
   --shadow-inset: inset 0 1px 0 rgba(255, 255, 255, 0.7);
   --artboard-shadow: 0 1px 2px rgba(17, 17, 20, 0.08), 0 10px 32px rgba(17, 17, 20, 0.1);
 
-  --focus-ring: 0 0 0 2px rgba(30, 158, 98, 0.35);
+  --focus-ring: 0 0 0 2px rgba(61, 107, 255, 0.35);
 
-  --logo-from: #16223d;
-  --logo-to: #4a5a7a;
+  --logo-from: #16181d;
+  --logo-to: #16181d;
 }
 
-/* --- Dark theme ---------------------------------------------------------- */
+/* --- Dark theme: the same neutrals inverted, accents on the 300 step ----- */
 
 :root[data-theme='dark'] {
   color-scheme: dark;
 
-  --bg-sunken: #070b14;
-  --bg: #0c111d;
-  --bg-plate: #121827;
-  --bg-raised: #182033;
-  --bg-panel: #182033;
-  --bg-input: #1f2840;
+  --bg-sunken: #0f1014;
+  --bg: #16181d;
+  --bg-plate: #1a1c21;
+  --bg-raised: #1e2026;
+  --bg-panel: #1e2026;
+  --bg-input: #25282e;
   --bg-hover: rgba(255, 255, 255, 0.055);
   --bg-active: rgba(255, 255, 255, 0.09);
 
-  --border: #243049;
-  --border-strong: #34425f;
+  --border: #2e3138;
+  --border-strong: #3a3e46;
 
-  --fg: #eef2f8;
-  --fg-muted: #9ba6bb;
-  --fg-faint: #6b7690;
+  --fg: #f2f2f0;
+  --fg-muted: #9ea2a9;
+  --fg-faint: #767a82;
 
-  --accent: #35c48b;
-  --accent-hover: #4bd69d;
-  --accent-fg: #06251a;
-  --accent-soft: rgba(53, 196, 139, 0.18);
-  --accent-line: rgba(53, 196, 139, 0.55);
+  --accent: #86a3ff;
+  --accent-hover: #a3baff;
+  --accent-fg: #16181d;
+  --accent-soft: rgba(134, 163, 255, 0.18);
+  --accent-line: rgba(134, 163, 255, 0.55);
 
-  --brand: #ff5a33;
-  --brand-hi: #ff8257;
-  --brand-fg: #1a0a05;
+  --brand: #86a3ff;
+  --brand-hi: #a3baff;
+  --brand-fg: #16181d;
 
-  --danger: #f87171;
-  --success: #35c48b;
+  --danger: #f0806b;
+  --success: #5fd391;
   --warning: #fbbf24;
-  --info: #60a5fa;
+  --info: #86a3ff;
   --guide: #f43f5e;
+
+  --note-bg: #3a3005;
+  --note-line: #8a6800;
+  --note-fg: #fdf6d8;
 
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.5), 0 8px 24px rgba(0, 0, 0, 0.45);
@@ -160,10 +166,10 @@
   --shadow-inset: inset 0 1px 0 rgba(255, 255, 255, 0.05);
   --artboard-shadow: 0 1px 2px rgba(0, 0, 0, 0.5), 0 10px 32px rgba(0, 0, 0, 0.5);
 
-  --focus-ring: 0 0 0 2px rgba(53, 196, 139, 0.4);
+  --focus-ring: 0 0 0 2px rgba(134, 163, 255, 0.4);
 
-  --logo-from: #ffffff;
-  --logo-to: #9a9aab;
+  --logo-from: #f2f2f0;
+  --logo-to: #f2f2f0;
 }
 
 /* --- Base ---------------------------------------------------------------- */
@@ -293,9 +299,7 @@ code { font-family: var(--mono); font-size: 0.92em; }
   /* Caps need far more tracking than lowercase: set solid they read as a
      single block, and the last letter needs the space back at the end or the
      word looks like it is leaning right. */
-  text-transform: uppercase;
-  letter-spacing: 0.185em;
-  padding-right: 0.185em;
+  letter-spacing: -0.01em;
   line-height: 1;
   color: var(--fg);
   white-space: nowrap;
@@ -1013,7 +1017,7 @@ code { font-family: var(--mono); font-size: 0.92em; }
  * a button that levitates under the cursor reads as a card being picked up.
  */
 .button {
-  background: var(--bg-panel); border: 1px solid var(--border); border-radius: var(--radius-pill);
+  background: var(--bg-panel); border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
   padding: 0.42rem var(--s5); text-decoration: none; display: inline-flex;
   align-items: center; gap: var(--s2); color: var(--fg); white-space: nowrap;
   box-shadow: var(--shadow-pill);
@@ -1022,12 +1026,11 @@ code { font-family: var(--mono); font-size: 0.92em; }
 }
 .button:hover { border-color: var(--border-strong); background: color-mix(in srgb, var(--fg) 4%, var(--bg-panel)); }
 .button:active { box-shadow: var(--shadow-sm); transform: translateY(0.5px); }
-/* Primary is the ink, not the accent: green carries state everywhere else in
-   the interface, and a green "Export" would claim to be telling you something. */
+/* Primary is the family fill: Playground blue, white text. */
 .button.primary {
-  background: var(--fg); border-color: var(--fg); color: var(--bg-panel);
+  background: var(--accent); border-color: var(--accent); color: var(--accent-fg); font-weight: 600;
 }
-.button.primary:hover { background: color-mix(in srgb, var(--fg) 88%, var(--bg-panel)); border-color: transparent; }
+.button.primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
 .button:disabled { opacity: .45; box-shadow: none; }
 .button.subtle { background: none; color: var(--fg-muted); box-shadow: none; border-color: transparent; }
 .button.subtle:hover { color: var(--fg); background: var(--bg-hover); border-color: transparent; }
@@ -3411,9 +3414,9 @@ code { font-family: var(--mono); font-size: 0.92em; }
 .rail-tabs button { color: var(--fg-muted); }
 .rail-tabs button.is-active { color: var(--fg); font-weight: 500; }
 
-/* Toolbar: the current tool is a navy circle, not a green slab. */
-.toolbar button { border-radius: var(--radius-pill); }
-.toolbar button.is-active { background: var(--fg); color: var(--bg-panel); }
+/* Toolbar: the current tool is a blue tile. */
+.toolbar button { border-radius: var(--radius-sm); }
+.toolbar button.is-active { background: var(--accent); color: var(--accent-fg); }
 
 /* Theme chips read as a segmented choice. */
 .tokens-themes { background: var(--bg-hover); padding: 0.15rem; border-radius: var(--radius-pill); width: fit-content; gap: 0.1rem; }
@@ -3671,7 +3674,7 @@ code { font-family: var(--mono); font-size: 0.92em; }
     width: 2.5rem; height: 2.5rem; flex: none; border-radius: 99px;
     background: var(--bg-raised); border: 1px solid var(--border); color: var(--fg);
   }
-  .topbar-more.is-active { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+  .topbar-more.is-active { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
 
   .overflow-scrim {
     display: block; position: fixed; inset: 0; z-index: 94;
@@ -3701,7 +3704,7 @@ code { font-family: var(--mono); font-size: 0.92em; }
   .home .home-actions .button { height: 2.5rem; padding: 0 0.8rem; }
   .home .home-actions label.button .home-action-label { display: none; }
   .home .home-actions label.button { width: 2.5rem; padding: 0; justify-content: center; }
-  .home .home-new { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+  .home .home-new { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
   .home .home-new .home-action-label { font-size: 0; }
   .home .home-new .home-action-label::after { content: 'New'; font-size: 0.9rem; }
 
@@ -3714,7 +3717,7 @@ code { font-family: var(--mono); font-size: 0.92em; }
   }
   .home .library-nav .library-row.is-project { padding: 0; border: 0; background: none; }
   .home .library-nav .library-row.is-active, .home .library-nav .library-row.is-active .library-row-main {
-    background: var(--fg); color: var(--bg); border-color: var(--fg);
+    background: var(--accent); color: var(--accent-fg); border-color: var(--accent);
   }
   .home .library-nav .library-row.is-active .dim { color: inherit; opacity: 0.7; }
 }
@@ -3732,3 +3735,34 @@ code { font-family: var(--mono); font-size: 0.92em; }
   .topbar > .account-menu { order: 11; margin-left: 0.25rem; }
   .topbar > .panel-toggle:last-child { order: 12; }
 }
+
+/* --- heymax family chrome ------------------------------------------------
+ *
+ * The shared top bar (kit-topbar.css) on Home, and the pieces of Home that
+ * moved around it. Last in the file so it wins over the older home rules.
+ */
+.home-shell { min-height: 100%; display: flex; flex-direction: column; }
+.family-topbar { position: sticky; top: 0; z-index: 30; }
+.family-topbar .hm-topbar__name { font-family: var(--font); }
+.family-search { width: 100%; height: 2.3rem; background: var(--bg-panel); }
+.home-account { display: flex; align-items: center; gap: var(--s3); position: relative; }
+.home-account .settings-popover { top: 2.6rem; right: 0; left: auto; }
+.home { padding-top: 2rem; }
+.home .makers-head h1 {
+  margin: 0 0 0.35rem; font-size: 30px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.15;
+}
+.home .makers-head p { font-size: 15px; color: var(--fg-muted); max-width: 40rem; }
+.makers-style { display: flex; justify-content: flex-end; margin-top: var(--s4); }
+.makers-head h2, .home-section-title { font-weight: 600; font-size: 17px; letter-spacing: -0.01em; }
+.home-card, .maker { border-radius: var(--radius-lg); }
+/* The ink tile needs a lift on the dark ground. */
+:root[data-theme='dark'] .logo-mark rect:first-child { fill: #2a2d34; }
+@media (max-width: 767px) {
+  .family-topbar .hm-topbar__name, .family-topbar .hm-switcher { display: none; }
+}
+
+/* Editor header in the family pattern: ground bar, mark + name / document. */
+.topbar { background: var(--bg); }
+.topbar .logotype-word { font-size: 15px !important; font-weight: 600; }
+.crumb-sep { color: var(--fg-muted); font-size: 14px; padding: 0 0.15rem; }
+.doc-name { font-weight: 600; }

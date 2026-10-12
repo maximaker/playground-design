@@ -1,15 +1,10 @@
 /**
- * The Playground logotype.
+ * The Playground logotype, in the heymax family system.
  *
- * The mark is a filled tile with the play triangle knocked out of it — the
- * canvas as a solid object rather than an outline, which holds up at 16px in a
- * toolbar where a 1.6px stroke turns into grey mush.
- *
- * The wordmark is set in capitals and tracked out. Caps have a flat top and
- * bottom, so the word sits square against the tile instead of hanging off its
- * descender; it is also the only way a nine-letter word reads as a mark rather
- * than as a label. The gradient stays on the tile alone — gradient text is
- * illegible at small sizes and dates a product faster than anything else in it.
+ * The mark is the family ink tile on the 48-unit grid: the crop marks of an
+ * artboard in white and the cursor working on it in blue 300 — one accent
+ * shape, like every app in the family. The wordmark is Inter 600 in sentence
+ * case with no tracking, the same as Studio OS, Artifactory and Notes.
  */
 
 interface Props {
@@ -35,31 +30,17 @@ export function Logo({ variant = 'full', size = 18, className }: Props) {
 
 export function LogoMark({ size = 18 }: { size?: number }) {
   return (
-    <svg
-      className="logo-mark"
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      aria-hidden
-      focusable="false"
-    >
-      <defs>
-        <linearGradient id="pg-mark" x1="2" y1="2" x2="22" y2="22" gradientUnits="userSpaceOnUse">
-          <stop offset="0" stopColor="var(--logo-from)" />
-          <stop offset="1" stopColor="var(--logo-to)" />
-        </linearGradient>
-        {/*
-          * The triangle is cut out of the tile rather than drawn on top of it,
-          * so the mark works on any background — including the one case that
-          * caught the painted version out, a white favicon tile on a white card.
-          */}
-        <mask id="pg-play">
-          <rect x="0" y="0" width="24" height="24" fill="#fff" />
-          <path d="M9.4 7.8 16.4 12l-7 4.2z" fill="#000" />
-        </mask>
-      </defs>
-      <rect x="1" y="1" width="22" height="22" rx="7" fill="url(#pg-mark)" mask="url(#pg-play)" />
+    <svg className="logo-mark" width={size} height={size} viewBox="0 0 48 48" aria-hidden focusable="false">
+      <rect width="48" height="48" rx="12" fill="#16181d" />
+      <path
+        d="M13.75 21V13.75H21 M27 13.75H34.25V21 M13.75 27V34.25H21"
+        fill="none"
+        stroke="#fff"
+        strokeWidth="3.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path d="M25 25 L37 29.5 L31.6 31.6 L29.5 37 Z" fill="#86a3ff" stroke="#86a3ff" strokeWidth="1.5" strokeLinejoin="round" />
     </svg>
   );
 }

@@ -153,7 +153,6 @@ export function handoffHtml(doc: CanvasDocument, handoff: Handoff, base: string)
   const firstBoard = groups.find((g) => g.artboards.length)?.artboards[0];
   const families = firstBoard ? fontFamiliesIn(doc, firstBoard) : [];
   const fontHref = googleFontsHref(families.slice(0, 2));
-  const fontStack = families[0] ? `"${families[0].replace(/"/g, '')}",` : '';
   // Only tokens the design really uses: a fresh document carries a starter "brand" nobody chose.
   const styleText = Object.values(doc.nodes).map((n) => Object.values(n.styles).join(';')).join(';');
   const used = doc.tokens.filter((t) => t.group === 'color' && styleText.includes(`var(${cssVarName(t.name)})`));
@@ -184,14 +183,19 @@ export function handoffHtml(doc: CanvasDocument, handoff: Handoff, base: string)
 
   const ordered = [...groups.filter((g) => !g.section && g.artboards.length && g.artboards.every(isSheet)),
     ...groups.filter((g) => g.section || !g.artboards.length || !g.artboards.every(isSheet))];
-  const sectionHtml = ordered.map((g) => {
+  const screensIndex = ordered.map((g, index) => {
+    const label = g.section?.flowCard?.title || g.section?.title
+      || (g.artboards.length && g.artboards.every(isSheet) ? 'Brief & docs' : g.page.name.replace(/^\d+\s*/, ''));
+    return `<a href="#group-${index}">${esc(label)}<span>${g.artboards.length}</span></a>`;
+  }).join('');
+  const sectionHtml = ordered.map((g, index) => {
     const s = g.section;
     const meta = s ? SECTION_STATUS_META[s.status] : null;
     const card = s?.flowCard;
     // Unsectioned frames: wide ones are the brief, research and docs a newcomer should read first.
     const fallback = g.artboards.length && g.artboards.every(isSheet) ? 'Brief & docs' : g.page.name.replace(/^\d+\s*/, '');
     const flows = s ? sectionFlows(doc, s) : [];
-    return `<section class="group">
+    return `<section class="group" id="group-${index}">
   <header>
     <p class="eyebrow">${esc(g.page.name)}</p>
     <h2>${card?.code ? `<span class="code">${esc(card.code)}</span> ` : ''}${esc(card?.title || s?.title || fallback)}</h2>
@@ -237,41 +241,67 @@ export function handoffHtml(doc: CanvasDocument, handoff: Handoff, base: string)
 <meta name="robots" content="noindex">
 <title>${esc(title)} — handoff</title>
 ${fontHref ? `<link rel="stylesheet" href="${esc(fontHref)}">` : ''}
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
 <style>
-  :root { --bg:#fafafa; --fg:#18181b; --muted:#71717a; --line:#e4e4e7; --card:#fff; }
-  @media (prefers-color-scheme: dark) { :root { --bg:#111113; --fg:#f4f4f5; --muted:#a1a1aa; --line:#2a2a2e; --card:#18181b; } }
+  /* The heymax family: shared neutrals, Playground blue, Inter. */
+  :root { --bg:#f5f5f3; --fg:#16181d; --soft:#4a4e55; --muted:#6b6f76; --line:#e4e4e0; --card:#fff; --accent:#3d6bff; --accent-50:#eaf0ff; --accent-800:#152c80; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#16181d; --fg:#f2f2f0; --soft:#c9ccd1; --muted:#9ea2a9; --line:#2e3138; --card:#1e2026; --accent:#86a3ff; --accent-50:#1c2547; --accent-800:#c9d6ff; } }
   * { box-sizing: border-box; }
-  body { margin:0; background:var(--bg); color:var(--fg); font:15px/1.5 ${fontStack}system-ui,-apple-system,"Segoe UI",sans-serif; }
-  main { max-width:1200px; margin:0 auto; padding:32px 16px 96px; }
-  nav { display:flex; gap:16px; flex-wrap:wrap; font-size:14px; margin:8px 0 32px; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:15px/1.5 Inter,system-ui,-apple-system,"Segoe UI",sans-serif; }
+  .shell { max-width:1200px; margin:0 auto; padding:40px 24px 56px; display:flex; flex-direction:column; gap:20px; }
+  .brand { display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap; }
+  .brand-name { display:flex; align-items:center; gap:10px; font-size:15px; font-weight:600; }
+  .brand-meta { font-size:13px; color:var(--muted); }
+  .layout { display:grid; grid-template-columns:220px minmax(0,1fr); gap:16px; align-items:start; }
+  .screens-nav { position:sticky; top:16px; background:var(--card); border:1px solid var(--line); border-radius:14px; padding:16px; display:flex; flex-direction:column; gap:2px; }
+  .screens-nav p { margin:0 0 8px; font-size:12px; font-weight:600; letter-spacing:.06em; text-transform:uppercase; color:var(--muted); }
+  .screens-nav a { display:flex; justify-content:space-between; gap:8px; font-size:14px; padding:8px 10px; border-radius:8px; color:var(--fg); text-decoration:none; }
+  .screens-nav a:hover { background:var(--accent-50); color:var(--accent-800); }
+  .screens-nav a span { color:var(--muted); font:12px "JetBrains Mono",ui-monospace,monospace; }
+  .screens-nav .jump { margin-top:12px; border-top:1px solid var(--line); padding-top:10px; }
+  main { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:24px 28px 32px; min-width:0; }
+  nav { display:flex; gap:16px; flex-wrap:wrap; font-size:14px; margin:8px 0 8px; }
   nav a { color:var(--muted); }
   ${safeAccent ? `.accent-bar { height:6px; width:56px; border-radius:99px; background:${safeAccent}; margin-bottom:16px; }` : '.accent-bar { display:none; }'}
-  h1 { font-size:28px; margin:0; letter-spacing:-.01em; }
-  h2 { font-size:20px; margin:0; }
-  h3 { font-size:16px; margin:40px 0 12px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); }
-  .group { border-top:1px solid var(--line); padding:28px 0; }
+  h1 { font-size:28px; font-weight:600; margin:0; letter-spacing:-.02em; }
+  h2 { font-size:20px; font-weight:600; margin:0; letter-spacing:-.01em; }
+  h3 { font-size:12px; font-weight:600; margin:40px 0 12px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); }
+  .group { border-top:1px solid var(--line); padding:28px 0; scroll-margin-top:16px; }
   .group header { display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
   .eyebrow { width:100%; margin:0; font-size:12px; color:var(--muted); text-transform:uppercase; letter-spacing:.06em; }
   .code { color:var(--muted); font-weight:500; }
   .status { font-size:12px; font-weight:600; padding:2px 8px; border-radius:99px; }
-  .desc { color:var(--muted); max-width:70ch; }
-  .card { display:grid; grid-template-columns:max-content 1fr; gap:4px 16px; background:var(--card); border:1px solid var(--line); border-radius:10px; padding:12px 16px; max-width:720px; font-size:14px; }
+  .desc { color:var(--soft); max-width:70ch; }
+  .card { display:grid; grid-template-columns:max-content 1fr; gap:4px 16px; background:var(--bg); border:1px solid var(--line); border-radius:10px; padding:12px 16px; max-width:720px; font-size:14px; }
   .card dt { color:var(--muted); } .card dd { margin:0; } .card ul { margin:0; padding-left:18px; }
   .screens { display:flex; flex-wrap:wrap; gap:24px; margin-top:20px; }
   .screen { margin:0; }
   .frame { display:block; overflow:hidden; border-radius:8px; border:1px solid var(--line); background:#fff; position:relative; }
+  .frame:hover { outline:2px solid var(--accent); outline-offset:2px; }
   .frame iframe { border:0; transform-origin:0 0; pointer-events:none; display:block; }
   figcaption { font-size:13px; margin-top:6px; } figcaption span { color:var(--muted); }
   .flow { margin:0 0 24px; background:var(--card); border:1px solid var(--line); border-radius:10px; padding:12px; overflow:auto; }
   .flow svg { max-width:100%; height:auto; }
   table { border-collapse:collapse; width:100%; font-size:14px; }
   td { border-top:1px solid var(--line); padding:6px 8px; vertical-align:top; overflow-wrap:anywhere; }
-  td i { display:inline-block; width:14px; height:14px; border-radius:3px; border:1px solid var(--line); vertical-align:-2px; margin-right:8px; }
+  td code { font:13px "JetBrains Mono",ui-monospace,monospace; }
+  td i { display:inline-block; width:14px; height:14px; border-radius:4px; border:1px solid var(--line); vertical-align:-2px; margin-right:8px; }
   .muted, .empty { color:var(--muted); }
   ul.log { padding-left:18px; } ul.log li { margin-bottom:6px; }
   .wrap { overflow-x:auto; }
+  .signature { display:flex; justify-content:center; align-items:center; gap:8px; font-size:13px; color:var(--muted); flex-wrap:wrap; }
+  .signature span { display:inline-flex; gap:3px; } .signature i { width:8px; height:8px; border-radius:2px; display:inline-block; }
+  @media (max-width: 800px) { .layout { grid-template-columns:1fr; } .screens-nav { position:static; } main { padding:18px; } }
 </style></head>
-<body><main>
+<body><div class="shell">
+<header class="brand">
+  <div class="brand-name"><svg width="30" height="30" viewBox="0 0 48 48" aria-hidden="true"><rect width="48" height="48" rx="12" fill="#16181d"/><path d="M13.75 21V13.75H21 M27 13.75H34.25V21 M13.75 27V34.25H21" fill="none" stroke="#fff" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M25 25 L37 29.5 L31.6 31.6 L29.5 37 Z" fill="#86a3ff" stroke="#86a3ff" stroke-width="1.5" stroke-linejoin="round"/></svg>Handoff · ${esc(title)}</div>
+  <div class="brand-meta">Read-only · revision ${esc(String(doc.rev ?? ''))}</div>
+</header>
+<div class="layout">
+<aside class="screens-nav"><p>Screens</p>${screensIndex || '<span class="empty">Nothing yet.</span>'}<div class="jump"><p>Spec</p>${flowsHtml ? '<a href="#flows">Flows</a>' : ''}<a href="#tokens">Tokens</a><a href="#decisions">Decisions</a><a href="#notes">Annotations</a></div></aside>
+<main>
 <div class="accent-bar"></div>
 <p class="eyebrow">Handoff · read-only · revision ${esc(String(doc.rev ?? ''))} · rendered ${esc(new Date().toISOString().slice(0, 16).replace('T', ' '))} UTC</p>
 <h1>${esc(title)}</h1>
@@ -284,5 +314,8 @@ ${tokens ? `<div class="wrap"><table>${tokens}</table></div>` : '<p class="empty
 ${decisions.length ? `<ul class="log">${decisions.map((d) => `<li><strong>${esc(d.decision)}</strong> <span class="muted">— ${esc(d.by)}, ${esc(d.date)}${d.node && 'name' in d.node ? ` · ${esc(String(d.node.name))}` : ''}</span></li>`).join('')}</ul>` : '<p class="empty">No decisions logged.</p>'}
 <h3 id="notes">Annotations</h3>
 ${notes.length ? `<ul class="log">${notes.map((c) => `<li><strong>${esc(NOTE_KIND_LABELS[c.kind as keyof typeof NOTE_KIND_LABELS] ?? c.kind ?? '')}</strong> · ${esc(doc.nodes[c.nodeId!]?.name ?? '')}: ${esc(c.text)}${c.resolved ? ' <span class="muted">(resolved)</span>' : ''}</li>`).join('')}</ul>` : '<p class="empty">No annotations.</p>'}
-</main></body></html>`;
+</main>
+</div>
+<footer class="signature">Made with Playground, part of <span aria-hidden="true"><i style="background:#1f9d5c"></i><i style="background:#f2661f"></i><i style="background:#3d6bff"></i><i style="background:#f5c518"></i><i style="background:#8a5cf5"></i></span> heymax studio</footer>
+</div></body></html>`;
 }

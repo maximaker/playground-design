@@ -350,12 +350,13 @@ export interface Note {
 export type NoteStatus = 'idle' | 'queued' | 'running' | 'done';
 export type NoteColor = 'yellow' | 'blue' | 'green' | 'pink' | 'purple';
 
+/** Family ramps, 50 ground / 300 edge / 800 text. Keys are persisted. */
 export const NOTE_COLORS: Record<NoteColor, { bg: string; border: string; fg: string }> = {
-  yellow: { bg: '#fef3c7', border: '#fcd34d', fg: '#78350f' },
-  blue: { bg: '#dbeafe', border: '#93c5fd', fg: '#1e3a8a' },
-  green: { bg: '#dcfce7', border: '#86efac', fg: '#14532d' },
-  pink: { bg: '#fce7f3', border: '#f9a8d4', fg: '#831843' },
-  purple: { bg: '#ede9fe', border: '#c4b5fd', fg: '#4c1d95' },
+  yellow: { bg: '#fdf6d8', border: '#ffd84d', fg: '#4a3800' },
+  blue: { bg: '#eaf0ff', border: '#86a3ff', fg: '#152c80' },
+  green: { bg: '#e8f6ee', border: '#5fd391', fg: '#0b4a2c' },
+  pink: { bg: '#fdeee5', border: '#ff9a5c', fg: '#6e2b07' },
+  purple: { bg: '#f1ecfe', border: '#b597ff', fg: '#36196e' },
 };
 
 export const DEFAULT_NOTE_SIZE = { width: 260, height: 160 };
