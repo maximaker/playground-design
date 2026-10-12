@@ -32,6 +32,7 @@ import { Icon, type IconName } from './ui/Icon.tsx';
 import { MOD } from './ui/tools.ts';
 import { zoomToFit } from './hooks/commands.ts';
 import { Logo } from './ui/Logo.tsx';
+import { AppSwitcher } from './ui/FamilyTopBar.tsx';
 import { Settings } from './ui/Settings.tsx';
 import { Landing } from './Landing.tsx';
 import { Join } from './Join.tsx';
@@ -429,6 +430,7 @@ function Editor({ source, onHome, appearance, onAppearance, session }: {
           </span>
         )}
 
+        {mode !== 'narrow' && <AppSwitcher />}
         {/* Family breadcrumb: mark, app name, then the document. */}
         {mode !== 'narrow' && <span className="crumb-sep" aria-hidden>/</span>}
         {mode !== 'narrow' && projectName && (

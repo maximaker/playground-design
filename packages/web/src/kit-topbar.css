@@ -17,6 +17,11 @@
   font-family: var(--font-sans);
   font-size: 14px;
   line-height: 1.5;
+  /* Above page content, sidebars and canvases, so the switcher menu is never
+     covered or clipped; below modals, which sit at 50 and up. */
+  position: sticky;
+  top: 0;
+  z-index: 45;
 }
 
 .hm-topbar__brand {
@@ -46,6 +51,10 @@
   text-decoration: none;
 }
 
+.hm-switcher {
+  position: relative;
+}
+/* One quiet caret everywhere: no box, no border, ink-mute until hovered. */
 .hm-switcher > summary {
   list-style: none;
   cursor: pointer;
@@ -53,23 +62,34 @@
   place-items: center;
   width: 24px;
   height: 24px;
+  margin: 0;
+  padding: 0;
+  border: 0;
   border-radius: 6px;
+  background: transparent;
+  box-shadow: none;
   color: var(--ink-mute);
   font-size: 11px;
+  line-height: 1;
 }
 .hm-switcher > summary::-webkit-details-marker {
   display: none;
 }
-.hm-switcher > summary:hover {
-  background: var(--surface);
+.hm-switcher > summary:hover,
+.hm-switcher[open] > summary {
+  background: var(--line);
   color: var(--ink);
+}
+.hm-switcher > summary:focus-visible {
+  outline: 2px solid var(--accent-500);
+  outline-offset: 2px;
 }
 
 .hm-switcher__menu {
   position: absolute;
-  top: 40px;
-  left: 0;
-  z-index: 50;
+  top: 32px;
+  left: -8px;
+  z-index: 60;
   width: 260px;
   padding: 6px;
   border: 1px solid var(--line);

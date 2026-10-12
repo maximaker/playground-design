@@ -21,18 +21,7 @@ export function FamilyTopBar({ middle, end }: { middle?: ReactNode; end?: ReactN
       <div className="hm-topbar__brand">
         <LogoMark size={28} />
         <a className="hm-topbar__name" href="/">Playground</a>
-        <details className="hm-switcher">
-          <summary aria-label="Switch app">▾</summary>
-          <div className="hm-switcher__menu">
-            {APPS.filter((a) => a.url).map((a) => (
-              <a key={a.key} className="hm-switcher__item" href={a.url} aria-current={a.key === 'playground'}>
-                <img src={`/kit/marks/${a.key}.svg`} alt="" width={22} height={22} />
-                {a.name}
-                <span className="hm-switcher__role">{a.role}</span>
-              </a>
-            ))}
-          </div>
-        </details>
+        <AppSwitcher />
       </div>
       {middle !== undefined && <div className="hm-topbar__search">{middle}</div>}
       <div className="hm-topbar__end">
@@ -44,5 +33,23 @@ export function FamilyTopBar({ middle, end }: { middle?: ReactNode; end?: ReactN
         {end}
       </div>
     </header>
+  );
+}
+
+/** The app switcher on its own, for the editor header. */
+export function AppSwitcher() {
+  return (
+    <details className="hm-switcher">
+      <summary aria-label="Switch app">▾</summary>
+      <div className="hm-switcher__menu">
+        {APPS.filter((a) => a.url).map((a) => (
+          <a key={a.key} className="hm-switcher__item" href={a.url} aria-current={a.key === 'playground'}>
+            <img src={`/kit/marks/${a.key}.svg`} alt="" width={22} height={22} />
+            {a.name}
+            <span className="hm-switcher__role">{a.role}</span>
+          </a>
+        ))}
+      </div>
+    </details>
   );
 }
