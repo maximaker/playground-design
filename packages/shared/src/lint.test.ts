@@ -326,3 +326,11 @@ test('contrast: text over a gradient set with the background shorthand is not me
   const { doc } = docWith(`<div style="background:#ffffff"><div style="background:linear-gradient(160deg,#2346F5,#1630C9)"><p style="color:#ffffff;font-size:16px">On cobalt</p></div></div>`);
   assert.equal(only(doc, 'contrast').length, 0);
 });
+
+test('contrast fix names a text colour used as a surface', () => {
+  // --color-fg is a text colour (dark on light, light on dark); as a background it flips.
+  const { doc } = docWith(`<div style="background:var(--color-fg)"><p style="color:var(--color-fg);font-size:14px">On ink</p></div>`);
+  const [f] = only(doc, 'contrast');
+  assert.ok(f, 'the same token for text and surface fails');
+  assert.match(f.fix ?? '', /text colour used as a surface/);
+});

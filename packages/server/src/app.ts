@@ -694,9 +694,13 @@ type ConnectionBody = {
   sectionIds?: string[];
 };
 
+const DEFAULT_LINK_HOURS = 168;
+
 function connectionOptions(body: ConnectionBody): ConnectionOptions {
-  let expiresAt: number | null = null;
-  if (body.expiresInHours !== undefined) expiresAt = Date.now() + Number(body.expiresInHours) * 3_600_000;
+  // Links expire after a week unless the caller says otherwise; `expiresAt: null` means never.
+  let expiresAt: number | null = Date.now() + DEFAULT_LINK_HOURS * 3_600_000;
+  if (body.expiresAt === null) expiresAt = null;
+  else if (body.expiresInHours !== undefined) expiresAt = Date.now() + Number(body.expiresInHours) * 3_600_000;
   else if (typeof body.expiresAt === 'string') expiresAt = Date.parse(body.expiresAt);
   else if (typeof body.expiresAt === 'number') expiresAt = body.expiresAt;
   if (expiresAt !== null && Number.isNaN(expiresAt)) throw new ConnectionError('expiresAt is not a date.');
@@ -768,6 +772,21 @@ function connectionSetup(conn: Connection) {
       : 'The code stops working if unused for 30 minutes before its first connection.',
   };
 }
+
+/** Revokes this document's links not used for `unusedForDays` (default 7), and expired ones. */
+api.post('/documents/:id/connections/prune', async (c) => {
+  const doc = await requireDocument(c.req.param('id'));
+  const body = await c.req.json<{ unusedForDays?: number }>().catch(() => ({} as { unusedForDays?: number }));
+  const cutoff = Date.now() - (body.unusedForDays ?? 7) * 86_400_000;
+  const revoked: string[] = [];
+  for (const conn of await listConnections(doc.id)) {
+    const last = conn.lastUsedAt ?? conn.redeemedAt ?? conn.createdAt;
+    if ((conn as { expired?: boolean }).expired || last < cutoff) {
+      if (await revokeConnection(conn.code)) revoked.push(conn.code);
+    }
+  }
+  return c.json({ revoked });
+});
 
 api.delete('/connections/:code', async (c) =>
   (await revokeConnection(c.req.param('code'))) ? c.json({ ok: true }) : c.json({ error: 'not found' }, 404));

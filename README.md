@@ -187,7 +187,7 @@ Artifactory's origin gets an answer that allows the session cookie.
 | `get_node_info` | One node in full: styles, variants, attributes, text, parent, children |
 | `get_children` | One level down: ids, names, types, child counts |
 | `find_nodes` | Search by name, text, tag, type, class, theme, page or style (`styles: { color: { contains: '--color-ink' } }`, `ancestorBackground`); returns every match, paged: `{ count, offset, nodes: [{ id, type, tag, name, text, artboard, … }], nextOffset? }` |
-| `restyle_matching` | `{ query, styles, selector?, dryRun }` — one style update applied to every `find_nodes` match as a single undoable step |
+| `restyle_matching` | `{ query, styles, selector?, dryRun, compare? }` — one style update applied to every `find_nodes` match as a single undoable step; `compare: true` adds a before/after sheet of up to three affected frames |
 | `get_selection` | What the human has selected right now |
 | `get_computed_styles` | Authored styles, plus browser-resolved values and measured boxes — from the person's tab when it shows the page, otherwise rendered headlessly (`source` says which) |
 | `get_screenshot` | PNG of any node, so the agent can see its own work |
@@ -218,7 +218,7 @@ Artifactory's origin gets an answer that allows the session cookie.
 | `create_section` / `update_section` | Titled groups of screens with a status. Both take `flowCard: { code, title, role, persona, goal, feedback[] }` (null removes it): the header reads "F3 · Title" and the card is drawn at the start of the section, left of the first screen; `list_sections` returns it with the `heading` |
 | `set_version_state` | Mark a page or section `current` or `superseded` (with `reason` and `replacedBy`) instead of emoji in names. The Pages panel badges the current one and dims superseded ones; `list_sections` and `list_pages` report it |
 | `publish_page` / `unpublish_page` / `get_publication` | Put an artboard on the public web, or take it down |
-| `publish_handoff` / `unpublish_handoff` | A read-only spec site at `/h/<slug>` for a whole document or one section (`scope: 'document' \| sectionId`) — screens per section with status and flow card, flow diagrams, tokens, decisions log, annotations; live, no account. REST: `GET/POST /api/documents/:id/handoffs`, `DELETE /api/documents/:id/handoffs[/:slug]` |
+| `publish_handoff` / `unpublish_handoff` | A read-only spec site at `/h/<slug>` for a whole document or one section (`scope: 'document' \| sectionId`) — screens per section with status and flow card, flow diagrams, tokens, decisions log, annotations; live, no account. Uses the document's own font and accent; wide frames outside sections lead as "Brief & docs". REST: `GET/POST /api/documents/:id/handoffs`, `DELETE /api/documents/:id/handoffs[/:slug]` |
 | `mark_checkpoint` | Save a named version to compare against later |
 | `annotate` | A typed note on a layer — behaviour, data, constraint, accessibility, to-do |
 | `componentise` | Registers a shape and swaps every identical copy for an instance, text and links carried as overrides. Refuses if any artboard would render differently. `match: "role"` groups by the original class (`data-class`) and tag instead — "all primary buttons" — carrying each copy's style differences as overrides and skipping (and reporting) any copy that would render differently; dry-run without `id` lists the role groups |

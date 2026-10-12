@@ -1136,6 +1136,13 @@ function registerReadTools(server: McpServer, ctx: McpContext): void {
       id: n.id, type: n.type, tag: n.tag, name: n.name,
       text: n.text ?? null, visible: n.visible, locked: n.locked,
       parent: n.parent, artboard: artboardOf(doc, id),
+      ancestors: (() => {
+        const out: { id: string; name: string; tag: string | undefined }[] = [];
+        for (let p = n.parent ? getNode(doc, n.parent) : undefined; p; p = p.parent ? getNode(doc, p.parent) : undefined) {
+          out.push({ id: p.id, name: p.name, tag: p.tag });
+        }
+        return out;
+      })(),
       children: n.children.map((c) => {
         const cn = getNode(doc, c)!;
         return { id: c, name: cn.name, type: cn.type, tag: cn.tag };
@@ -1229,15 +1236,32 @@ function registerReadTools(server: McpServer, ctx: McpContext): void {
       styles: StyleRecord.describe('Kebab-case CSS to set on each match. An empty string removes a declaration.'),
       selector: z.string().optional().describe('":hover" or a breakpoint selector; omit for base styles.'),
       dryRun: z.boolean().optional().default(false),
+      compare: z.boolean().optional().default(false)
+        .describe('Also return a before/after contact sheet of up to three affected frames, to show the person what changed.'),
     },
-  }, async ({ query, styles, selector, dryRun }) => guard(() => {
+  }, async ({ query, styles, selector, dryRun, compare }) => guard(async () => {
     const doc = requireDoc(ctx);
     const hits = matchNodes(doc, query).filter((n) => n.type !== 'instance');
     if (!hits.length) return json({ matched: 0, updated: 0, ids: [] });
     const ids = hits.map((n) => n.id);
     if (dryRun) return json({ matched: ids.length, wouldUpdate: ids.length, ids: ids.slice(0, 200), dryRun: true });
+    const frames = compare
+      ? [...new Set(ids.map((id) => artboardOf(doc, id)).filter((a): a is NodeId => !!a))].slice(0, 3)
+      : [];
+    const shot = async (id: NodeId) => (await renderNode(doc, id, { format: 'png', scale: 1, baseUrl: ctx.baseUrl })).data;
+    const before = await Promise.all(frames.map(shot)).catch(() => null);
     commit(ctx, [{ t: 'styles', updates: ids.map((id) => ({ id, styles, ...(selector ? { selector } : {}) })) }]);
-    return json({ matched: ids.length, updated: ids.length, ids: ids.slice(0, 200), undo: 'One step: a single undo reverts every change.' });
+    const result = json({ matched: ids.length, updated: ids.length, ids: ids.slice(0, 200), undo: 'One step: a single undo reverts every change.' });
+    if (!frames.length || !before) return result;
+    const after = await Promise.all(frames.map(shot)).catch(() => null);
+    if (!after) return result;
+    const cells = frames.flatMap((id, i) => [
+      { png: before[i]!, label: `Before · ${doc.nodes[id]!.name}` },
+      { png: after[i]!, label: `After · ${doc.nodes[id]!.name}` },
+    ]);
+    const sheet = await composeContactSheet(cells, { columns: 2, scale: 0.5 });
+    if (!sheet) return result;
+    return { content: [...result.content, { type: 'image' as const, data: sheet.toString('base64'), mimeType: 'image/png' }] };
   }));
 
   server.registerTool('get_html', {
@@ -1447,13 +1471,18 @@ function registerReadTools(server: McpServer, ctx: McpContext): void {
       rules: z.array(z.string()).optional().describe(`Limit to specific rules: ${RULES.map((r) => r.id).join(', ')}`),
       severity: z.enum(['error', 'warning', 'info']).optional()
         .describe('Minimum severity to report. Defaults to reporting everything.'),
+      pageId: z.string().optional().describe('Limit to one page.'),
       theme: z.string().optional(),
       allThemes: z.boolean().optional().describe('Also check frames that do not pin a theme in every document theme. Default: each frame in its own theme.'),
     },
     annotations: { readOnlyHint: true },
-  }, async ({ within, rules, severity, theme, measure, allThemes }) => guard(async () => {
-    const doc = requireDoc(ctx);
-    if (within) node(doc, within);
+  }, async ({ within, rules, severity, theme, measure, allThemes, pageId }) => guard(async () => {
+    const full = requireDoc(ctx);
+    if (within) node(full, within);
+    const onPage = pageId ? full.pages.find((p) => p.id === pageId) : undefined;
+    if (pageId && !onPage) return fail(`No page "${pageId}". list_pages lists them.`);
+    // One page: the same checks on a view of the document that holds only that page.
+    const doc = onPage ? { ...full, pages: [onPage] } : full;
 
     // Rendered boxes make the tap-target check exact rather than a guess from
     // authored styles; without a tab it stays conservative.
@@ -1489,7 +1518,8 @@ function registerReadTools(server: McpServer, ctx: McpContext): void {
       allThemes,
       measured,
       facts,
-    }).filter((f) => !severity || rank(f.severity) <= rank(severity));
+    }).filter((f) => !severity || rank(f.severity) <= rank(severity))
+      .filter((f) => !onPage || (!!f.artboard && onPage.artboards.includes(f.artboard)));
 
     const pageOf = (id: NodeId | null) => (id ? doc.pages.find((p) => p.artboards.includes(id))?.id ?? null : null);
     return json({
@@ -2687,14 +2717,15 @@ function registerWriteTools(server: McpServer, ctx: McpContext): void {
     inputSchema: {
       tokens: z.array(z.object({
         name: z.string().describe('Dot path, e.g. "color.brand.500".'),
-        group: z.string().regex(/^[a-z][\w-]*$/i).max(40).describe(
-          'color, space, radius, font, shadow, duration — or any group of your own (motion, z, opacity…).'),
+        group: z.string().regex(/^[a-z][\w-]*$/i).max(40).optional().describe(
+          'color, space, radius, font, shadow, duration — or any group of your own (motion, z, opacity…). Defaults to the first part of the name.'),
         values: z.record(z.string(), z.string()).describe(
           'Value per theme. Must include "default". A value of "{color.lime}" aliases another token.'),
       })).min(1).max(200),
     },
-  }, async ({ tokens }) => guard(() => {
+  }, async ({ tokens: given }) => guard(() => {
     const doc = requireDoc(ctx);
+    const tokens = given.map((t) => ({ ...t, group: t.group ?? t.name.split('.')[0]! }));
     const missing = tokens.filter((t) => !t.values.default);
     if (missing.length) return fail(`These tokens have no "default" value: ${missing.map((t) => t.name).join(', ')}`);
 

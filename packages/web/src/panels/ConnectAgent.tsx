@@ -124,7 +124,7 @@ export function ConnectAgent({ onClose }: { onClose: () => void }) {
         : scopeKind === 'sections' && sectionIds.length ? { kind: 'sections', sectionIds } : { kind: 'document' };
       const options = supported
         ? {
-            expiresInHours: EXPIRY_HOURS[expiry],
+            ...(EXPIRY_HOURS[expiry] === undefined ? { expiresAt: null } : { expiresInHours: EXPIRY_HOURS[expiry] }),
             readOnly,
             ...(scope.kind === 'sections' ? { scope: 'sections', sectionIds: scope.sectionIds } : {}),
           }
@@ -156,6 +156,15 @@ export function ConnectAgent({ onClose }: { onClose: () => void }) {
     if (latest?.code === code) setLatest(null);
     await refresh();
     toast('Link revoked', 'success');
+  };
+
+  const pruneUnused = async () => {
+    const r = await fetch(`/api/documents/${docId}/connections/prune`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}',
+    });
+    const n = r.ok ? ((await r.json()) as { revoked: string[] }).revoked.length : 0;
+    await refresh();
+    toast(n ? `Turned off ${n} unused link${n === 1 ? '' : 's'}` : 'No unused links', 'success');
   };
 
   const copy = async (value: string) => {
@@ -320,6 +329,7 @@ export function ConnectAgent({ onClose }: { onClose: () => void }) {
                   <button className="button subtle" onClick={() => revoke(c.code)}>Revoke</button>
                 </div>
               ))}
+              <button className="button subtle" onClick={pruneUnused}>Turn off links unused for a week</button>
             </details>
           )}
 

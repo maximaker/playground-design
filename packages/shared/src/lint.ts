@@ -216,7 +216,9 @@ function checkContrast(
     nodeId: node.id,
     artboard,
     message: `Text contrast is ${formatRatio(worst.ratio)}${where}; WCAG AA needs ${required}:1 at ${Math.round(size)}px.`,
-    fix: failing.length < resolvers.length
+    fix: textTokenSurface(doc, node)
+      ? `The background is ${textTokenSurface(doc, node)}, a text colour used as a surface: it inverts between themes while what sits on it does not. Give the surface a token that stays dark (or light) in every theme, with matching text tokens.`
+      : failing.length < resolvers.length
       ? 'Use colour tokens for both the text and its background, so they change together between themes.'
       : 'Darken the text, lighten the background, or increase the size past 24px.',
   }];
@@ -638,6 +640,23 @@ function effectiveBackground(
     if (!parsed || parsed.a === 0) continue;
     if (parsed.a < 1) return null;
     return parsed;
+  }
+  return null;
+}
+
+/**
+ * The variable behind the nearest painted background, when that variable is also
+ * used as a text colour somewhere — the "ink as a dark surface" pattern that flips
+ * to light in a dark theme and takes its contents' contrast with it.
+ */
+function textTokenSurface(doc: CanvasDocument, node: CanvasNode): string | null {
+  for (const id of [node.id, ...ancestors(doc, node.id)]) {
+    const raw = doc.nodes[id]?.styles['background-color'] ?? doc.nodes[id]?.styles.background;
+    if (!raw) continue;
+    const v = /^\s*var\((--[\w-]+)\)\s*$/.exec(raw)?.[1];
+    if (!v) return null;
+    const usedAsText = Object.values(doc.nodes).some((n) => n.type === 'text' && n.styles.color?.includes(`var(${v})`));
+    return usedAsText ? `var(${v})` : null;
   }
   return null;
 }

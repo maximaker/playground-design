@@ -16,7 +16,7 @@ import { randomBytes } from 'node:crypto';
 import {
   type CanvasDocument, type NodeId, type Page, type Section,
   SECTION_STATUS_META, decisionsOf, describeDecision, emitBoardSvg, emitStandalone, getArtboardSize,
-  sectionFlows, sectionsOf, descendants, NOTE_KIND_LABELS, cssVarName,
+  sectionFlows, sectionsOf, descendants, NOTE_KIND_LABELS, cssVarName, fontFamiliesIn, googleFontsHref,
 } from '@playground/shared';
 import { persistence, type StoredShare } from './persistence.ts';
 import { ensureLoaded, getDocument } from './store.ts';
@@ -147,11 +147,23 @@ export function handoffHtml(doc: CanvasDocument, handoff: Handoff, base: string)
     ? `${findSection(doc, handoff.scope.sectionId)?.section.title ?? 'Section'} · ${doc.name}`
     : doc.name;
   const SHOT = 320;
+  const SHEET = 640;
+
+  // The document's own type and accent, so the site reads as this project and not a generic spec.
+  const firstBoard = groups.find((g) => g.artboards.length)?.artboards[0];
+  const families = firstBoard ? fontFamiliesIn(doc, firstBoard) : [];
+  const fontHref = googleFontsHref(families.slice(0, 2));
+  const fontStack = families[0] ? `"${families[0].replace(/"/g, '')}",` : '';
+  const accentToken = doc.tokens.find((t) => t.group === 'color' && /(^|\.)(brand|accent|primary)$/.test(t.name))
+    ?? doc.tokens.find((t) => t.group === 'color' && /brand|accent|primary|lime/.test(t.name));
+  const accent = accentToken?.values.default ?? '';
+  const safeAccent = /^#[0-9a-f]{3,8}$/i.test(accent) ? accent : '';
+  const isSheet = (id: NodeId) => getArtboardSize(doc.nodes[id]!).width >= 1000;
 
   const screen = (id: NodeId) => {
     const n = doc.nodes[id]!;
     const { width, height } = getArtboardSize(n);
-    const scale = Math.min(1, SHOT / Math.max(1, width));
+    const scale = Math.min(1, (width >= 1000 ? SHEET : SHOT) / Math.max(1, width));
     const h = Math.round(Math.min(height, 4000) * scale);
     return `<figure class="screen"><a href="${base}/screen/${encodeURIComponent(id)}" target="_blank" rel="noopener" class="frame" style="width:${Math.round(width * scale)}px;height:${h}px">`
       + `<iframe loading="lazy" src="${base}/screen/${encodeURIComponent(id)}" title="${esc(n.name)}" tabindex="-1" `
@@ -159,15 +171,19 @@ export function handoffHtml(doc: CanvasDocument, handoff: Handoff, base: string)
       + `<figcaption>${esc(n.name)} <span>${Math.round(width)}×${Math.round(height)}</span></figcaption></figure>`;
   };
 
-  const sectionHtml = groups.map((g) => {
+  const ordered = [...groups.filter((g) => !g.section && g.artboards.length && g.artboards.every(isSheet)),
+    ...groups.filter((g) => g.section || !g.artboards.length || !g.artboards.every(isSheet))];
+  const sectionHtml = ordered.map((g) => {
     const s = g.section;
     const meta = s ? SECTION_STATUS_META[s.status] : null;
     const card = s?.flowCard;
+    // Unsectioned frames: wide ones are the brief, research and docs a newcomer should read first.
+    const fallback = g.artboards.length && g.artboards.every(isSheet) ? 'Brief & docs' : g.page.name.replace(/^\d+\s*/, '');
     const flows = s ? sectionFlows(doc, s) : [];
     return `<section class="group">
   <header>
     <p class="eyebrow">${esc(g.page.name)}</p>
-    <h2>${card?.code ? `<span class="code">${esc(card.code)}</span> ` : ''}${esc(card?.title || s?.title || 'Other screens')}</h2>
+    <h2>${card?.code ? `<span class="code">${esc(card.code)}</span> ` : ''}${esc(card?.title || s?.title || fallback)}</h2>
     ${meta ? `<span class="status" style="background:${meta.bg};color:${meta.fg}">${esc(meta.label)}</span>` : ''}
   </header>
   ${s?.description ? `<p class="desc">${esc(s.description)}</p>` : ''}
@@ -209,14 +225,16 @@ export function handoffHtml(doc: CanvasDocument, handoff: Handoff, base: string)
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex">
 <title>${esc(title)} — handoff</title>
+${fontHref ? `<link rel="stylesheet" href="${esc(fontHref)}">` : ''}
 <style>
   :root { --bg:#fafafa; --fg:#18181b; --muted:#71717a; --line:#e4e4e7; --card:#fff; }
   @media (prefers-color-scheme: dark) { :root { --bg:#111113; --fg:#f4f4f5; --muted:#a1a1aa; --line:#2a2a2e; --card:#18181b; } }
   * { box-sizing: border-box; }
-  body { margin:0; background:var(--bg); color:var(--fg); font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:15px/1.5 ${fontStack}system-ui,-apple-system,"Segoe UI",sans-serif; }
   main { max-width:1200px; margin:0 auto; padding:32px 16px 96px; }
   nav { display:flex; gap:16px; flex-wrap:wrap; font-size:14px; margin:8px 0 32px; }
   nav a { color:var(--muted); }
+  ${safeAccent ? `.accent-bar { height:6px; width:56px; border-radius:99px; background:${safeAccent}; margin-bottom:16px; }` : '.accent-bar { display:none; }'}
   h1 { font-size:28px; margin:0; letter-spacing:-.01em; }
   h2 { font-size:20px; margin:0; }
   h3 { font-size:16px; margin:40px 0 12px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); }
@@ -243,7 +261,8 @@ export function handoffHtml(doc: CanvasDocument, handoff: Handoff, base: string)
   .wrap { overflow-x:auto; }
 </style></head>
 <body><main>
-<p class="eyebrow">Handoff · read-only · updated live</p>
+<div class="accent-bar"></div>
+<p class="eyebrow">Handoff · read-only · revision ${esc(String(doc.rev ?? ''))} · rendered ${esc(new Date().toISOString().slice(0, 16).replace('T', ' '))} UTC</p>
 <h1>${esc(title)}</h1>
 <nav><a href="#screens">Screens</a>${flowsHtml ? '<a href="#flows">Flows</a>' : ''}<a href="#tokens">Tokens</a><a href="#decisions">Decisions</a><a href="#notes">Annotations</a></nav>
 <div id="screens">${sectionHtml || '<p class="empty">Nothing to show yet.</p>'}</div>
