@@ -835,14 +835,17 @@ api.get('/documents/:id/health', async (c) => {
 api.get('/documents/:id/thumbnail', async (c) => {
   const doc = await requireDocument(c.req.param('id'));
   const store = await persistence();
-  const stamp = `${RENDERER_VERSION}:${doc.rev}`;
+  const stamp = `${RENDERER_VERSION}:cover:${doc.rev}`;
   const cached = await store.loadThumbnail(doc.id, 'doc');
   if (cached && cached.stamp === stamp) return pictureResponse(c, cached.bytes, cached.mime, stamp);
 
   // The busiest artboard on the first page, not the first one: a document often
   // opens with an empty starter frame beside the work, and a thumbnail of the
   // empty one is a white rectangle that says nothing.
-  const artboard = (doc.pages[0]?.artboards ?? [])
+  // A frame named "Cover", on any page, wins: it is the one meant to be seen first.
+  const cover = doc.pages.flatMap((p) => p.artboards)
+    .find((id) => /^cover\b/i.test(doc.nodes[id]?.name?.trim() ?? ''));
+  const artboard = cover ?? (doc.pages[0]?.artboards ?? [])
     .map((id) => ({ id, size: countDescendants(doc, id) }))
     .sort((a, b) => b.size - a.size)[0]?.id;
   if (!artboard) return c.json({ error: 'This document has no artboards yet.' }, 404);
