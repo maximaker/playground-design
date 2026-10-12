@@ -22,6 +22,7 @@ import { Icon } from '../ui/Icon.tsx';
 import { AlignExtras, AlignPad } from '../ui/AlignPad.tsx';
 import { BoxEditor } from '../ui/BoxEditor.tsx';
 import { BoardProperties } from './BoardProperties.tsx';
+import { LinkedWork } from '../connect.tsx';
 import { nodeInnerRect } from '../canvas/registry.ts';
 
 const MIXED = '—'; // em dash: "these nodes disagree"
@@ -91,6 +92,7 @@ export function Properties() {
               : <>Double-click text to rewrite it. To add something new, press <kbd>T</kbd> for text or <kbd>F</kbd> for a box.</>}
           </span>
         </p>
+        {doc && <LinkedWork type="doc" id={doc.id} title={doc.name} url={`${location.origin}/d/${doc.id}`} />}
       </div>
     );
   }

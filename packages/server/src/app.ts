@@ -56,6 +56,7 @@ import {
 } from './accounts.ts';
 import { DB_PATH } from './persistence-sqlite.ts';
 import { idUrl, userFromCookies } from './sso.ts';
+import { connect } from './connect.ts';
 import { isOnMountedVolume } from './volume.ts';
 import { dirname } from 'node:path';
 
@@ -1241,6 +1242,9 @@ api.post('/documents/:id/assets', async (c) => {
   return c.json({ id, url: `${PUBLIC_URL}/assets/${id}`, name: file.name, size: bytes.length }, 201);
 });
 
+// heymax connect does its own auth (session or CONNECT_TOKEN), so it is
+// mounted before the API and its gate ever see the request.
+app.route('/api/connect', connect);
 app.route('/api', api);
 
 /**

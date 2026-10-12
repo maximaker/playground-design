@@ -1,0 +1,88 @@
+/* heymax connect: Linked work panel, unfurl card, ⌘K palette. Uses tokens.css. */
+
+.hm-cx { font: inherit; color: var(--ink, #16181d); }
+.hm-cx[hidden] { display: none; }
+
+.hm-cx-panel {
+  display: block;
+  padding: 18px 20px;
+  border: 1px solid var(--line, #e4e4e0);
+  border-radius: 12px;
+  background: var(--surface, #fff);
+}
+.hm-cx__head { display: flex; align-items: center; justify-content: space-between; }
+.hm-cx__label {
+  font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase;
+  color: var(--ink-mute, #6b6f76);
+}
+.hm-cx__list { margin-top: 10px; display: flex; flex-direction: column; gap: 2px; }
+
+.hm-cx__row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 6px 8px; margin: 0 -8px; border-radius: 8px;
+  color: inherit; text-decoration: none; min-width: 0;
+}
+.hm-cx__row:hover, .hm-cx__row[data-active] { background: var(--ground, #f5f5f3); }
+.hm-cx__mark { width: 22px; height: 22px; flex: none; border-radius: 6px; }
+.hm-cx__text { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.hm-cx__title { font-size: 13.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hm-cx__meta, .hm-cx__when { font-size: 11.5px; color: var(--ink-mute, #6b6f76); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hm-cx__when { flex: none; }
+
+.hm-cx__x {
+  flex: none; border: 0; background: none; cursor: pointer; font-size: 16px; line-height: 1;
+  width: 24px; height: 24px; border-radius: 6px; color: var(--ink-mute, #6b6f76); opacity: 0;
+}
+.hm-cx__row:hover .hm-cx__x, .hm-cx__tag:hover .hm-cx__x, .hm-cx__x:focus-visible { opacity: 1; }
+.hm-cx__x:hover { background: var(--line, #e4e4e0); color: var(--ink, #16181d); }
+
+.hm-cx__tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; align-items: center; }
+.hm-cx__tag {
+  display: inline-flex; align-items: center; gap: 6px; padding: 2px 4px 2px 3px;
+  border: 1px solid var(--line, #e4e4e0); border-radius: 999px; font-size: 12.5px;
+}
+.hm-cx__tag .hm-cx__mark { width: 18px; height: 18px; border-radius: 999px; }
+.hm-cx__tag a { color: inherit; text-decoration: none; }
+.hm-cx__tag a:hover { text-decoration: underline; }
+
+.hm-cx__add {
+  margin-top: 10px; border: 0; background: none; padding: 4px 0; cursor: pointer;
+  font: inherit; font-size: 12.5px; color: var(--accent-text, var(--ink-soft, #4a4e55));
+}
+.hm-cx__tags .hm-cx__add { margin-top: 0; }
+.hm-cx__add:hover { color: var(--ink, #16181d); text-decoration: underline; }
+.hm-cx__empty { margin: 8px 0 0; font-size: 12.5px; color: var(--ink-mute, #6b6f76); }
+.hm-cx__error { margin: 8px 0 0; font-size: 12.5px; color: #b42318; }
+
+.hm-cx__picker { margin-top: 8px; border-top: 1px solid var(--line, #e4e4e0); padding-top: 10px; }
+.hm-cx__input {
+  width: 100%; box-sizing: border-box; font: inherit; font-size: 14px;
+  padding: 8px 10px; border: 1px solid var(--line-strong, #d4d4cf); border-radius: 8px;
+  background: var(--surface, #fff); color: inherit;
+}
+.hm-cx__input:focus { outline: 2px solid var(--accent-fill, #3d6bff); outline-offset: -1px; }
+.hm-cx__picker .hm-cx__results { margin-top: 6px; max-height: 280px; overflow: auto; padding: 0 8px; }
+
+.hm-cx-unfurl {
+  display: block; max-width: 520px; padding: 6px 12px;
+  border: 1px solid var(--line, #e4e4e0); border-radius: 10px; background: var(--surface, #fff);
+}
+.hm-cx-unfurl .hm-cx__row { margin: 0 -4px; padding: 4px; }
+
+.hm-cx-palette {
+  width: min(640px, calc(100vw - 32px)); max-height: min(70vh, 560px);
+  padding: 12px; border: 1px solid var(--line, #e4e4e0); border-radius: 14px;
+  background: var(--surface, #fff); color: var(--ink, #16181d);
+  box-shadow: 0 24px 64px rgba(22, 24, 29, .18); margin-top: 12vh;
+}
+.hm-cx-palette::backdrop { background: rgba(22, 24, 29, .32); }
+.hm-cx-palette .hm-cx__results { overflow: auto; max-height: calc(min(70vh, 560px) - 70px); padding: 0 8px; }
+.hm-cx__group h3 {
+  display: flex; align-items: center; gap: 6px; margin: 12px 0 4px;
+  font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-mute, #6b6f76);
+}
+.hm-cx__group h3 .hm-cx__mark { width: 16px; height: 16px; border-radius: 4px; }
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .hm-cx-palette { box-shadow: 0 24px 64px rgba(0, 0, 0, .5); }
+}

@@ -11,6 +11,7 @@ import { NOTE_KIND_LABELS, commentsOf, decisionsOf, describeDecision, decisionsM
 import { useCanvas, getDoc, currentPage } from '../state/store.ts';
 import { Icon } from '../ui/Icon.tsx';
 import { isAgentThread } from '../canvas/CommentPin.tsx';
+import { Unfurls } from '../connect.tsx';
 
 export function Comments() {
   const version = useCanvas((s) => s.version);
@@ -103,8 +104,8 @@ export function Comments() {
       {shown.map((c) => {
         const node = c.nodeId ? doc?.nodes[c.nodeId] : undefined;
         return (
+          <div key={c.id} className="comment-row-wrap">
           <button
-            key={c.id}
             className={`comment-row${c.resolved ? ' is-resolved' : ''}`}
             onClick={() => focus(c.id, c.x, c.y, c.nodeId)}
           >
@@ -128,6 +129,9 @@ export function Comments() {
               {c.nodeId ? (node ? node.name : 'layer deleted') : 'on the canvas'}
             </span>
           </button>
+          {/* heymax links in a comment unfurl as cards; a card is a link, so it sits outside the row button. */}
+          <Unfurls text={[c.text, ...c.replies.map((r) => r.text)].join(' ')} />
+          </div>
         );
       })}
       </>}

@@ -23,6 +23,13 @@ services:
       PORT: "4000"
       PLAYGROUND_DB: /data/playground.db
       NODE_ENV: production
+      # heymax connect (kit/docs/connect.md): family search, unfurls and the
+      # Linked work panel. Off unless CONNECT_ENABLED=true; then /api/connect/*
+      # answers to a signed-in session or `Authorization: Bearer $CONNECT_TOKEN`
+      # (the same secret in all four apps). LINKS_URL defaults to ID_URL.
+      CONNECT_ENABLED: ${CONNECT_ENABLED:-false}
+      CONNECT_TOKEN: ${CONNECT_TOKEN:-}
+      LINKS_URL: ${LINKS_URL:-}
 
     volumes:
       # Documents, version snapshots and every uploaded asset live in this one

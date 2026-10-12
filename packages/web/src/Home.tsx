@@ -13,6 +13,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FamilyTopBar } from './ui/FamilyTopBar.tsx';
+import { ConnectSearch, LinkedWork } from './connect.tsx';
 import { useLayoutMode } from './hooks/useLayout.ts';
 import { Icon } from './ui/Icon.tsx';
 import { Settings } from './ui/Settings.tsx';
@@ -55,7 +56,8 @@ export function Home({ onOpen, appearance, onAppearance, session }: {
   const [templates, setTemplates] = useState<TemplateSummary[]>([]);
   const [starters, setStarters] = useState<StarterSummary[]>([]);
   const [style, setStyle] = useState('clean');
-  const [filter, setFilter] = useState<Filter>(null);
+  // ?project=<id> opens on that project: it is the address heymax connect hands out for a project.
+  const [filter, setFilter] = useState<Filter>(() => new URLSearchParams(location.search).get('project'));
   const [creating, setCreating] = useState(false);
   const [importing, setImporting] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -280,6 +282,8 @@ export function Home({ onOpen, appearance, onAppearance, session }: {
       }
       end={
         <div className="home-account">
+          {/* The library has no palette of its own, so ⌘K here searches across heymax. */}
+          <ConnectSearch />
           <button
             className="icon-button"
             title="Appearance"
@@ -490,6 +494,16 @@ export function Home({ onOpen, appearance, onAppearance, session }: {
                 </div>
               </div>
             </div>
+
+            {typeof filter === 'string' && filter !== 'unfiled' && projects.some((p) => p.id === filter) && (
+              <LinkedWork
+                key={filter}
+                type="project"
+                id={filter}
+                title={title}
+                url={`${location.origin}/?project=${encodeURIComponent(filter)}`}
+              />
+            )}
 
             {note && (
               <p className="library-note">

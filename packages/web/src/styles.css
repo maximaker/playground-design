@@ -3795,3 +3795,10 @@ code { font-family: var(--mono); font-size: 0.92em; }
 /* The editor header layers above the canvas and panels so the app switcher
    menu is never covered; modals (z 90+) still sit above it. */
 .topbar { position: relative; z-index: 45; }
+
+/* heymax connect (kit/connect): Linked work in the Design panel and the library,
+   unfurl cards under comments. The kit's own connect.css styles the insides. */
+.connect-linked { margin: var(--s4); }
+.library-docs-head + .connect-linked, .library-title .connect-linked { margin: var(--s2) 0 var(--s4); }
+.comment-row-wrap { display: flex; flex-direction: column; gap: var(--s1, 4px); }
+.connect-unfurls { display: flex; flex-direction: column; gap: var(--s1, 4px); }

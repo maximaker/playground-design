@@ -17,6 +17,8 @@ import {
 } from '../hooks/commands.ts';
 import { MOD, TOOLS, TOOL_ORDER } from './tools.ts';
 import { reorder } from '../canvas/arrange.ts';
+import { searchEverywhere, useConnectEnabled } from '../connect.tsx';
+import { appName } from '../kit-connect/connect.js';
 
 export interface PaletteActions {
   openImport: () => void;
@@ -37,7 +39,7 @@ interface Entry {
   hint?: string;
   icon: IconName;
   shortcut?: string;
-  group: 'Actions' | 'Layers' | 'Components' | 'Pages' | 'Tools';
+  group: 'Actions' | 'Layers' | 'Components' | 'Pages' | 'Tools' | 'Across heymax';
   run: () => void;
 }
 
@@ -53,6 +55,7 @@ const GROUP_BIAS: Record<Entry['group'], number> = {
   Components: 20,
   Pages: 10,
   Layers: 0,
+  'Across heymax': 0,
 };
 
 export function CommandPalette({ onClose, actions }: { onClose: () => void; actions: PaletteActions }) {
@@ -73,7 +76,8 @@ export function CommandPalette({ onClose, actions }: { onClose: () => void; acti
     [actions, selection, structureVersion],
   );
 
-  const matches = useMemo(() => rank(entries, query), [entries, query]);
+  const remote = useAcrossHeymax(query);
+  const matches = useMemo(() => [...rank(entries, query), ...remote], [entries, query, remote]);
   useEffect(() => setActive(0), [query]);
 
   // Keep the highlighted row in view while arrowing through a long list.
@@ -286,6 +290,36 @@ function buildEntries({
   }
 
   void onClose;
+  return entries;
+}
+
+/**
+ * heymax connect: the same query across Studio OS, Notes, Artifactory and
+ * Playground's library, through /api/connect/everywhere. Only once connect
+ * says it is on, only for a typed query, and always after this document's own
+ * results, so the palette's commands are never pushed down.
+ */
+function useAcrossHeymax(query: string): Entry[] {
+  const on = useConnectEnabled();
+  const [entries, setEntries] = useState<Entry[]>([]);
+  useEffect(() => {
+    const q = query.trim();
+    if (!on || q.length < 2) { setEntries([]); return; }
+    const ctl = new AbortController();
+    const t = setTimeout(() => {
+      searchEverywhere(q, { signal: ctl.signal })
+        .then(({ groups }) => setEntries(groups.flatMap((g) => g.results).slice(0, MAX_PER_GROUP).map((it) => ({
+          id: `heymax:${it.uri}`,
+          label: it.title || 'Untitled',
+          hint: `${appName(it.app)} · ${it.type}${it.subtitle ? ` · ${it.subtitle}` : ''}`,
+          icon: 'share' as IconName,
+          group: 'Across heymax' as const,
+          run: () => { if (/^https?:\/\//.test(it.url)) location.href = it.url; },
+        }))))
+        .catch(() => { /* aborted or unavailable: the local results stand alone */ });
+    }, 180);
+    return () => { clearTimeout(t); ctl.abort(); };
+  }, [on, query]);
   return entries;
 }
 
