@@ -79,7 +79,8 @@ const app = new Hono();
  * clients configured with the old address keep working.
  */
 const REDIRECT_HOSTS = (process.env.REDIRECT_HOSTS ?? '').split(',').map((h) => h.trim().toLowerCase()).filter(Boolean);
-if (REDIRECT_HOSTS.length) {
+// Never redirect to a host that is itself being redirected: that is a loop.
+if (REDIRECT_HOSTS.length && !REDIRECT_HOSTS.includes(new URL(PUBLIC_URL).hostname.toLowerCase())) {
   app.use('*', async (c, next) => {
     const host = (c.req.header('x-forwarded-host') ?? c.req.header('host') ?? '').split(':')[0]!.toLowerCase();
     const isPage = (c.req.method === 'GET' || c.req.method === 'HEAD') && !/^\/(api|mcp|ws)(\/|$)/.test(c.req.path)
