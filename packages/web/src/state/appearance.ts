@@ -27,11 +27,17 @@ export function loadAppearance(): Appearance {
   try {
     const raw = localStorage.getItem(KEY);
     if (!raw) return { ...DEFAULT_APPEARANCE };
-    const parsed = JSON.parse(raw) as Partial<Appearance>;
+    const parsed = JSON.parse(raw) as Partial<Appearance> & { v?: number };
+    // Densities moved up one step (12/13/15 -> 13/14/16) so Default matches
+    // the 14px UI of the other heymax apps. A preference saved before then
+    // keeps meaning the same choice.
+    const OLD_TO_NEW: Record<number, number> = { 12: 13, 13: 14, 15: 16 };
+    const savedBase = Number(parsed.base);
+    const base = parsed.v === 2 ? savedBase : OLD_TO_NEW[savedBase] ?? savedBase;
     return {
       theme: parsed.theme === 'dark' || parsed.theme === 'light' ? parsed.theme : 'system',
       scale: clamp(Number(parsed.scale) || 1, SCALE_RANGE.min, SCALE_RANGE.max),
-      base: clamp(Number(parsed.base) || 14, 11, 18),
+      base: clamp(base || 14, 11, 18),
     };
   } catch {
     // Private mode, blocked storage, corrupt value — the defaults are fine.
@@ -40,7 +46,7 @@ export function loadAppearance(): Appearance {
 }
 
 export function saveAppearance(appearance: Appearance): void {
-  try { localStorage.setItem(KEY, JSON.stringify(appearance)); } catch { /* not critical */ }
+  try { localStorage.setItem(KEY, JSON.stringify({ ...appearance, v: 2 })); } catch { /* not critical */ }
 }
 
 /** Writes the appearance onto the document element, where the CSS reads it. */
