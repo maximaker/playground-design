@@ -3719,3 +3719,9 @@ code { font-family: var(--mono); font-size: 0.92em; }
   .home .library-nav .library-row.is-active .dim { color: inherit; opacity: 0.7; }
 }
 .home-card-face:has(.home-card-shot.is-loaded) .home-card-initial { opacity: 0; }
+/* The toolbar sits at the bottom, so its zoom menu opens upward. */
+.zoom-menu .overflow-menu { top: auto; bottom: calc(100% + 0.6rem); right: -0.3rem; z-index: 60; }
+.zoom-menu .overflow-menu { width: 15rem; }
+.zoom-menu .overflow-menu .context-item { white-space: nowrap; }
+.overflow-menu .context-item { display: flex; justify-content: space-between; align-items: center; gap: 1.5rem; }
+.overflow-hint { margin-left: auto; font: inherit; font-size: 0.75rem; color: var(--fg-muted); background: none; border: 0; padding: 0; }

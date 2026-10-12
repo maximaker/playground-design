@@ -12,7 +12,8 @@ import { useCanvas, type Tool } from '../state/store.ts';
 import { Icon } from './Icon.tsx';
 import { MOD, TOOLS } from './tools.ts';
 import { useViewTheme } from '../state/viewTheme.ts';
-import { zoomBy, zoomTo, zoomToFit } from '../hooks/commands.ts';
+import { zoomStep, zoomTo, zoomToFit, zoomToSelection } from '../hooks/commands.ts';
+import { OverflowMenu } from './OverflowMenu.tsx';
 import { getArtboardSize } from '@playground/shared';
 import { getDoc } from '../state/store.ts';
 import { getFrame } from '../canvas/registry.ts';
@@ -169,17 +170,15 @@ export function Toolbar({ compact }: { compact?: boolean }) {
       {!compact && <ViewAsSelect />}
       {!compact && <span className="toolbar-divider" />}
       {!compact && (
-      <button className="tip is-top" data-tip="Zoom out  −" aria-label="Zoom out" onClick={() => zoomBy(1 / 1.25)}>
+      <button className="tip is-top" data-tip="Zoom out  −" aria-label="Zoom out" onClick={() => zoomStep(-1)}>
         <Icon name="minus" size={16} />
       </button>
       )}
       {!compact && (
-        <button className="zoom-readout tip is-top" data-tip="Zoom to 100%  ⇧0" aria-label={`Zoom ${Math.round(zoom * 100)} percent. Reset to 100%.`} onClick={() => zoomTo(1)}>
-          {Math.round(zoom * 100)}%
-        </button>
+        <ZoomMenu zoom={zoom} />
       )}
       {!compact && (
-      <button className="tip is-top" data-tip="Zoom in  +" aria-label="Zoom in" onClick={() => zoomBy(1.25)}>
+      <button className="tip is-top" data-tip="Zoom in  +" aria-label="Zoom in" onClick={() => zoomStep(1)}>
         <Icon name="plus" size={16} />
       </button>
       )}
@@ -282,5 +281,34 @@ function DeviceToggle() {
         <Icon name="phone" size={15} />
       </button>
     </div>
+  );
+}
+
+/** The zoom readout opens the presets, the way Figma's and Penpot's do. */
+function ZoomMenu({ zoom }: { zoom: number }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <span className="overflow-anchor zoom-menu">
+      <button
+        className="zoom-readout"
+        aria-haspopup="menu" aria-expanded={open}
+        aria-label={`Zoom ${Math.round(zoom * 100)} percent`}
+        onClick={() => setOpen((v) => !v)}
+      >{Math.round(zoom * 100)}%</button>
+      {open && (
+        <OverflowMenu
+          onClose={() => setOpen(false)}
+          items={[
+            { label: 'Zoom in', hint: '+', icon: 'plus', run: () => zoomStep(1) },
+            { label: 'Zoom out', hint: '−', icon: 'minus', run: () => zoomStep(-1) },
+            { group: 'Fit', label: 'Zoom to fit', hint: '⇧1', icon: 'fullscreen', run: () => zoomToFit() },
+            { group: 'Fit', label: 'Zoom to selection', hint: '⇧2', icon: 'frame', run: () => zoomToSelection() },
+            { group: 'Levels', label: '50%', icon: 'search', run: () => zoomTo(0.5) },
+            { group: 'Levels', label: '100%', hint: '⇧0', icon: 'search', run: () => zoomTo(1) },
+            { group: 'Levels', label: '200%', icon: 'search', run: () => zoomTo(2) },
+          ]}
+        />
+      )}
+    </span>
   );
 }

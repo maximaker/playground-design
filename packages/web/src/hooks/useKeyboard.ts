@@ -14,7 +14,7 @@ import { moveChanges, movingSet } from '../canvas/boardGestures.ts';
 import {
   copyProperties, duplicateSelection, moveInParent, nudge, pasteProperties, selectChildren,
   selectParent, selectSibling, toggleLock, toggleVisibility, wrapInFrame,
-  zoomBy, zoomTo, zoomToFit, zoomToSelection,
+  zoomBy, zoomStep, zoomTo, zoomToFit, zoomToSelection,
 } from './commands.ts';
 import type { Tool } from '../state/store.ts';
 
@@ -174,8 +174,8 @@ export function useKeyboard(actions: KeyboardActions = {}): void {
        * that tries to claim them is best-effort on the browsers where it works
        * — these are the ones that always reach the canvas.
        */
-      if (!mod && (e.key === '+' || e.key === '=')) { e.preventDefault(); zoomBy(1.25); return; }
-      if (!mod && (e.key === '-' || e.key === '_')) { e.preventDefault(); zoomBy(1 / 1.25); return; }
+      if (!mod && (e.key === '+' || e.key === '=')) { e.preventDefault(); zoomStep(1); return; }
+      if (!mod && (e.key === '-' || e.key === '_')) { e.preventDefault(); zoomStep(-1); return; }
       if (!mod && e.shiftKey && e.code === 'Digit0') { e.preventDefault(); zoomTo(1); return; }
 
       // Both spellings: the bare digits this tool started with, and Figma's
@@ -308,8 +308,8 @@ export function useKeyboard(actions: KeyboardActions = {}): void {
       // so a focused field cannot swallow it and leave the browser to zoom.
       if (!(e.metaKey || e.ctrlKey) || e.altKey) return;
       if (e.key === '0') { e.preventDefault(); zoomTo(1); }
-      else if (e.key === '=' || e.key === '+') { e.preventDefault(); zoomBy(1.25); }
-      else if (e.key === '-') { e.preventDefault(); zoomBy(1 / 1.25); }
+      else if (e.key === '=' || e.key === '+') { e.preventDefault(); zoomStep(1); }
+      else if (e.key === '-') { e.preventDefault(); zoomStep(-1); }
       else return;
       // Handled here; the bubble listener must not act on it a second time.
       e.stopPropagation();

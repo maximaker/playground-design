@@ -13,7 +13,7 @@ import { Icon, iconForNodeType, type IconName } from './Icon.tsx';
 import {
   copyProperties, detachSelection, duplicateSelection, createComponentFromSelection,
   pasteProperties, selectParent, toggleLock, toggleVisibility, wrapInFrame,
-  zoomBy, zoomTo, zoomToFit, zoomToSelection,
+  zoomBy, zoomStep, zoomTo, zoomToFit, zoomToSelection,
 } from '../hooks/commands.ts';
 import { MOD, TOOLS, TOOL_ORDER } from './tools.ts';
 import { reorder } from '../canvas/arrange.ts';
@@ -228,8 +228,8 @@ function buildEntries({
   }
 
   action('zoom-fit', 'Zoom to fit', 'search', zoomToFit, '1');
-  action('zoom-in', 'Zoom in', 'plus', () => zoomBy(1.25), '+');
-  action('zoom-out', 'Zoom out', 'minus', () => zoomBy(1 / 1.25), '−');
+  action('zoom-in', 'Zoom in', 'plus', () => zoomStep(1), '+');
+  action('zoom-out', 'Zoom out', 'minus', () => zoomStep(-1), '−');
   action('zoom-100', 'Zoom to 100%', 'search', () => zoomTo(1), '⇧0');
   action('tokens', 'Design tokens', 'palette', () => actions.openPanel('tokens'));
   action('components', 'Components', 'component', () => actions.openPanel('components'));

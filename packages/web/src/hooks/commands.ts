@@ -146,6 +146,22 @@ export function zoomBy(factor: number, at?: { x: number; y: number }): void {
   });
 }
 
+/**
+ * The zoom levels the + and − controls step through: powers of two around 100%,
+ * the ladder Figma, Sketch and Penpot all use. Stepping from an in-between zoom
+ * (after a pinch or a fit) lands on the next level, not a fixed ratio away, so
+ * pressing + twice from 37% reads 50%, 100% — never 46%, 58%.
+ */
+export const ZOOM_LEVELS = [0.02, 0.03125, 0.0625, 0.125, 0.25, 0.5, 1, 2, 4, 8];
+
+export function zoomStep(direction: 1 | -1, at?: { x: number; y: number }): void {
+  const current = useCanvas.getState().viewport.zoom;
+  const next = direction > 0
+    ? ZOOM_LEVELS.find((z) => z > current * 1.001) ?? ZOOM_LEVELS[ZOOM_LEVELS.length - 1]!
+    : [...ZOOM_LEVELS].reverse().find((z) => z < current / 1.001) ?? ZOOM_LEVELS[0]!;
+  zoomBy(next / current, at);
+}
+
 /** Back to 1:1, holding the centre of the stage. */
 export function zoomTo(zoom: number): void {
   const { viewport } = useCanvas.getState();

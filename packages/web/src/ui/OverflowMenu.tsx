@@ -16,6 +16,8 @@ export interface OverflowItem {
   disabled?: boolean;
   /** Items with the same group sit together under its heading. */
   group?: string;
+  /** A keyboard shortcut, shown at the right. */
+  hint?: string;
 }
 
 export function OverflowMenu({ items, onClose }: { items: OverflowItem[]; onClose: () => void }) {
@@ -61,6 +63,7 @@ export function OverflowMenu({ items, onClose }: { items: OverflowItem[]; onClos
                 onClick={() => { item.run(); onClose(); }}
               >
                 <span><Icon name={item.icon} size={14} /> {item.label}</span>
+                {item.hint && <kbd className="overflow-hint">{item.hint}</kbd>}
               </button>
             ))}
           </div>
