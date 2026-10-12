@@ -14,6 +14,8 @@ export interface OverflowItem {
   icon: IconName;
   run: () => void;
   disabled?: boolean;
+  /** Items with the same group sit together under its heading. */
+  group?: string;
 }
 
 export function OverflowMenu({ items, onClose }: { items: OverflowItem[]; onClose: () => void }) {
@@ -34,19 +36,36 @@ export function OverflowMenu({ items, onClose }: { items: OverflowItem[]; onClos
     };
   }, [onClose]);
 
+  // Consecutive items of one group share a heading; ungrouped items have none.
+  const groups: { name?: string; items: OverflowItem[] }[] = [];
+  for (const item of items) {
+    const last = groups[groups.length - 1];
+    if (last && last.name === item.group) last.items.push(item);
+    else groups.push({ name: item.group, items: [item] });
+  }
+
   return (
-    <div className="overflow-menu" ref={ref} role="menu">
-      {items.map((item) => (
-        <button
-          key={item.label}
-          role="menuitem"
-          className="context-item"
-          disabled={item.disabled}
-          onClick={() => { item.run(); onClose(); }}
-        >
-          <span><Icon name={item.icon} size={14} /> {item.label}</span>
-        </button>
-      ))}
-    </div>
+    <>
+      {/* On a phone the menu is a sheet from the bottom, under the thumb; the scrim closes it. */}
+      <div className="overflow-scrim" aria-hidden />
+      <div className="overflow-menu" ref={ref} role="menu">
+        {groups.map((g, i) => (
+          <div key={g.name ?? i} className="overflow-group" role="group" aria-label={g.name}>
+            {g.name && <div className="overflow-heading">{g.name}</div>}
+            {g.items.map((item) => (
+              <button
+                key={item.label}
+                role="menuitem"
+                className="context-item"
+                disabled={item.disabled}
+                onClick={() => { item.run(); onClose(); }}
+              >
+                <span><Icon name={item.icon} size={14} /> {item.label}</span>
+              </button>
+            ))}
+          </div>
+        ))}
+      </div>
+    </>
   );
 }

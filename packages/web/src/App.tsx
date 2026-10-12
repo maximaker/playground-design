@@ -470,41 +470,36 @@ function Editor({ source, onHome, appearance, onAppearance, session }: {
         {mode === 'narrow' ? (
           <span className="overflow-anchor">
             <button
-              className="icon-button"
-              title="More actions"
-              aria-label="More actions"
+              className={`icon-button topbar-more${showOverflow ? ' is-active' : ''}`}
+              title="More"
+              aria-label="More"
+              aria-haspopup="menu"
               aria-expanded={showOverflow}
               onClick={() => setShowOverflow((v) => !v)}
-            ><Icon name="chevronDown" size={15} /></button>
+            ><Icon name="more" size={18} /></button>
             {showOverflow && (
               <OverflowMenu
                 onClose={() => setShowOverflow(false)}
                 items={[
+                  // Look: what a reader opens a design on a phone for.
                   ...(viewing ? [
-                    { label: 'Pages', icon: 'page' as IconName, run: () => { setLeftTab('pages'); setOpenPanel('left'); } },
-                    { label: 'Comments', icon: 'comment' as IconName, run: () => { setRightTab('comments'); setOpenPanel('right'); } },
-                    { label: 'Spec', icon: 'ruler' as IconName, run: () => { setRightTab('spec'); setOpenPanel('right'); } },
-                    ...(readOnly ? [] : [
-                      { label: 'Edit on this phone', icon: 'edit' as IconName, run: () => setEditingOnPhone(true) },
-                    ]),
-                  ] : []),
-                  ...(mode === 'narrow' && !readOnly && !viewing ? [
-                    { label: 'Back to viewing', icon: 'eye' as IconName, run: () => setEditingOnPhone(false) },
-                  ] : []),
-                  ...(readOnly || viewing ? [] : [
-                    { label: 'Undo', icon: 'undo' as IconName, run: () => useCanvas.getState().undo(), disabled: !canUndo },
-                    { label: 'Redo', icon: 'redo' as IconName, run: () => useCanvas.getState().redo(), disabled: !canRedo },
-                    { label: 'Import a webpage', icon: 'download' as IconName, run: () => setModal('import') },
-                    { label: 'Share a link', icon: 'share' as IconName, run: () => setModal('share') },
-                    { label: 'Publish', icon: 'link' as IconName, run: () => setModal('publish') },
+                    { group: 'View', label: 'Pages', icon: 'page' as IconName, run: () => { setLeftTab('pages'); setOpenPanel('left'); } },
+                    { group: 'View', label: 'Comments', icon: 'comment' as IconName, run: () => { setRightTab('comments'); setOpenPanel('right'); } },
+                    { group: 'View', label: 'Spec', icon: 'ruler' as IconName, run: () => { setRightTab('spec'); setOpenPanel('right'); } },
+                  ] : [
+                    { group: 'Edit', label: 'Undo', icon: 'undo' as IconName, run: () => useCanvas.getState().undo(), disabled: !canUndo },
+                    { group: 'Edit', label: 'Redo', icon: 'redo' as IconName, run: () => useCanvas.getState().redo(), disabled: !canRedo },
+                    { group: 'Edit', label: 'Import a webpage', icon: 'download' as IconName, run: () => setModal('import') },
                   ]),
-                  ...(viewing && !readOnly ? [
-                    { label: 'Share a link', icon: 'share' as IconName, run: () => setModal('share') },
-                    { label: 'Publish', icon: 'link' as IconName, run: () => setModal('publish') },
-                  ] : []),
-                  { label: 'Export', icon: 'upload', run: () => setModal('export') },
-                  { label: 'Keyboard shortcuts', icon: 'keyboard', run: () => setModal('shortcuts') },
-                  { label: 'Appearance', icon: 'settings', run: () => setShowSettings(true) },
+                  ...(readOnly ? [] : [
+                    { group: 'Share', label: 'Share a link', icon: 'share' as IconName, run: () => setModal('share') },
+                    { group: 'Share', label: 'Publish', icon: 'link' as IconName, run: () => setModal('publish') },
+                  ]),
+                  { group: 'Share', label: 'Export', icon: 'upload' as IconName, run: () => setModal('export') },
+                  ...(readOnly ? [] : [viewing
+                    ? { group: 'This phone', label: 'Edit on this phone', icon: 'edit' as IconName, run: () => setEditingOnPhone(true) }
+                    : { group: 'This phone', label: 'Back to viewing', icon: 'eye' as IconName, run: () => setEditingOnPhone(false) }]),
+                  { group: 'This phone', label: 'Appearance', icon: 'settings' as IconName, run: () => setShowSettings(true) },
                 ]}
               />
             )}

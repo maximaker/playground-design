@@ -13,6 +13,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Logo } from './ui/Logo.tsx';
+import { useLayoutMode } from './hooks/useLayout.ts';
 import { Icon } from './ui/Icon.tsx';
 import { Settings } from './ui/Settings.tsx';
 import type { Appearance } from './state/appearance.ts';
@@ -47,6 +48,7 @@ export function Home({ onOpen, appearance, onAppearance, session }: {
   appearance: Appearance;
   onAppearance: (next: Appearance) => void;
 }) {
+  const layout = useLayoutMode();
   const [showSettings, setShowSettings] = useState(false);
   const [docs, setDocs] = useState<DocSummary[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -265,12 +267,12 @@ export function Home({ onOpen, appearance, onAppearance, session }: {
     <div className="home">
       <header className="home-head">
         <div className="home-identity">
-          <h1><Logo size={30} /></h1>
+          <h1><Logo size={30} variant={layout === 'narrow' ? 'mark' : 'full'} /></h1>
           <p>Design a page and put it online — on your own, or with an AI agent helping.</p>
         </div>
         <div className="home-actions">
-          <button className="button" onClick={() => void create()} disabled={creating}>
-            <Icon name="plus" size={14} /> Blank page
+          <button className="button home-new" onClick={() => void create()} disabled={creating}>
+            <Icon name="plus" size={14} /> <span className="home-action-label">Blank page</span>
           </button>
 
           {/*
@@ -281,7 +283,7 @@ export function Home({ onOpen, appearance, onAppearance, session }: {
             */}
           <label className={`button${importing ? ' is-busy' : ''}`}>
             <Icon name="upload" size={14} />
-            {importing ? 'Importing…' : 'Import a bundle'}
+            <span className="home-action-label">{importing ? 'Importing…' : 'Import a bundle'}</span>
             <input
               type="file"
               accept="application/json,.json"

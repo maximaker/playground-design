@@ -3654,3 +3654,68 @@ code { font-family: var(--mono); font-size: 0.92em; }
   .maker { flex: 0 0 72%; scroll-snap-align: start; }
   .style-picker { overflow-x: auto; flex-wrap: nowrap; scrollbar-width: none; }
 }
+
+/* Grouped menu headings, and the phone's bottom sheet. */
+.overflow-scrim { display: none; }
+.overflow-heading {
+  padding: 0.55rem 0.75rem 0.25rem; font-size: 0.7rem; font-weight: 600;
+  letter-spacing: 0.06em; text-transform: uppercase; color: var(--fg-muted);
+}
+.overflow-group + .overflow-group { border-top: 1px solid var(--border); margin-top: 0.25rem; padding-top: 0.15rem; }
+
+@media (max-width: 700px) {
+  /* The top bar: logo, name, one control. The name takes whatever is left. */
+  .topbar { padding: 0 0.5rem 0 0.75rem; gap: 0.5rem; }
+  .topbar .doc-name { width: 0; flex: 1 1 0; font-weight: 600; font-size: 0.95rem; background: transparent; border-color: transparent; }
+  .topbar-more {
+    width: 2.5rem; height: 2.5rem; flex: none; border-radius: 99px;
+    background: var(--bg-raised); border: 1px solid var(--border); color: var(--fg);
+  }
+  .topbar-more.is-active { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+
+  .overflow-scrim {
+    display: block; position: fixed; inset: 0; z-index: 94;
+    background: rgba(0, 0, 0, 0.45); animation: fade-in 160ms ease;
+  }
+  .overflow-menu {
+    position: fixed; top: auto; left: 0.5rem; right: 0.5rem;
+    bottom: calc(0.5rem + env(safe-area-inset-bottom, 0px));
+    min-width: 0; max-height: 75vh; overflow-y: auto;
+    padding: 0.5rem; border-radius: 1.25rem;
+    animation: sheet-up 200ms cubic-bezier(.2, .8, .2, 1);
+  }
+  .overflow-menu .context-item { min-height: 3rem; font-size: 1rem; border-radius: 0.75rem; }
+  .overflow-menu .context-item span { gap: 0.85rem; }
+}
+@keyframes sheet-up { from { transform: translateY(1.5rem); opacity: 0; } }
+
+/* Dashboard header on a phone: one row — mark, then new, import, settings, you. */
+@media (max-width: 700px) {
+  .home .home-head { display: flex; flex-direction: row; align-items: center; justify-content: space-between; gap: 0.5rem; }
+  .home .home-identity { flex-direction: row; }
+  .home .home-identity h1 { margin: 0; display: flex; }
+  .home .library-nav { align-self: stretch; width: auto; }
+  .home .library-nav > .library-row { width: auto; }
+  .home .home-identity h1 svg { height: 22px; width: auto; }
+  .home .home-actions { flex-wrap: nowrap; gap: 0.35rem; }
+  .home .home-actions .button { height: 2.5rem; padding: 0 0.8rem; }
+  .home .home-actions label.button .home-action-label { display: none; }
+  .home .home-actions label.button { width: 2.5rem; padding: 0; justify-content: center; }
+  .home .home-new { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+  .home .home-new .home-action-label { font-size: 0; }
+  .home .home-new .home-action-label::after { content: 'New'; font-size: 0.9rem; }
+
+  /* The chip row says which collection this is; the big title repeats it. */
+  .home .library-title h2 { display: none; }
+  .home .library-nav { background: transparent; border: 0; box-shadow: none; padding: 0; }
+  .home .library-nav .library-row, .home .library-nav .library-row-main {
+    height: 2.25rem; padding: 0 0.85rem; border-radius: 99px; gap: 0.4rem;
+    background: var(--bg-raised); border: 1px solid var(--border); font-size: 0.85rem;
+  }
+  .home .library-nav .library-row.is-project { padding: 0; border: 0; background: none; }
+  .home .library-nav .library-row.is-active, .home .library-nav .library-row.is-active .library-row-main {
+    background: var(--fg); color: var(--bg); border-color: var(--fg);
+  }
+  .home .library-nav .library-row.is-active .dim { color: inherit; opacity: 0.7; }
+}
+.home-card-face:has(.home-card-shot.is-loaded) .home-card-initial { opacity: 0; }
