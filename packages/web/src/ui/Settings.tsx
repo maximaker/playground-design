@@ -38,9 +38,9 @@ function step(scale: number, direction: 1 | -1): number {
 }
 
 const DENSITIES = [
-  { value: 12, label: 'Compact' },
-  { value: 13, label: 'Default' },
-  { value: 15, label: 'Roomy' },
+  { value: 13, label: 'Compact' },
+  { value: 14, label: 'Default' },
+  { value: 16, label: 'Roomy' },
 ];
 
 export function Settings({ appearance, onChange, onClose }: {

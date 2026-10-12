@@ -18,7 +18,8 @@ export interface Appearance {
 
 const KEY = 'playground.appearance';
 
-export const DEFAULT_APPEARANCE: Appearance = { theme: 'system', scale: 1, base: 13 };
+// 14px matches the body/UI size of every heymax app; density and scale stay the viewer's.
+export const DEFAULT_APPEARANCE: Appearance = { theme: 'system', scale: 1, base: 14 };
 
 export const SCALE_RANGE = { min: 0.85, max: 1.6, step: 0.05 };
 
@@ -30,7 +31,7 @@ export function loadAppearance(): Appearance {
     return {
       theme: parsed.theme === 'dark' || parsed.theme === 'light' ? parsed.theme : 'system',
       scale: clamp(Number(parsed.scale) || 1, SCALE_RANGE.min, SCALE_RANGE.max),
-      base: clamp(Number(parsed.base) || 13, 11, 18),
+      base: clamp(Number(parsed.base) || 14, 11, 18),
     };
   } catch {
     // Private mode, blocked storage, corrupt value — the defaults are fine.

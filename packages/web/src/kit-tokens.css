@@ -55,6 +55,23 @@
   --purple-600: #6c3fd6;
   --purple-800: #36196e;
 
+  /* type scale — the same in every app */
+  --text-root: 16px;
+  --text-ui: 14px;        /* body and UI */
+  --leading-ui: 1.5;
+  --text-read: 16px;      /* reading text */
+  --leading-read: 1.7;
+  --text-title: 30px;     /* page title, 600, -0.02em */
+  --tracking-title: -0.02em;
+  --text-section: 17px;   /* section title, 600 */
+  --text-label: 12px;     /* card label, 600, uppercase */
+  --tracking-label: 0.06em;
+  --text-mono-max: 14px;  /* JetBrains Mono never above this */
+
+  /* the family top bar */
+  --topbar-height: 56px;
+  --topbar-mark: 28px;
+
   /* shape and type */
   --radius-control: 8px;
   --radius-card: 14px;
@@ -131,3 +148,9 @@
   --accent-fill: var(--accent-300);
   --accent-fill-text: #16181d;
 }
+
+/* Shared type roles, for apps that want the classes rather than the values. */
+.hm-page-title { font-size: var(--text-title); font-weight: 600; letter-spacing: var(--tracking-title); line-height: 1.2; }
+.hm-section-title { font-size: var(--text-section); font-weight: 600; letter-spacing: 0; line-height: 1.3; }
+.hm-label { font-size: var(--text-label); font-weight: 600; letter-spacing: var(--tracking-label); text-transform: uppercase; }
+.hm-reading { font-size: var(--text-read); line-height: var(--leading-read); }

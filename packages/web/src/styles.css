@@ -9,7 +9,7 @@
 
 :root {
   /* UI scale. --ui-base is the density preference; --ui-scale is accessibility. */
-  --ui-base: 13px;
+  --ui-base: 14px;
   --ui-scale: 1;
 
   /* The heymax family: Inter only, JetBrains Mono for small figures. */
@@ -43,7 +43,7 @@
 
   --rail: 19rem;
   --rail-right: 21rem;
-  --topbar: 3.4rem;
+  --topbar: 56px; /* the family bar height, fixed in px */
   --row: 2.1rem;
 
   --transition: 120ms cubic-bezier(0.2, 0, 0, 1);
@@ -1263,7 +1263,7 @@ code { font-family: var(--mono); font-size: 0.92em; }
    this register — large type, wide gutters, white surfaces on a grey ground. */
 .home {
   max-width: 86rem; margin: 0 auto; padding: 3rem var(--s6) 4rem;
-  font-size: 1.04rem;
+  font-size: 1rem;
   display: grid; grid-template-columns: repeat(12, minmax(0, 1fr));
   column-gap: var(--s4); row-gap: 2.4rem;
   align-content: start;
@@ -3783,3 +3783,12 @@ code { font-family: var(--mono); font-size: 0.92em; }
   }
   .home .library-docs { grid-column: 4 / -1; }
 }
+
+/* The family bar geometry, in px so the viewer's UI scale cannot change it:
+   56px, the 28px mark, the name in Inter 15/600 — identical in every app. */
+.topbar { padding: 0 20px; gap: 10px; }
+.topbar .logo-mark { width: 28px; height: 28px; }
+.topbar .logotype { gap: 10px; }
+.topbar .logotype-word { font-size: 15px !important; font-weight: 600; letter-spacing: 0; line-height: 1; }
+.family-topbar .logo-mark { width: 28px; height: 28px; }
+.family-search { height: 36px; border-radius: 8px; font-size: 14px; }
