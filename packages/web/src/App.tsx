@@ -37,7 +37,7 @@ import { Settings } from './ui/Settings.tsx';
 import { Landing } from './Landing.tsx';
 import { Join } from './Join.tsx';
 import { AccountMenu } from './ui/AccountMenu.tsx';
-import { useSession } from './state/session.ts';
+import { goToSignIn, useSession } from './state/session.ts';
 import { OverflowMenu } from './ui/OverflowMenu.tsx';
 import { CommandPalette } from './ui/CommandPalette.tsx';
 import { AgentChangeBar } from './ui/AgentChangeBar.tsx';
@@ -94,6 +94,13 @@ export function App() {
     return watchSystemTheme(() => applyAppearance(appearance));
   }, [appearance]);
 
+  // Under single sign-on there is no sign-in screen here: anyone signed out is
+  // sent to the identity service, except on a share link, which works signed out.
+  const toIdentity = !session.loading && !session.user && !!session.idUrl && source?.kind !== 'share';
+  useEffect(() => {
+    if (toIdentity) goToSignIn(session.idUrl!);
+  }, [toIdentity, session.idUrl]);
+
   useEffect(() => {
     const onPop = () => { setSource(sourceFromLocation()); setJoining(joinFromLocation()); };
     window.addEventListener('popstate', onPop);
@@ -102,7 +109,7 @@ export function App() {
 
   // A share link is the one route that works signed out: the token is the
   // credential, and sending a reviewer to a sign-in form would defeat the link.
-  if (session.loading && source?.kind !== 'share') {
+  if ((session.loading || toIdentity) && source?.kind !== 'share') {
     return <div className="boot" aria-busy>Loading…</div>;
   }
 

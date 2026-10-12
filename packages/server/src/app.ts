@@ -52,9 +52,10 @@ import { persistence, type MemberRole } from './persistence.ts';
 import {
   AuthError, SESSION_COOKIE, atLeast, authenticate, createAccount, documentsFor, endSession, grant,
   acceptInvite, createInvite, hasAccounts, invitesFor, membersOf, publicUser, readInvite,
-  revokeInvite, revokeMembership, roleFor, sessionUser, signupCodeRequired, startSession,
+  revokeInvite, revokeMembership, roleFor, signupCodeRequired, startSession,
 } from './accounts.ts';
 import { DB_PATH } from './persistence-sqlite.ts';
+import { idUrl, userFromCookies } from './sso.ts';
 import { isOnMountedVolume } from './volume.ts';
 import { dirname } from 'node:path';
 
@@ -69,6 +70,25 @@ const PUBLIC_URL =
 const SERVE_CLIENT = !process.env.VERCEL;
 
 const app = new Hono();
+
+/**
+ * Old addresses (REDIRECT_HOSTS, comma-separated) send page loads on to
+ * PLAYGROUND_PUBLIC_URL, path and query kept so shared links still land. The
+ * shared sign-in cookie only exists under .heymax.im, so a page opened anywhere
+ * else could never be signed in. API, MCP and WebSocket calls are left alone:
+ * clients configured with the old address keep working.
+ */
+const REDIRECT_HOSTS = (process.env.REDIRECT_HOSTS ?? '').split(',').map((h) => h.trim().toLowerCase()).filter(Boolean);
+if (REDIRECT_HOSTS.length) {
+  app.use('*', async (c, next) => {
+    const host = (c.req.header('x-forwarded-host') ?? c.req.header('host') ?? '').split(':')[0]!.toLowerCase();
+    const isPage = (c.req.method === 'GET' || c.req.method === 'HEAD') && !/^\/(api|mcp|ws)(\/|$)/.test(c.req.path)
+      && c.req.header('upgrade') === undefined;
+    if (!REDIRECT_HOSTS.includes(host) || !isPage) return next();
+    const url = new URL(c.req.url);
+    return c.redirect(`${PUBLIC_URL}${url.pathname}${url.search}`, 301);
+  });
+}
 
 /**
  * Assets are fetched by code-component sandboxes, which have an opaque origin,
@@ -164,7 +184,7 @@ const OWNER_ONLY: { method: string; pattern: RegExp }[] = [
  */
 api.use('*', async (c, next) => {
   const path = c.req.path.replace(/^\/api/, '') || '/';
-  const user = await sessionUser(getCookie(c, SESSION_COOKIE));
+  const user = await userFromCookies(c.req.header('cookie'));
   c.set('user', user);
   c.set('role', null);
 
@@ -245,6 +265,8 @@ api.get('/health', async (c) => {
 api.get('/auth/state', async (c) => c.json({
   hasAccounts: await hasAccounts(),
   signupCodeRequired: signupCodeRequired(),
+  // Set when sign-in happens at the family's identity service instead of here.
+  idUrl,
   user: c.get('user') ? publicUser(c.get('user')!) : null,
 }));
 

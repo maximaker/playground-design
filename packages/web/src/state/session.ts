@@ -27,6 +27,8 @@ export interface SessionState {
   signupCodeRequired: boolean;
   /** Set when the server cannot be reached at all, so the UI can say so. */
   error: string | null;
+  /** The family's identity service, when sign-in happens there instead of here. */
+  idUrl: string | null;
 }
 
 export async function fetchSession(): Promise<Omit<SessionState, 'loading'>> {
@@ -34,19 +36,19 @@ export async function fetchSession(): Promise<Omit<SessionState, 'loading'>> {
     const res = await fetch('/api/auth/state', { credentials: 'same-origin' });
     if (!res.ok) throw new Error(`${res.status}`);
     const body = (await res.json()) as
-      { user: Account | null; hasAccounts: boolean; signupCodeRequired?: boolean };
+      { user: Account | null; hasAccounts: boolean; signupCodeRequired?: boolean; idUrl?: string | null };
     return {
       user: body.user, hasAccounts: body.hasAccounts,
-      signupCodeRequired: !!body.signupCodeRequired, error: null,
+      signupCodeRequired: !!body.signupCodeRequired, error: null, idUrl: body.idUrl ?? null,
     };
   } catch {
-    return { user: null, hasAccounts: true, signupCodeRequired: false, error: 'Could not reach the server.' };
+    return { user: null, hasAccounts: true, signupCodeRequired: false, error: 'Could not reach the server.', idUrl: null };
   }
 }
 
 export function useSession(): SessionState & { refresh: () => Promise<void> } {
   const [state, setState] = useState<SessionState>({
-    loading: true, user: null, hasAccounts: true, signupCodeRequired: false, error: null,
+    loading: true, user: null, hasAccounts: true, signupCodeRequired: false, error: null, idUrl: null,
   });
 
   const refresh = async () => {
@@ -84,6 +86,18 @@ export async function signUp(
 
 export async function signOut(): Promise<void> {
   await fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' });
+  // Under single sign-on, signing out here means signing out of every app.
+  const { idUrl } = await fetchSession();
+  if (idUrl) {
+    const back = `${idUrl}/sign-in?next=${encodeURIComponent(location.origin + '/')}`;
+    location.href = `${idUrl}/sign-out?next=${encodeURIComponent(back)}`;
+    await new Promise(() => {});
+  }
+}
+
+/** Sends the browser to the identity service, to come back here signed in. */
+export function goToSignIn(idUrl: string): void {
+  location.replace(`${idUrl}/sign-in?next=${encodeURIComponent(location.href)}`);
 }
 
 async function post(url: string, body: unknown): Promise<Account> {

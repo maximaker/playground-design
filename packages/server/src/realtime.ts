@@ -14,7 +14,8 @@ import type { Server } from 'node:http';
 import type { OpEnvelope } from '@playground/shared';
 import { applyOps, ensureLoaded, getDocument, subscribe, StoreError, autoSnapshotIfStale } from './store.ts';
 import { redactForViewer, resolveShare, viewerMayApply } from './shares.ts';
-import { SESSION_COOKIE, atLeast, cookieValue, roleFor, sessionUser } from './accounts.ts';
+import { atLeast, roleFor } from './accounts.ts';
+import { userFromCookies } from './sso.ts';
 import { persistence } from './persistence.ts';
 
 export interface Peer {
@@ -82,7 +83,7 @@ export function attachRealtime(server: Server): WebSocketServer {
             }
 
             const docId = String(msg.docId ?? '');
-            const user = await sessionUser(cookieValue(cookie, SESSION_COOKIE));
+            const user = await userFromCookies(cookie);
             if (!user) {
               return send(ws, { type: 'error', code: 'unauthenticated', message: 'Sign in to open this document.' });
             }
