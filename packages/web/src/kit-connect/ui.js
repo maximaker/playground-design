@@ -99,15 +99,16 @@ class HmLinkedWork extends HTMLElement {
   static observedAttributes = ['uri', 'item-title'];
   attributeChangedCallback() { if (this.isConnected) this.load(); }
   connectedCallback() { this.load(); }
-  get base() { return this.getAttribute('base') || '/api/connect'; }
-  get marks() { return this.getAttribute('marks') || '/kit/marks'; }
+  // Not `base`/`marks`: React 19 would try to assign a getter-only property.
+  get apiBase() { return this.getAttribute('base') || '/api/connect'; }
+  get marksPath() { return this.getAttribute('marks') || '/kit/marks'; }
 
   async load() {
     const uri = this.getAttribute('uri');
     if (!uri) return;
     this.classList.add('hm-cx', 'hm-cx-panel');
     try {
-      const { links } = await call(this.base, `/links?uri=${encodeURIComponent(uri)}`);
+      const { links } = await call(this.apiBase, `/links?uri=${encodeURIComponent(uri)}`);
       this.links = links || [];
       this.error = null;
     } catch (e) {
@@ -123,13 +124,13 @@ class HmLinkedWork extends HTMLElement {
     const uri = this.getAttribute('uri');
     const me = { uri, title: this.getAttribute('item-title') || '', url: this.getAttribute('item-url') || location.href };
     try {
-      await call(this.base, '/links', { method: 'POST', body: JSON.stringify({ from: me, to: { uri: other.uri, title: other.title, url: other.url }, kind }) });
+      await call(this.apiBase, '/links', { method: 'POST', body: JSON.stringify({ from: me, to: { uri: other.uri, title: other.title, url: other.url }, kind }) });
     } catch (e) { this.error = e.message; }
     this.load();
   }
 
   async remove(id) {
-    try { await call(this.base, `/links/${encodeURIComponent(id)}`, { method: 'DELETE' }); } catch (e) { this.error = e.message; }
+    try { await call(this.apiBase, `/links/${encodeURIComponent(id)}`, { method: 'DELETE' }); } catch (e) { this.error = e.message; }
     this.load();
   }
 
@@ -141,11 +142,11 @@ class HmLinkedWork extends HTMLElement {
     this.innerHTML = `
       <div class="hm-cx__head"><span class="hm-cx__label">Linked work</span></div>
       ${self !== 'studio' ? `<div class="hm-cx__tags">
-        ${tags.map((l) => `<span class="hm-cx__tag">${mark(this.marks, 'studio')}<a href="${esc(safeHref(l.url))}">${esc(l.title || l.type)}</a>${x(l)}</span>`).join('')}
+        ${tags.map((l) => `<span class="hm-cx__tag">${mark(this.marksPath, 'studio')}<a href="${esc(safeHref(l.url))}">${esc(l.title || l.type)}</a>${x(l)}</span>`).join('')}
         <button class="hm-cx__add" type="button" data-pick="tag">${tags.length ? '+ Tag' : '+ Client or engagement'}</button>
       </div>` : ''}
       ${work.length
-        ? `<div class="hm-cx__list">${work.map((l) => row(this.marks, l, x(l))).join('')}</div>`
+        ? `<div class="hm-cx__list">${work.map((l) => row(this.marksPath, l, x(l))).join('')}</div>`
         : `<p class="hm-cx__empty">${self === 'studio' ? 'Notes, artifacts and designs for this engagement show here.' : 'Nothing linked yet.'}</p>`}
       ${this.error ? `<p class="hm-cx__error">${esc(this.error)}</p>` : ''}
       <button class="hm-cx__add" type="button" data-pick="link">+ Link work</button>
@@ -161,8 +162,8 @@ class HmLinkedWork extends HTMLElement {
     const have = new Set(this.links.map((l) => l.uri));
     slot.replaceChildren(
       picker({
-        base: this.base,
-        marks: this.marks,
+        base: this.apiBase,
+        marks: this.marksPath,
         apps: what === 'tag' ? ['studio'] : undefined,
         placeholder: what === 'tag' ? 'Find a client or engagement…' : 'Find a page, artifact, design…',
         exclude: (r) => r.uri === me || have.has(r.uri) || (what === 'tag' && !['client', 'engagement'].includes(r.type)),

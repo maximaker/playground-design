@@ -46,10 +46,10 @@
 .hm-cx__tag a:hover { text-decoration: underline; }
 
 .hm-cx__add {
-  margin-top: 10px; border: 0; background: none; padding: 4px 0; cursor: pointer;
-  font: inherit; font-size: 12.5px; color: var(--accent-text, var(--ink-soft, #4a4e55));
+  display: block; margin-top: 10px; border: 0; background: none; padding: 4px 0; cursor: pointer;
+  font: inherit; font-size: 12.5px; font-weight: 500; color: var(--ink-soft, #4a4e55); text-align: left;
 }
-.hm-cx__tags .hm-cx__add { margin-top: 0; }
+.hm-cx__tags .hm-cx__add { display: inline-block; margin-top: 0; }
 .hm-cx__add:hover { color: var(--ink, #16181d); text-decoration: underline; }
 .hm-cx__empty { margin: 8px 0 0; font-size: 12.5px; color: var(--ink-mute, #6b6f76); }
 .hm-cx__error { margin: 8px 0 0; font-size: 12.5px; color: #b42318; }
