@@ -143,7 +143,7 @@ class HmLinkedWork extends HTMLElement {
       <div class="hm-cx__head"><span class="hm-cx__label">Linked work</span></div>
       ${self !== 'studio' ? `<div class="hm-cx__tags">
         ${tags.map((l) => `<span class="hm-cx__tag">${mark(this.marksPath, 'studio')}<a href="${esc(safeHref(l.url))}">${esc(l.title || l.type)}</a>${x(l)}</span>`).join('')}
-        <button class="hm-cx__add" type="button" data-pick="tag">${tags.length ? '+ Tag' : '+ Client or engagement'}</button>
+        <button class="hm-cx__add" type="button" data-pick="tag">${tags.length ? '+ Tag' : '+ Engagement'}</button>
       </div>` : ''}
       ${work.length
         ? `<div class="hm-cx__list">${work.map((l) => row(this.marksPath, l, x(l))).join('')}</div>`
@@ -165,9 +165,10 @@ class HmLinkedWork extends HTMLElement {
         base: this.apiBase,
         marks: this.marksPath,
         apps: what === 'tag' ? ['studio'] : undefined,
-        placeholder: what === 'tag' ? 'Find a client or engagement…' : 'Find a page, artifact, design…',
-        exclude: (r) => r.uri === me || have.has(r.uri) || (what === 'tag' && !['client', 'engagement'].includes(r.type)),
-        onPick: (it) => this.add(it, what === 'tag' ? 'for' : 'relates'),
+        placeholder: what === 'tag' ? 'Find an engagement…' : 'Find a page, artifact, design…',
+        exclude: (r) => r.uri === me || have.has(r.uri) || (what === 'tag' && r.type !== 'engagement'),
+        // A tag names the engagement with its client in front: the client comes from the engagement.
+        onPick: (it) => this.add(what === 'tag' ? { ...it, title: `${(it.subtitle || '').split(' · ')[0]} · ${it.title}`.replace(/^ · /, '') } : it, what === 'tag' ? 'for' : 'relates'),
         onClose: () => slot.replaceChildren(),
       }),
     );

@@ -15,6 +15,9 @@ delete process.env.CONNECT_ENABLED;
 delete process.env.ID_URL;
 
 const { app } = await import('./app.ts');
+// sso.ts read ID_URL at import, so accounts stay local; the connect gate reads
+// it per request, so setting it now opens the browser-facing routes.
+process.env.ID_URL = 'http://id.example.test';
 
 let server: ReturnType<typeof serve>;
 let base: string;
@@ -47,6 +50,19 @@ after(async () => {
 test('every connect route 404s while CONNECT_ENABLED is off', async () => {
   for (const path of ['/api/connect/status', '/api/connect/search?q=a', '/api/connect/everywhere?q=a', '/api/connect/links?uri=x']) {
     assert.equal((await get(path, { cookie })).status, 404, path);
+  }
+});
+
+test('without SSO only server-to-server routes answer', async () => {
+  process.env.CONNECT_ENABLED = 'true';
+  delete process.env.ID_URL;
+  try {
+    for (const path of ['/api/connect/status', '/api/connect/everywhere?q=a', '/api/connect/unfurl?ref=x', '/api/connect/links?uri=x']) {
+      assert.equal((await get(path, { cookie })).status, 404, path);
+    }
+    assert.equal((await get('/api/connect/search?q=a', { authorization: 'Bearer test-connect-token' })).status, 200);
+  } finally {
+    process.env.ID_URL = 'http://id.example.test';
   }
 });
 

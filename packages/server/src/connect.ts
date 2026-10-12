@@ -115,6 +115,9 @@ export const connect = new Hono<{ Variables: Vars }>();
 connect.use('*', async (c, next) => {
   const cfg = connectConfig();
   if (!cfg.enabled) return c.json({ error: 'Not found' }, 404);
+  // Browser-facing routes need SSO (Max, 2026-10-12): without ID_URL only
+  // server-to-server search/item answer, so the panel and palette stay hidden.
+  if (!process.env.ID_URL && /^\/(status|everywhere|unfurl|links)(\/|$)/.test(c.req.path.replace(/^.*\/connect/, ''))) return c.json({ error: 'Not found' }, 404);
   let user = await userFromCookies(c.req.header('cookie'));
   if (!user && bearerOk(c.req.header('authorization'), cfg.token)) user = await ownerUser();
   if (!user) return c.json({ error: 'Sign in to continue.', needsAuth: true }, 401);
