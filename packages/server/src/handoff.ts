@@ -157,10 +157,18 @@ export function handoffHtml(doc: CanvasDocument, handoff: Handoff, base: string)
   // Only tokens the design really uses: a fresh document carries a starter "brand" nobody chose.
   const styleText = Object.values(doc.nodes).map((n) => Object.values(n.styles).join(';')).join(';');
   const used = doc.tokens.filter((t) => t.group === 'color' && styleText.includes(`var(${cssVarName(t.name)})`));
-  const accentToken = used.find((t) => /(^|\.)(brand|accent|primary)$/.test(t.name))
-    ?? used.find((t) => /brand|accent|primary|lime/.test(t.name));
-  const accent = accentToken?.values.default ?? '';
-  const safeAccent = /^#[0-9a-f]{3,8}$/i.test(accent) ? accent : '';
+  // The accent is the most vivid colour the design leans on, not whichever token is called "brand".
+  const vivid = (hex: string) => {
+    const m = /^#([0-9a-f]{6})$/i.exec(hex); if (!m) return -1;
+    const [r, g, b] = [0, 2, 4].map((k) => parseInt(m[1]!.slice(k, k + 2), 16) / 255) as [number, number, number];
+    const max = Math.max(r, g, b), min = Math.min(r, g, b);
+    return max === 0 ? 0 : (max - min) / max * max;
+  };
+  const uses = (t: { name: string }) => styleText.split(`var(${cssVarName(t.name)})`).length - 1;
+  const safeAccent = used
+    .map((t) => ({ v: t.values.default ?? '', score: vivid(t.values.default ?? '') * Math.log2(1 + uses(t)) }))
+    .filter((x) => x.score > 0.3)
+    .sort((a, b) => b.score - a.score)[0]?.v ?? '';
   const isSheet = (id: NodeId) => getArtboardSize(doc.nodes[id]!).width >= 1000;
 
   const screen = (id: NodeId) => {
