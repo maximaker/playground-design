@@ -3725,3 +3725,10 @@ code { font-family: var(--mono); font-size: 0.92em; }
 .zoom-menu .overflow-menu .context-item { white-space: nowrap; }
 .overflow-menu .context-item { display: flex; justify-content: space-between; align-items: center; gap: 1.5rem; }
 .overflow-hint { margin-left: auto; font: inherit; font-size: 0.75rem; color: var(--fg-muted); background: none; border: 0; padding: 0; }
+
+/* Desktop header: document actions, then More, then you. */
+@media (min-width: 701px) {
+  .topbar > .overflow-anchor { order: 10; }
+  .topbar > .account-menu { order: 11; margin-left: 0.25rem; }
+  .topbar > .panel-toggle:last-child { order: 12; }
+}

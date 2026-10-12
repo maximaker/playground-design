@@ -505,39 +505,36 @@ function Editor({ source, onHome, appearance, onAppearance, session }: {
             )}
           </span>
         ) : (
-          <>
+          /*
+           * Desktop: the header carries what you do to the whole document —
+           * present, share, publish — and one menu for the rest. Import, export,
+           * shortcuts and appearance are reached a few times a session, not a
+           * few times a minute, and as a row of labelled buttons they made the
+           * header the busiest thing on screen.
+           */
+          <span className="overflow-anchor">
             <button
-              className="icon-button"
-              title="Keyboard shortcuts (?)"
-              aria-label="Keyboard shortcuts"
-              onClick={() => setModal('shortcuts')}
-            ><Icon name="keyboard" size={15} /></button>
-
-            <button
-              className="icon-button"
-              title="Appearance"
-              aria-label="Appearance"
-              aria-expanded={showSettings}
-              onClick={() => setShowSettings((v) => !v)}
-            ><Icon name="settings" size={15} /></button>
-
-            {session.user && (
-              <AccountMenu user={session.user} onSignedOut={() => { void session.refresh(); }} />
+              className={`icon-button${showOverflow ? ' is-active' : ''}`}
+              title="More"
+              aria-label="More"
+              aria-haspopup="menu"
+              aria-expanded={showOverflow}
+              onClick={() => setShowOverflow((v) => !v)}
+            ><Icon name="more" size={18} /></button>
+            {showOverflow && (
+              <OverflowMenu
+                onClose={() => setShowOverflow(false)}
+                items={[
+                  ...(readOnly ? [] : [
+                    { label: 'Import a webpage', icon: 'download' as IconName, run: () => setModal('import') },
+                  ]),
+                  { label: 'Export', hint: `${MOD}⇧E`, icon: 'upload' as IconName, run: () => setModal('export') },
+                  { group: 'Help', label: 'Keyboard shortcuts', hint: '?', icon: 'keyboard' as IconName, run: () => setModal('shortcuts') },
+                  { group: 'Help', label: 'Appearance', icon: 'settings' as IconName, run: () => setShowSettings(true) },
+                ]}
+              />
             )}
-
-            <span className="topbar-divider" />
-
-            {!readOnly && (
-              <button className="button" onClick={() => setModal('import')} title="Bring a live webpage onto the canvas">
-                <Icon name="download" size={14} />
-                <span className="button-label">Import</span>
-              </button>
-            )}
-            <button className="button" onClick={() => setModal('export')} title={`Export this design (${MOD}⇧E)`}>
-              <Icon name="upload" size={14} />
-              <span className="button-label">Export</span>
-            </button>
-          </>
+          </span>
         )}
 
         {/* Present is for everyone, including a viewer on a share link: showing
@@ -552,14 +549,17 @@ function Editor({ source, onHome, appearance, onAppearance, session }: {
 
         {!readOnly && !viewing && (
           <>
+            <button
+              className="icon-button topbar-ai"
+              onClick={() => setModal('connect')}
+              title="AI assistant — let an agent such as Claude work on this page"
+              aria-label="AI assistant"
+            ><Icon name="sparkle" size={16} /></button>
             <button className="button" onClick={() => setModal('share')} title="Create a read-only link">
               <Icon name="share" size={14} />
               <span className="button-label">Share</span>
             </button>
-            <button className="button" onClick={() => setModal('connect')} title="Let an AI agent such as Claude work on this page">
-              <Icon name="sparkle" size={14} />
-              <span className="button-label">AI assistant</span>
-            </button>
+
             <button
               className="button primary"
               onClick={() => setModal('publish')}
@@ -577,6 +577,10 @@ function Editor({ source, onHome, appearance, onAppearance, session }: {
           </span>
         )}
 
+
+        {mode !== 'narrow' && session.user && (
+          <AccountMenu user={session.user} onSignedOut={() => { void session.refresh(); }} />
+        )}
 
         {overlay && !viewing && (
           <button
