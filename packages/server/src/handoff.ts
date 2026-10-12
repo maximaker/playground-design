@@ -154,8 +154,11 @@ export function handoffHtml(doc: CanvasDocument, handoff: Handoff, base: string)
   const families = firstBoard ? fontFamiliesIn(doc, firstBoard) : [];
   const fontHref = googleFontsHref(families.slice(0, 2));
   const fontStack = families[0] ? `"${families[0].replace(/"/g, '')}",` : '';
-  const accentToken = doc.tokens.find((t) => t.group === 'color' && /(^|\.)(brand|accent|primary)$/.test(t.name))
-    ?? doc.tokens.find((t) => t.group === 'color' && /brand|accent|primary|lime/.test(t.name));
+  // Only tokens the design really uses: a fresh document carries a starter "brand" nobody chose.
+  const styleText = Object.values(doc.nodes).map((n) => Object.values(n.styles).join(';')).join(';');
+  const used = doc.tokens.filter((t) => t.group === 'color' && styleText.includes(`var(${cssVarName(t.name)})`));
+  const accentToken = used.find((t) => /(^|\.)(brand|accent|primary)$/.test(t.name))
+    ?? used.find((t) => /brand|accent|primary|lime/.test(t.name));
   const accent = accentToken?.values.default ?? '';
   const safeAccent = /^#[0-9a-f]{3,8}$/i.test(accent) ? accent : '';
   const isSheet = (id: NodeId) => getArtboardSize(doc.nodes[id]!).width >= 1000;
