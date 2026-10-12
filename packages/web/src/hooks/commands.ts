@@ -682,3 +682,24 @@ export function jumpToBoardItem(pageId: string, itemId: string): boolean {
   }
   return true;
 }
+
+/**
+ * One frame across the stage's width, its top at the top — how a phone reads a
+ * design: the frame as wide as the screen, scrolled with a finger.
+ */
+export function focusFrame(id: NodeId): void {
+  const doc = getDoc();
+  const node = doc?.nodes[id];
+  const stage = document.querySelector('.stage')?.getBoundingClientRect();
+  if (!node || !stage) return;
+  const pos = getArtboardPosition(node);
+  const w = parsePx(node.styles.width, 1440);
+  const gutter = 12;
+  const zoom = Math.min(2, Math.max(0.02, (stage.width - gutter * 2) / Math.max(1, w)));
+  useCanvas.getState().setViewport({
+    zoom,
+    x: stage.left + gutter - pos.x * zoom,
+    // Room above for the frame's name label.
+    y: stage.top + 36 - pos.y * zoom,
+  });
+}

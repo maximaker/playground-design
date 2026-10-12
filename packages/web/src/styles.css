@@ -3583,3 +3583,74 @@ code { font-family: var(--mono); font-size: 0.92em; }
 .flow-card-facts dd { margin: 2px 0 0; }
 .flow-card-feedback { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--border); }
 .flow-card-feedback ul { margin: 6px 0 0; padding-left: 1.1em; display: flex; flex-direction: column; gap: 6px; }
+
+/* ---------------------------------------------------------------------------
+ * Phone viewer: a reading layout, not a cramped editor.
+ * ------------------------------------------------------------------------- */
+.topbar .button.is-labelled .button-label { display: inline; }
+.topbar .button.is-labelled { padding: 0.4rem 0.85rem; }
+
+.frame-nav {
+  display: flex; align-items: center; gap: 0.15rem;
+  margin: 0 auto calc(var(--s3) + env(safe-area-inset-bottom, 0px));
+  padding: 0.3rem;
+  max-width: calc(100vw - 2 * var(--s3));
+  background: var(--bg-raised); border: 1px solid var(--border);
+  border-radius: 99px; box-shadow: var(--shadow-lg);
+  pointer-events: auto;
+}
+.frame-nav .icon-button { width: 2.75rem; height: 2.75rem; border-radius: 99px; }
+.frame-nav .icon-button.is-accent { background: var(--accent); color: var(--accent-fg, #fff); }
+.frame-nav-name {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  min-width: 0; flex: 1 1 auto; max-width: 11rem; height: 2.75rem; padding: 0 0.5rem;
+  background: none; border: 0; color: var(--fg); line-height: 1.15; cursor: pointer;
+}
+.frame-nav-name strong { font-size: 0.85rem; font-weight: 600; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.frame-nav-name .dim { font-size: 0.72rem; }
+.frame-nav-divider { width: 1px; height: 1.6rem; background: var(--border); margin: 0 0.15rem; }
+
+@media (max-width: 700px) {
+  /* Presenting on a phone: the frame and four big targets. */
+  .present-stage { padding: var(--s2); }
+  .present-bar { gap: 0.2rem; bottom: calc(var(--s3) + env(safe-area-inset-bottom, 0px)); padding: 0.3rem; }
+  .present-bar .icon-button { width: 2.75rem; height: 2.75rem; }
+  .present-title, .present-scaling, .present-zoom { display: none; }
+  .present-page { max-width: 6.5rem; }
+  .present-bar .present-scale-cycle { display: inline-flex; }
+}
+.present-scale-cycle {
+  display: none; align-items: center; height: 2.75rem; padding: 0 0.7rem;
+  border-radius: 99px; border: 0; background: rgba(255, 255, 255, 0.1); color: #fff; font-size: 0.78rem; white-space: nowrap;
+}
+/* Vertical scroll stays native; a horizontal swipe is left for the deck. */
+@media (pointer: coarse) { .present-stage { touch-action: pan-y pinch-zoom; } }
+
+/* Dashboard on a phone: your work first, then the way to start something new. */
+@media (max-width: 700px) {
+  .home { display: flex; flex-direction: column; padding: 1.25rem 1rem 3rem; row-gap: 1.5rem; }
+  .home-head { order: 0; }
+  .home-identity p { display: none; }
+  .home-actions { flex-wrap: wrap; gap: 0.4rem; }
+  .home .library-nav {
+    order: 1; position: static; display: flex; flex-direction: row; overflow-x: auto; scrollbar-width: none;
+    gap: 0.3rem; padding: 0.3rem; border-radius: 99px;
+  }
+  .library-nav::-webkit-scrollbar { display: none; }
+  .library-nav .library-heading, .library-nav .library-empty,
+  .library-nav .library-row .icon-button { display: none; }
+  .library-nav .library-row, .library-nav .library-row-main { flex: none; white-space: nowrap; }
+  .library-docs { order: 2; display: flex; flex-direction: column; }
+  .makers { order: 3; }
+  .home .home-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
+  .home .home-grid .home-card { grid-column: auto; padding: 0.5rem; gap: 0.4rem; }
+  .home .home-grid .home-card-actions { display: none; }
+  .home .home-grid .home-card-body { font-size: 0.85rem; }
+  .maker-grid {
+    display: flex; overflow-x: auto; scroll-snap-type: x mandatory; scrollbar-width: none;
+    margin: 0 -1rem; padding: 0 1rem 0.5rem;
+  }
+  .maker-grid::-webkit-scrollbar { display: none; }
+  .maker { flex: 0 0 72%; scroll-snap-align: start; }
+  .style-picker { overflow-x: auto; flex-wrap: nowrap; scrollbar-width: none; }
+}

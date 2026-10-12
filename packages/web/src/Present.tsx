@@ -40,7 +40,10 @@ export function Present() {
   const setPresent = useCanvas((s) => s.setPresent);
   const doc = getDoc();
 
-  const [scaling, setScaling] = useState<Scaling>('fit');
+  // On a phone a frame is read with a finger: as wide as the screen, scrolled.
+  const [scaling, setScaling] = useState<Scaling>(() => (window.innerWidth <= 700 ? 'fill' : 'fit'));
+  const swipe = useRef<{ x: number; y: number; at: number } | null>(null);
+  const swiped = useRef(false);
   /*
    * A zoom the person set themselves, which overrides the scaling mode until
    * they pick one again. Presenting is not only showing: it is also "hold on,
@@ -93,8 +96,13 @@ export function Present() {
     wake();
     const measure = () => {
       const box = stageRef.current?.getBoundingClientRect();
+      // The stage's padding is not room for the frame: a fit to the outer box
+      // overflows it by exactly that much, cut off on the right.
+      const cs = stageRef.current ? getComputedStyle(stageRef.current) : null;
+      const padX = cs ? parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight) : 0;
+      const padY = cs ? parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom) : 0;
       setSize(box && box.width
-        ? { width: box.width, height: box.height }
+        ? { width: box.width - padX, height: box.height - padY }
         : { width: window.innerWidth, height: window.innerHeight });
     };
     measure();
@@ -225,7 +233,23 @@ export function Present() {
       <div
         className="present-stage"
         ref={stageRef}
+        // A horizontal swipe moves through the deck; a vertical one scrolls the frame.
+        onPointerDown={(e) => {
+          if (e.pointerType !== 'mouse') swipe.current = { x: e.clientX, y: e.clientY, at: Date.now() };
+        }}
+        onPointerUp={(e) => {
+          const start = swipe.current;
+          swipe.current = null;
+          if (!start) return;
+          const dx = e.clientX - start.x, dy = e.clientY - start.y;
+          if (Math.abs(dx) > 48 && Math.abs(dx) > Math.abs(dy) * 1.5 && Date.now() - start.at < 700) {
+            swiped.current = true;
+            wake();
+            go(index + (dx < 0 ? 1 : -1));
+          }
+        }}
         onClick={(e) => {
+          if (swiped.current) { swiped.current = false; return; }
           // A click advances, the way it does in every presentation — unless
           // comments are on, where a click is where the comment goes.
           if (showComments) return;
@@ -301,6 +325,16 @@ export function Present() {
             >{s.label}</button>
           ))}
         </div>
+
+        <button
+          className="present-scale-cycle"
+          onClick={() => {
+            const order: Scaling[] = ['fill', 'fit', 'actual'];
+            setScaling(order[(order.indexOf(scaling) + 1) % order.length]!);
+            setCustom(null);
+          }}
+          aria-label="Change scaling"
+        >{SCALING.find((x) => x.value === scaling)?.label}</button>
 
         {custom !== null && (
           <button

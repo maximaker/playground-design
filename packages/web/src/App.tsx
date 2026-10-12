@@ -21,6 +21,7 @@ import { Share } from './panels/Share.tsx';
 import { PublishDialog } from './panels/Publish.tsx';
 import { FirstRunTips } from './ui/FirstRunTips.tsx';
 import { Present } from './Present.tsx';
+import { FrameNav } from './ui/FrameNav.tsx';
 import { artboardOf } from '@playground/shared';
 import { Export } from './panels/Export.tsx';
 import { Import } from './panels/Import.tsx';
@@ -341,13 +342,32 @@ function Editor({ source, onHome, appearance, onAppearance, session }: {
   useClipboard();
 
   const readOnly = source.kind === 'share';
+
+  /*
+   * On a phone the editor opens as a viewer. Most of what happens there is
+   * looking — a link from a colleague, a check between meetings, a screen held
+   * up across a table — and the drawing tools are both noise and easy to set off
+   * with a thumb. Editing is one tap away and remembered.
+   */
+  const [phoneEditing, setPhoneEditing] = useState(() => {
+    try { return localStorage.getItem('playground.phoneEdit') === '1'; } catch { return false; }
+  });
+  const viewing = mode === 'narrow' && (readOnly || !phoneEditing);
+  const setEditingOnPhone = (on: boolean) => {
+    setPhoneEditing(on);
+    try { localStorage.setItem('playground.phoneEdit', on ? '1' : '0'); } catch { /* private mode */ }
+  };
+  useEffect(() => {
+    useCanvas.getState().setReadOnly(readOnly || viewing);
+    if (viewing) useCanvas.getState().select([]);
+  }, [readOnly, viewing]);
   // Subscribed to the depths rather than the arrays, so a new entry only
   // re-renders the header when it changes whether the buttons are usable.
   const canUndo = useCanvas((s) => s.undoStack.length > 0);
   const canRedo = useCanvas((s) => s.redoStack.length > 0);
 
   useEffect(() => {
-    useCanvas.getState().setReadOnly(readOnly);
+    useCanvas.getState().setReadOnly(readOnly || viewing);
     const conn = connectDocument(source);
     return () => conn.close();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -396,12 +416,12 @@ function Editor({ source, onHome, appearance, onAppearance, session }: {
           </span>
         )}
 
-        <button
+        {!viewing && <button
           className="icon-button"
           title={`Search and commands (${MOD}K)`}
           aria-label="Search and commands"
           onClick={() => setShowPalette(true)}
-        ><Icon name="search" size={15} /></button>
+        ><Icon name="search" size={15} /></button>}
 
         {/*
           * Undo and redo are in the toolbar with the tools now — they act on the
@@ -411,7 +431,7 @@ function Editor({ source, onHome, appearance, onAppearance, session }: {
           * them back in the topbar there overflowed it.
           */}
 
-        {overlay && (
+        {overlay && !viewing && (
           <button
             className={`icon-button panel-toggle${openPanel === 'left' ? ' is-active' : ''}`}
             title="Layers, components and tokens"
@@ -424,7 +444,7 @@ function Editor({ source, onHome, appearance, onAppearance, session }: {
         <input
           className="doc-name"
           aria-label="Document name"
-          readOnly={readOnly}
+          readOnly={readOnly || viewing}
           key={`${doc.id}-${version}`}
           defaultValue={doc.name}
           onBlur={(e) => {
@@ -460,13 +480,28 @@ function Editor({ source, onHome, appearance, onAppearance, session }: {
               <OverflowMenu
                 onClose={() => setShowOverflow(false)}
                 items={[
-                  ...(readOnly ? [] : [
+                  ...(viewing ? [
+                    { label: 'Pages', icon: 'page' as IconName, run: () => { setLeftTab('pages'); setOpenPanel('left'); } },
+                    { label: 'Comments', icon: 'comment' as IconName, run: () => { setRightTab('comments'); setOpenPanel('right'); } },
+                    { label: 'Spec', icon: 'ruler' as IconName, run: () => { setRightTab('spec'); setOpenPanel('right'); } },
+                    ...(readOnly ? [] : [
+                      { label: 'Edit on this phone', icon: 'edit' as IconName, run: () => setEditingOnPhone(true) },
+                    ]),
+                  ] : []),
+                  ...(mode === 'narrow' && !readOnly && !viewing ? [
+                    { label: 'Back to viewing', icon: 'eye' as IconName, run: () => setEditingOnPhone(false) },
+                  ] : []),
+                  ...(readOnly || viewing ? [] : [
                     { label: 'Undo', icon: 'undo' as IconName, run: () => useCanvas.getState().undo(), disabled: !canUndo },
                     { label: 'Redo', icon: 'redo' as IconName, run: () => useCanvas.getState().redo(), disabled: !canRedo },
                     { label: 'Import a webpage', icon: 'download' as IconName, run: () => setModal('import') },
                     { label: 'Share a link', icon: 'share' as IconName, run: () => setModal('share') },
                     { label: 'Publish', icon: 'link' as IconName, run: () => setModal('publish') },
                   ]),
+                  ...(viewing && !readOnly ? [
+                    { label: 'Share a link', icon: 'share' as IconName, run: () => setModal('share') },
+                    { label: 'Publish', icon: 'link' as IconName, run: () => setModal('publish') },
+                  ] : []),
                   { label: 'Export', icon: 'upload', run: () => setModal('export') },
                   { label: 'Keyboard shortcuts', icon: 'keyboard', run: () => setModal('shortcuts') },
                   { label: 'Appearance', icon: 'settings', run: () => setShowSettings(true) },
@@ -512,12 +547,15 @@ function Editor({ source, onHome, appearance, onAppearance, session }: {
 
         {/* Present is for everyone, including a viewer on a share link: showing
             the work is most of what a link is for. */}
-        <button className="button" onClick={startPresenting} title="Present this page (P)">
-          <Icon name="play" size={14} />
-          <span className="button-label">Present</span>
-        </button>
+        {/* On the phone viewer Present lives in the frame bar, under the thumb. */}
+        {!viewing && (
+          <button className="button" onClick={startPresenting} title="Present this page (P)">
+            <Icon name="play" size={14} />
+            <span className="button-label">Present</span>
+          </button>
+        )}
 
-        {!readOnly && (
+        {!readOnly && !viewing && (
           <>
             <button className="button" onClick={() => setModal('share')} title="Create a read-only link">
               <Icon name="share" size={14} />
@@ -538,14 +576,14 @@ function Editor({ source, onHome, appearance, onAppearance, session }: {
           </>
         )}
 
-        {readOnly && (
+        {readOnly && !viewing && (
           <span className="view-badge" title="You are looking at a shared link. Nothing you do changes the document.">
             <Icon name="eye" size={13} /> View only
           </span>
         )}
 
 
-        {overlay && (
+        {overlay && !viewing && (
           <button
             className={`icon-button panel-toggle${openPanel === 'right' ? ' is-active' : ''}`}
             title="Design, spec, comments and review"
@@ -645,7 +683,7 @@ function Editor({ source, onHome, appearance, onAppearance, session }: {
 
         <main className="stage">
           <Canvas onContextMenu={setContextMenu} />
-          {!readOnly && <FirstRunTips />}
+          {!readOnly && !viewing && <FirstRunTips />}
 
           {/*
             * One stack along the bottom, rather than three things each pinned at
@@ -653,11 +691,15 @@ function Editor({ source, onHome, appearance, onAppearance, session }: {
             * a toolbar positioned a fixed distance above it ends up underneath.
             */}
           <div className="stage-bottom">
-            <AgentChangeBar />
-            <Toolbar compact={mode === 'narrow'} />
-            {/* History is a record of what has been done to the document, not
-                part of what the document is, so it is not in a rail. */}
-            <HistoryBar />
+            {viewing ? <FrameNav /> : (
+              <>
+                <AgentChangeBar />
+                <Toolbar compact={mode === 'narrow'} />
+                {/* History is a record of what has been done to the document, not
+                    part of what the document is, so it is not in a rail. */}
+                <HistoryBar />
+              </>
+            )}
           </div>
         </main>
 
