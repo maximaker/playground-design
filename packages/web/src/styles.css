@@ -3771,3 +3771,15 @@ code { font-family: var(--mono); font-size: 0.92em; }
 .home-card-face, [data-theme='dark'] .home-card-face {
   background: var(--bg); color: var(--fg-muted); border: 1px solid var(--border);
 }
+
+/* Desktop: the project rail becomes the page's left sidebar, beside the
+   starters as well as the documents (PG 01 Home). Tablet and phone keep their
+   own rules above, where the rail goes full width or turns into chips. */
+@media (min-width: 1025px) {
+  .home > * { grid-column: 4 / -1; }
+  .home .library-nav {
+    grid-column: 1 / span 3; grid-row: 1 / span 8;
+    top: calc(56px + var(--s4));
+  }
+  .home .library-docs { grid-column: 4 / -1; }
+}
