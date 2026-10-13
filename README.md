@@ -607,6 +607,13 @@ Coding agent ──MCP/HTTP──┘         │
 
 ---
 
+## Sign-in
+
+Standalone by default; set `ID_URL` to join the heymax suite.
+
+- **`ID_URL` unset (standalone):** the app's own accounts and sessions, as always.
+- **`ID_URL=https://id.heymax.im` (heymax suite):** sign-in happens once at the shared identity service, whose session cookie lives on `.heymax.im`. This app asks it who the visitor is and maps them onto its own user by email; `OWNER_EMAIL` covers an owner whose address here differs (mapped to the first account).. The local password form and local sessions are switched off. Share links, invite tokens and MCP links work exactly as before. `REDIRECT_HOSTS` sends page loads on old domains (outside `.heymax.im`) to `PLAYGROUND_PUBLIC_URL`, since the shared cookie can't reach them.
+
 ## Deployment
 
 The app runs in two shapes from one codebase:

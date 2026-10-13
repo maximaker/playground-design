@@ -277,6 +277,10 @@ api.get('/auth/me', async (c) => {
   return user ? c.json({ user: publicUser(user) }) : c.json({ user: null }, 401);
 });
 
+// Under single sign-on there is no local password form, so no local sign-in.
+api.post('/auth/signup', async (c, next) => (idUrl ? c.json({ error: 'Sign in at the identity service.' }, 404) : next()));
+api.post('/auth/login', async (c, next) => (idUrl ? c.json({ error: 'Sign in at the identity service.' }, 404) : next()));
+
 api.post('/auth/signup', async (c) => {
   const { email, password, name, code } =
     await c.req.json<{ email?: string; password?: string; name?: string; code?: string }>();

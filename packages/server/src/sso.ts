@@ -10,12 +10,12 @@ import { persistence } from './persistence.ts';
  * its get-session endpoint and the person it names is mapped onto our own user
  * by email. Documents, memberships and shares stay ours.
  *
- * Without ID_URL the app's own accounts sign people in, as before.
- * LOCAL_LOGIN=true keeps them working alongside SSO while it beds in.
+ * Without ID_URL the app's own accounts sign people in, as before
+ * (standalone). With it, the shared session is the only browser sign-in;
+ * shares and MCP links are unaffected.
  */
 const ID_URL = (process.env.ID_URL ?? '').replace(/\/$/, '');
 const OWNER_EMAIL = process.env.OWNER_EMAIL?.trim().toLowerCase();
-const LOCAL_LOGIN = process.env.LOCAL_LOGIN === 'true';
 
 export const idUrl = ID_URL || null;
 
@@ -68,5 +68,5 @@ export async function userFromCookies(header: string | undefined): Promise<Store
       if (user) return user;
     }
   }
-  return LOCAL_LOGIN ? local() : null;
+  return null;
 }
