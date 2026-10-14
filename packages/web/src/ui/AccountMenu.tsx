@@ -30,8 +30,10 @@ export function Avatar({ name, color, size = 22, title }: {
   );
 }
 
-export function AccountMenu({ user, onSignedOut }: {
+export function AccountMenu({ user, onSignedOut, onAppearance }: {
   user: Account;
+  /** Dark mode and the rest of appearance live here, next to the person. */
+  onAppearance?: () => void;
   onSignedOut: () => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -73,6 +75,11 @@ export function AccountMenu({ user, onSignedOut }: {
               <span className="dim">{user.email}</span>
             </div>
           </div>
+          {onAppearance && (
+            <button className="account-item" onClick={() => { setOpen(false); onAppearance(); }}>
+              <Icon name="settings" size={14} /> Appearance
+            </button>
+          )}
           <button
             className="account-item"
             onClick={async () => { await signOut(); onSignedOut(); }}

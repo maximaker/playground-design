@@ -37,6 +37,7 @@ import { Settings } from './ui/Settings.tsx';
 import { Landing } from './Landing.tsx';
 import { Join } from './Join.tsx';
 import { AccountMenu } from './ui/AccountMenu.tsx';
+import { createBlank, dialItems, dialPanel, firstName, importBundleFile, navigate, openRow, useDial, useLibrary } from './ui/Dial.ts';
 import { goToSignIn, useSession } from './state/session.ts';
 import { OverflowMenu } from './ui/OverflowMenu.tsx';
 import { CommandPalette } from './ui/CommandPalette.tsx';
@@ -362,6 +363,29 @@ function Editor({ source, onHome, appearance, onAppearance, session }: {
   });
   useClipboard();
 
+  // Navigation: the dial as a knob in the corner, so the panels keep their
+  // room. A share-link viewer has no library to navigate, so no dial.
+  const withDial = source.kind === 'doc' && !!session.user;
+  const library = useLibrary(withDial);
+  const openDocId = source.kind === 'doc' ? source.id : null;
+  useDial(withDial ? {
+    label: firstName(session.user?.name),
+    items: dialItems(library.docs ? library.docs.length : null, true),
+    activeId: 'docs',
+    panel: dialPanel(library.docs ?? [], library.projects, openDocId, null),
+    corner: true,
+    onSelect: (id) => {
+      const projectId = useCanvas.getState().doc?.projectId ?? null;
+      if (id === 'search') setShowPalette(true);
+      else if (id === 'new') void createBlank(projectId).then((d) => navigate(`/d/${d}`));
+      else if (id === 'templates') navigate('/#start');
+      else if (id === 'components') { setLeftTab('components'); setOpenPanel('left'); }
+      else if (id === 'import') void importBundleFile(projectId).then((d) => { if (d) navigate(`/d/${d}`); });
+      else if (id === 'home') navigate('/');
+    },
+    onRow: openRow,
+  } : null);
+
   const readOnly = source.kind === 'share';
 
   /*
@@ -561,7 +585,10 @@ function Editor({ source, onHome, appearance, onAppearance, session }: {
                   ]),
                   { label: 'Export', hint: `${MOD}⇧E`, icon: 'upload' as IconName, run: () => setModal('export') },
                   { group: 'Help', label: 'Keyboard shortcuts', hint: '?', icon: 'keyboard' as IconName, run: () => setModal('shortcuts') },
-                  { group: 'Help', label: 'Appearance', icon: 'settings' as IconName, run: () => setShowSettings(true) },
+                  // Signed in, appearance lives in the avatar menu.
+                  ...(session.user ? [] : [
+                    { group: 'Help', label: 'Appearance', icon: 'settings' as IconName, run: () => setShowSettings(true) },
+                  ]),
                 ]}
               />
             )}
@@ -610,7 +637,7 @@ function Editor({ source, onHome, appearance, onAppearance, session }: {
 
 
         {mode !== 'narrow' && session.user && (
-          <AccountMenu user={session.user} onSignedOut={() => { void session.refresh(); }} />
+          <AccountMenu user={session.user} onAppearance={() => setShowSettings(true)} onSignedOut={() => { void session.refresh(); }} />
         )}
 
         {overlay && !viewing && (

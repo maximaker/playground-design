@@ -1,0 +1,115 @@
+/*
+ * heymax dial + mini ring. Framework-agnostic; pairs with dial.js.
+ * Geometry and behaviour come from notes-radial-menu/ (index.html, suite.html,
+ * current-layout.html, mini-ring.js). Colours come from tokens.css: the ring
+ * picks up --accent-* from the app's data-app.
+ */
+.hm-dial-root {
+  --dial-ring: #1d2026; --dial-ring-hover: #343841; --dial-knob: #fbfbfa; --dial-hint: var(--ink-mute, #6b6f76);
+  --dial-sheen: linear-gradient(180deg, rgba(0,0,0,.035), rgba(255,255,255,.6));
+  --dial-panel: var(--surface, #fff); --dial-page: var(--surface, #fff); --dial-text: var(--ink, #16181d);
+  --dial-line: var(--line, #e4e4e0); --dial-row-hover: #f1f1ee; --dial-mute: var(--ink-mute, #6b6f76);
+  --dial-a50: var(--accent-50); --dial-a300: var(--accent-300); --dial-a500: var(--accent-500); --dial-a800: var(--accent-800);
+  --dial-on: #fff;
+  --dial-top: 80px; --dial-left: 10px;
+  font-family: Inter, system-ui, sans-serif;
+}
+[data-app='notes'] .hm-dial-root, .hm-dial-root[data-app='notes'] { --dial-on: #16181d; }
+[data-theme='dark'] .hm-dial-root {
+  --dial-panel: #1b1e24; --dial-page: #16181d; --dial-text: #eceef1; --dial-line: #2a2d34; --dial-row-hover: #23262d;
+  --dial-ring: #2a2d34; --dial-ring-hover: #3a3e46; --dial-knob: #20232a; --dial-hint: #a3a7ae; --dial-mute: #a3a7ae;
+  --dial-sheen: linear-gradient(180deg, rgba(255,255,255,.05), rgba(0,0,0,.15));
+  --dial-a50: color-mix(in srgb, var(--accent-800) 45%, #16181d); --dial-a800: var(--accent-300);
+}
+
+/* ---------- the dial ---------- */
+.hm-dial { position: fixed; left: var(--dial-left); top: var(--dial-top); width: 260px; height: 260px; z-index: 40; pointer-events: none; color: var(--dial-text); }
+.hm-dial > * { pointer-events: auto; }
+.hm-dial svg.hm-ring { pointer-events: none; }
+.hm-dial .seg { pointer-events: auto; }
+.hm-dial.closed .seg { pointer-events: none; }
+.hm-dial svg.hm-ring { position: absolute; inset: 0; overflow: visible; filter: drop-shadow(0 18px 30px rgba(22,24,29,.18)); transition: transform .45s cubic-bezier(.2,.9,.2,1), opacity .3s; transform-origin: 50% 50%; }
+.hm-dial.closed svg.hm-ring { transform: scale(.42) rotate(-30deg); opacity: 0; pointer-events: none; }
+.hm-dial .seg path { fill: var(--dial-ring); transition: fill .18s; cursor: pointer; }
+.hm-dial .seg:hover path, .hm-dial .seg.focus path, .hm-dial .seg.open path { fill: var(--dial-ring-hover); }
+.hm-dial .seg.active path { fill: var(--dial-a500); }
+.hm-dial .seg .ico { stroke: #c9ccd1; fill: none; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; pointer-events: none; transition: stroke .18s; }
+.hm-dial .seg:hover .ico, .hm-dial .seg.focus .ico, .hm-dial .seg.open .ico { stroke: #fff; }
+.hm-dial .seg.active .ico { stroke: var(--dial-on); }
+.hm-dial .seg .dot { fill: #8b8f96; pointer-events: none; }
+.hm-dial .seg .badge { fill: var(--dial-a500); pointer-events: none; }
+.hm-dial .seg.active .badge { fill: var(--dial-on); }
+.hm-dial .seg:focus { outline: none; }
+.hm-dial .gap-label { position: absolute; left: 50%; top: 2px; transform: translateX(-50%); display: flex; align-items: center; gap: 7px; font-weight: 600; font-size: 15px; letter-spacing: -.01em; white-space: nowrap; transition: opacity .3s; pointer-events: none; }
+.hm-dial.closed .gap-label { opacity: 0; }
+.hm-dial .knob { position: absolute; left: 50%; top: 50%; width: 112px; height: 112px; margin: -56px 0 0 -56px; border-radius: 50%; border: none; padding: 0; cursor: pointer; background: var(--dial-knob); color: var(--dial-text);
+  box-shadow: 0 1px 0 rgba(255,255,255,.9) inset, 0 10px 24px rgba(22,24,29,.16), 0 0 0 1px rgba(22,24,29,.06); display: grid; place-items: center; transition: transform .25s; font: inherit; }
+.hm-dial .knob::before { content: ""; position: absolute; inset: 12px; border-radius: 50%; background: var(--dial-sheen); box-shadow: 0 0 0 1px rgba(127,127,127,.12); }
+.hm-dial .knob:active { transform: scale(.97); }
+.hm-dial .knob:focus-visible { outline: 2px solid var(--dial-a500); outline-offset: 4px; }
+.hm-dial .face { position: relative; display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.hm-dial .face .label { font-size: 12px; font-weight: 600; min-height: 18px; text-align: center; max-width: 84px; line-height: 1.2; }
+.hm-dial .face .kbd { font: 500 10px 'JetBrains Mono', ui-monospace, monospace; color: var(--dial-hint); min-height: 14px; }
+
+/* ---------- flyout panels (the deep list, More) ---------- */
+.hm-flyout { position: fixed; left: 286px; top: calc(var(--dial-top) + 10px); width: 300px; max-height: calc(100vh - var(--dial-top) - 30px); overflow: auto; z-index: 39; box-sizing: border-box;
+  background: var(--dial-panel); color: var(--dial-text); border: 1px solid var(--dial-line); border-radius: 14px; box-shadow: 0 20px 40px rgba(22,24,29,.14); padding: 10px;
+  opacity: 0; transform: translateX(-8px); pointer-events: none; visibility: hidden; transition: opacity .2s, transform .2s, visibility 0s .2s;
+  scrollbar-width: thin; scrollbar-color: var(--dial-line) transparent; overscroll-behavior: contain; font-size: 14px; line-height: 1.5; }
+.hm-flyout.show { opacity: 1; transform: none; pointer-events: auto; visibility: visible; transition: opacity .2s, transform .2s; }
+/* pinned: the list lives in the column under the dial, always visible and scrollable */
+.hm-flyout.docked { left: 14px; top: calc(var(--dial-top) + 272px); bottom: 14px; width: 252px; max-height: none; opacity: 1; transform: none; pointer-events: auto; visibility: visible; box-shadow: none; z-index: 38; }
+.hm-flyout .fly-head { position: sticky; top: -10px; z-index: 1; display: flex; gap: 6px; align-items: center; background: var(--dial-panel); margin: -10px -10px 0; padding: 10px 10px 6px; }
+.hm-flyout .filter { flex: 1; min-width: 0; margin: 0; border: 1px solid var(--dial-line); background: var(--dial-page); color: var(--dial-text); border-radius: 8px; padding: 8px 10px; font: 14px Inter, system-ui, sans-serif; }
+.hm-flyout .filter:focus { outline: 2px solid var(--dial-a500); outline-offset: -1px; }
+.hm-flyout .pin { flex: none; width: 34px; height: 34px; border-radius: 8px; border: 1px solid var(--dial-line); background: var(--dial-page); color: var(--dial-mute); cursor: pointer; display: grid; place-items: center; padding: 0; }
+.hm-flyout .pin:hover { color: var(--dial-text); }
+.hm-flyout .pin[aria-pressed='true'] { background: var(--dial-a50); border-color: var(--dial-a300); color: var(--dial-a800); }
+.hm-flyout h3 { font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--dial-mute); margin: 12px 10px 6px; }
+.hm-flyout .row { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-radius: 8px; cursor: pointer; font-size: 14px; color: var(--dial-text); border: none; background: none; width: 100%; text-align: left; font-family: inherit; text-decoration: none; box-sizing: border-box; }
+.hm-flyout .row:hover, .hm-flyout .row:focus-visible { background: var(--dial-row-hover); outline: none; }
+.hm-flyout .row.current { background: var(--dial-a50); color: var(--dial-a800); font-weight: 600; }
+.hm-flyout .row.empty { cursor: default; color: var(--dial-mute); }
+.hm-flyout .row.empty:hover { background: none; }
+.hm-flyout .row .twisty { width: 14px; color: var(--dial-mute); font-size: 10px; flex: none; text-align: center; }
+.hm-flyout .row .emoji { width: 15px; text-align: center; flex: none; }
+.hm-flyout .row .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.hm-flyout .row .n { margin-left: auto; font-size: 12px; color: var(--dial-mute); white-space: nowrap; font-variant-numeric: tabular-nums; padding-left: 6px; }
+.hm-flyout .row .sw { width: 8px; height: 8px; border-radius: 2px; flex: none; background: var(--dial-a300); }
+.hm-flyout .row svg { flex: none; }
+.hm-flyout .children { margin-left: 18px; }
+.hm-flyout .children[hidden] { display: none; }
+
+/* page offset helper: apps put this on the element that used to sit beside the sidebar */
+.hm-dial-offset { padding-left: 280px; }
+
+/* knob-only corner mode (canvas editors): sits bottom-left, keeps the editor panels clear */
+.hm-dial.corner { top: auto; bottom: 8px; left: 8px; transform: scale(.82); transform-origin: bottom left; }
+.hm-dial.corner ~ .hm-flyout:not(.docked), .hm-dial.corner ~ .hm-flyout.docked { left: 230px; top: auto; bottom: 16px; max-height: 70vh; }
+
+/* tablet and phone: dial lives bottom-left, starts closed, flyouts become sheets */
+@media (max-width: 860px) {
+  .hm-dial { left: 8px; top: auto; bottom: 8px; transform: scale(.82); transform-origin: bottom left; }
+  .hm-flyout, .hm-flyout.docked, .hm-dial.corner ~ .hm-flyout:not(.docked), .hm-dial.corner ~ .hm-flyout.docked { left: 12px; right: 12px; top: auto; bottom: 236px; width: auto; max-height: 55vh; }
+  .hm-flyout.docked:not(.show) { opacity: 0; pointer-events: none; visibility: hidden; }
+  .hm-flyout .pin { display: none; }
+  .hm-dial-offset { padding-left: 0; padding-bottom: 120px; }
+}
+
+/* ---------- mini ring (in-document) ---------- */
+.hm-mr { position: fixed; z-index: 1000; width: 168px; height: 168px; margin: -84px 0 0 -84px; pointer-events: none; --mr-accent: var(--accent-500); --mr-on: #fff; }
+.hm-mr svg { width: 100%; height: 100%; overflow: visible; filter: drop-shadow(0 10px 22px rgba(22,24,29,.22)); transform: scale(.6); opacity: 0; transition: transform .18s cubic-bezier(.2,.9,.2,1), opacity .14s; }
+.hm-mr.show svg { transform: none; opacity: 1; }
+.hm-mr.show .s { pointer-events: auto; }
+.hm-mr .s path { fill: #2a2d34; transition: fill .12s; cursor: pointer; }
+.hm-mr .s.f path { fill: var(--mr-accent); }
+.hm-mr .s g { stroke: #d5d7db; fill: none; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; pointer-events: none; color: #d5d7db; }
+.hm-mr .s.f g { stroke: var(--mr-on); color: var(--mr-on); }
+.hm-mr .hub { fill: #fbfbfa; }
+.hm-mr .lab { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 64px; text-align: center; font: 600 11px/1.2 Inter, system-ui, sans-serif; color: #16181d; pointer-events: none; opacity: 0; transition: opacity .14s; }
+.hm-mr.show .lab { opacity: 1; }
+.hm-mr .lab small { display: block; font: 500 9.5px 'JetBrains Mono', monospace; color: #6b6f76; margin-top: 2px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .hm-dial *, .hm-flyout, .hm-mr svg, .hm-mr .lab { transition: none !important; }
+}

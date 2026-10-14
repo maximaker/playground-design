@@ -2208,7 +2208,7 @@ code { font-family: var(--mono); font-size: 0.92em; }
 
 .library { display: contents; }
 .library-nav { grid-column: 1 / span 3; }
-.library-docs { grid-column: 4 / -1; display: grid; grid-template-columns: subgrid; row-gap: var(--s4); }
+.library-docs { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; row-gap: var(--s4); }
 .library-docs > * { grid-column: 1 / -1; }
 
 /* The project rail is a floating card of pill rows — the reference's rail,
@@ -3776,12 +3776,9 @@ code { font-family: var(--mono); font-size: 0.92em; }
    starters as well as the documents (PG 01 Home). Tablet and phone keep their
    own rules above, where the rail goes full width or turns into chips. */
 @media (min-width: 1025px) {
-  .home > * { grid-column: 4 / -1; }
-  .home .library-nav {
-    grid-column: 1 / span 3; grid-row: 1 / span 8;
-    top: calc(56px + var(--s4));
-  }
-  .home .library-docs { grid-column: 4 / -1; }
+  /* The rail is gone (the dial navigates now), so the library takes the full width. */
+  .home > * { grid-column: 1 / -1; }
+  .home .library-docs { grid-column: 1 / -1; }
 }
 
 /* The family bar geometry, in px so the viewer's UI scale cannot change it:
@@ -3802,3 +3799,8 @@ code { font-family: var(--mono); font-size: 0.92em; }
 .library-docs-head + .connect-linked, .library-title .connect-linked { margin: var(--s2) 0 var(--s4); }
 .comment-row-wrap { display: flex; flex-direction: column; gap: var(--s1, 4px); }
 .connect-unfurls { display: flex; flex-direction: column; gap: var(--s1, 4px); }
+
+/* The dial's corner knob clears the phone editor's frame bar. */
+@media (max-width: 860px) {
+  body:has(.app.is-narrow) .hm-dial.corner { bottom: 76px; }
+}

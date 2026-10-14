@@ -20,6 +20,7 @@ import { Settings } from './ui/Settings.tsx';
 import type { Appearance } from './state/appearance.ts';
 import type { useSession } from './state/session.ts';
 import { AccountMenu } from './ui/AccountMenu.tsx';
+import { dialItems, dialPanel, firstName, navigate, openRow, useDial } from './ui/Dial.ts';
 
 interface DocSummary {
   id: string; name: string; rev: number; updatedAt: number; nodeCount: number;
@@ -62,7 +63,6 @@ export function Home({ onOpen, appearance, onAppearance, session }: {
   const [importing, setImporting] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [dragOver, setDragOver] = useState<Filter | undefined>(undefined);
   const [menuFor, setMenuFor] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [query, setQuery] = useState('');
@@ -74,6 +74,20 @@ export function Home({ onOpen, appearance, onAppearance, session }: {
   useEffect(() => {
     try { localStorage.setItem('playground.library.view', view); } catch { /* not critical */ }
   }, [view]);
+
+  // The dial and Back change ?project= under us; follow it.
+  useEffect(() => {
+    const onPop = () => setFilter(new URLSearchParams(location.search).get('project'));
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, []);
+  const searchRef = useRef<HTMLInputElement>(null);
+  const importRef = useRef<HTMLInputElement>(null);
+  const makersRef = useRef<HTMLElement>(null);
+  // "Starting points" from the editor lands here with #start.
+  useEffect(() => {
+    if (location.hash === '#start') makersRef.current?.scrollIntoView({ block: 'start' });
+  }, []);
 
   const refresh = useCallback(async () => {
     try {
@@ -215,7 +229,7 @@ export function Home({ onOpen, appearance, onAppearance, session }: {
     if (res.ok) {
       const { project } = (await res.json()) as { project: Project };
       await refresh();
-      setFilter(project.id);
+      setScope(project.id);
     }
   };
 
@@ -236,30 +250,34 @@ export function Home({ onOpen, appearance, onAppearance, session }: {
     if (!window.confirm(warning)) return;
     const res = await fetch(`/api/projects/${p.id}`, { method: 'DELETE' });
     const body = (await res.json().catch(() => ({}))) as { unfiled?: number };
-    if (filter === p.id) setFilter(null);
+    if (filter === p.id) setScope(null);
     await refresh();
     // Say where the documents went; silence here reads like they were deleted.
     if (body.unfiled) setNote(`${body.unfiled} document${body.unfiled === 1 ? '' : 's'} moved to Unfiled.`);
   };
 
-  /** A project row doubles as a drop target for filing a document. */
-  const dropProps = (target: Filter) => ({
-    onDragOver: (e: React.DragEvent) => {
-      if (!e.dataTransfer.types.includes('text/x-playground-doc')) return;
-      e.preventDefault();
-      e.dataTransfer.dropEffect = 'move';
-      setDragOver(target);
+
+  useDial(session.user ? {
+    label: firstName(session.user.name),
+    items: dialItems(loading ? null : docs.length, false),
+    activeId: filter === null ? 'home' : 'docs',
+    panel: dialPanel(docs, projects, null, typeof filter === 'string' && filter !== 'unfiled' ? filter : null),
+    corner: false,
+    onSelect: (id) => {
+      if (id === 'search') searchRef.current?.focus();
+      else if (id === 'new') void create();
+      else if (id === 'templates') makersRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      else if (id === 'import') importRef.current?.click();
+      else if (id === 'home') { navigate('/'); window.scrollTo({ top: 0 }); }
     },
-    onDragLeave: () => setDragOver((d) => (d === target ? undefined : d)),
-    onDrop: (e: React.DragEvent) => {
-      const id = e.dataTransfer.getData('text/x-playground-doc');
-      setDragOver(undefined);
-      if (!id) return;
-      e.preventDefault();
-      void file(id, target === 'unfiled' || target === null ? null : target);
-    },
-    className: dragOver === target ? 'is-drop-target' : undefined,
-  });
+    onRow: openRow,
+  } : null);
+
+  const setScope = (next: Filter) => {
+    navigate(typeof next === 'string' && next !== 'unfiled' ? `/?project=${encodeURIComponent(next)}` : '/');
+    setFilter(next);
+  };
+  const activeProject = typeof filter === 'string' && filter !== 'unfiled' ? projects.find((p) => p.id === filter) : undefined;
 
   const title = filter === null ? 'All documents'
     : filter === 'unfiled' ? 'Unfiled'
@@ -272,6 +290,7 @@ export function Home({ onOpen, appearance, onAppearance, session }: {
         <label className="library-search family-search">
           <Icon name="search" size={13} />
           <input
+            ref={searchRef}
             type="search"
             value={query}
             placeholder="Search documents"
@@ -284,23 +303,18 @@ export function Home({ onOpen, appearance, onAppearance, session }: {
         <div className="home-account">
           {/* The library has no palette of its own, so ⌘K here searches across heymax. */}
           <ConnectSearch />
-          <button
-            className="icon-button"
-            title="Appearance"
-            aria-label="Appearance"
-            onClick={() => setShowSettings((v) => !v)}
-          ><Icon name="settings" size={15} /></button>
           {showSettings && (
             <Settings appearance={appearance} onChange={onAppearance} onClose={() => setShowSettings(false)} />
           )}
           {session.user && (
-            <AccountMenu user={session.user} onSignedOut={() => { void session.refresh(); }} />
+            <AccountMenu user={session.user} onAppearance={() => setShowSettings(true)} onSignedOut={() => { void session.refresh(); }} />
           )}
         </div>
       }
     />
+    <div className="hm-dial-offset">
     <div className="home">
-      <section className="makers" aria-labelledby="makers-title">
+      <section className="makers" id="start" ref={makersRef} aria-labelledby="makers-title">
         <div className="makers-head">
           <div>
             <h1 id="makers-title">What are you making?</h1>
@@ -317,6 +331,7 @@ export function Home({ onOpen, appearance, onAppearance, session }: {
             <Icon name="upload" size={14} />
             <span className="home-action-label">{importing ? 'Importing…' : 'Import a bundle'}</span>
             <input
+              ref={importRef}
               type="file"
               accept="application/json,.json"
               className="sr-only"
@@ -407,59 +422,6 @@ export function Home({ onOpen, appearance, onAppearance, session }: {
 
       {!loading && !error && (
         <div className="library">
-          <nav className="library-nav" aria-label="Projects">
-            <button
-              className={`library-row${filter === null ? ' is-active' : ''}`}
-              onClick={() => setFilter(null)}
-            >
-              <Icon name="layers" size={13} />
-              <span>All documents</span>
-              <span className="dim">{docs.length}</span>
-            </button>
-
-            <button
-              {...dropProps('unfiled')}
-              className={`library-row${filter === 'unfiled' ? ' is-active' : ''}${dragOver === 'unfiled' ? ' is-drop-target' : ''}`}
-              onClick={() => setFilter('unfiled')}
-            >
-              <Icon name="page" size={13} />
-              <span>Unfiled</span>
-              <span className="dim">{unfiled}</span>
-            </button>
-
-            <div className="library-heading">
-              <span>Projects</span>
-              <button className="icon-button" title="New project" aria-label="New project" onClick={addProject}>
-                <Icon name="plus" size={13} />
-              </button>
-            </div>
-
-            {projects.length === 0 && (
-              <p className="library-empty dim">
-                No projects yet. Make one, then drag a document onto it.
-              </p>
-            )}
-
-            {projects.map((p) => (
-              <div
-                key={p.id}
-                {...dropProps(p.id)}
-                className={`library-row is-project${filter === p.id ? ' is-active' : ''}${dragOver === p.id ? ' is-drop-target' : ''}`}
-              >
-                <button className="library-row-main" onClick={() => setFilter(p.id)}>
-                  <Icon name="folder" size={13} />
-                  <span>{p.name}</span>
-                  <span className="dim">{p.documentCount}</span>
-                </button>
-                <button className="icon-button" title="Rename" aria-label={`Rename ${p.name}`} onClick={() => void renameProject(p)}>
-                  <Icon name="edit" size={11} />
-                </button>
-                <button className="icon-button" title="Delete project" aria-label={`Delete ${p.name}`} onClick={() => void removeProject(p)}>
-                  <Icon name="trash" size={11} />
-                </button>
-              </div>
-            ))}
-          </nav>
 
           <section className="library-docs">
             <div className="library-docs-head">
@@ -472,6 +434,32 @@ export function Home({ onOpen, appearance, onAppearance, session }: {
               </div>
 
               <div className="library-tools">
+                {/* What the sidebar used to choose: everything, unfiled, or one project. */}
+                <label className="library-sort">
+                  <span className="sr-only">Show</span>
+                  <select
+                    aria-label="Show"
+                    value={filter ?? ''}
+                    onChange={(e) => setScope(e.target.value === '' ? null : e.target.value)}
+                  >
+                    <option value="">All documents ({docs.length})</option>
+                    <option value="unfiled">Unfiled ({unfiled})</option>
+                    {projects.map((p) => <option key={p.id} value={p.id}>{p.name} ({p.documentCount})</option>)}
+                  </select>
+                </label>
+                <button className="icon-button" title="New project" aria-label="New project" onClick={addProject}>
+                  <Icon name="plus" size={13} />
+                </button>
+                {activeProject && (
+                  <>
+                    <button className="icon-button" title="Rename project" aria-label={`Rename ${activeProject.name}`} onClick={() => void renameProject(activeProject)}>
+                      <Icon name="edit" size={13} />
+                    </button>
+                    <button className="icon-button" title="Delete project" aria-label={`Delete ${activeProject.name}`} onClick={() => void removeProject(activeProject)}>
+                      <Icon name="trash" size={13} />
+                    </button>
+                  </>
+                )}
 
                 <label className="library-sort">
                   <span className="sr-only">Sort by</span>
@@ -619,6 +607,7 @@ export function Home({ onOpen, appearance, onAppearance, session }: {
           </section>
         </div>
       )}
+    </div>
     </div>
     </div>
   );
