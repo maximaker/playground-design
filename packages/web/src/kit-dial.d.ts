@@ -15,6 +15,7 @@ export interface DialOptions {
   items?: DialItem[]; activeId?: string | null; panel?: DialPanel | null;
   onSelect?: (item: DialItem) => void; onRow?: (row: DialRow) => void;
   startClosed?: boolean; corner?: boolean; mount?: HTMLElement;
+  onMoveTo?: (row: DialRow) => void;
 }
 export interface Dial {
   el: HTMLElement;
@@ -22,7 +23,12 @@ export interface Dial {
   setOpen(open: boolean): void; isOpen(): boolean;
   openPanel(): void; closePanel(): void;
   readonly pinned: boolean; setPinned(on: boolean): void;
+  readonly compact: boolean; openDrawer(): void; closeDrawer(): void;
   destroy(): void;
 }
 export function createDial(opts: DialOptions): Dial;
 export const DIAL_ICONS: Record<string, string>;
+export const COMPACT_QUERY: string;
+export function isCompact(): boolean;
+export function miniRingAllowed(pointerType?: string): boolean;
+export function drawerHint(item: DialItem): string;

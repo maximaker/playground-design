@@ -77,6 +77,10 @@
 .hm-flyout .row .n { margin-left: auto; font-size: 12px; color: var(--dial-mute); white-space: nowrap; font-variant-numeric: tabular-nums; padding-left: 6px; }
 .hm-flyout .row .sw { width: 8px; height: 8px; border-radius: 2px; flex: none; background: var(--dial-a300); }
 .hm-flyout .row svg { flex: none; }
+.hm-flyout .row.dragging { opacity: .4; }
+.hm-flyout .row.drop-before { box-shadow: inset 0 2px 0 var(--dial-a500); border-radius: 0 0 8px 8px; }
+.hm-flyout .row.drop-after { box-shadow: inset 0 -2px 0 var(--dial-a500); border-radius: 8px 8px 0 0; }
+.hm-flyout .row.drop-inside { background: var(--dial-a50); box-shadow: inset 0 0 0 1.5px var(--dial-a500); }
 .hm-flyout .children { margin-left: 18px; }
 .hm-flyout .children[hidden] { display: none; }
 
@@ -93,7 +97,7 @@
   .hm-flyout, .hm-flyout.docked, .hm-dial.corner ~ .hm-flyout:not(.docked), .hm-dial.corner ~ .hm-flyout.docked { left: 12px; right: 12px; top: auto; bottom: 236px; width: auto; max-height: 55vh; }
   .hm-flyout.docked:not(.show) { opacity: 0; pointer-events: none; visibility: hidden; }
   .hm-flyout .pin { display: none; }
-  .hm-dial-offset { padding-left: 0; padding-bottom: 120px; }
+  .hm-dial-offset { padding-left: 0; }
 }
 
 /* ---------- mini ring (in-document) ---------- */
@@ -113,3 +117,53 @@
 @media (prefers-reduced-motion: reduce) {
   .hm-dial *, .hm-flyout, .hm-mr svg, .hm-mr .lab { transition: none !important; }
 }
+
+/* ---------- compact (phones, touch-only): menu button + left drawer, no ring ---------- */
+.hm-menu-btn, .hm-drawer, .hm-drawer-backdrop { display: none; }
+.hm-dial-root.compact .hm-dial, .hm-dial-root.compact .hm-flyout { display: none !important; }
+.hm-dial-root.compact .hm-menu-btn { display: grid; place-items: center; position: fixed; left: 6px; top: 6px; z-index: 60; width: 44px; height: 44px; padding: 0; border: none; border-radius: 10px; background: transparent; color: var(--dial-text); cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.hm-dial-root.compact .hm-menu-btn:hover, .hm-dial-root.compact .hm-menu-btn[aria-expanded='true'] { background: var(--dial-row-hover); }
+.hm-dial-root.compact .hm-menu-btn:focus-visible { outline: 2px solid var(--dial-a500); outline-offset: 2px; }
+.hm-dial-compact .hm-topbar { padding-left: 56px; }
+.hm-dial-compact .hm-dial-offset { padding-left: 0; padding-bottom: 0; }
+.hm-drawer-open, .hm-drawer-open body { overflow: hidden; }
+
+.hm-dial-root.compact .hm-drawer-backdrop:not([hidden]) { display: block; position: fixed; inset: 0; z-index: 70; background: rgba(15,16,19,.42); opacity: 0; transition: opacity .2s; }
+.hm-dial-root.compact .hm-drawer-backdrop.show { opacity: 1; }
+.hm-dial-root.compact .hm-drawer:not([hidden]) { display: flex; flex-direction: column; position: fixed; left: 0; top: 0; bottom: 0; z-index: 71; width: min(320px, 86vw); box-sizing: border-box;
+  background: var(--dial-panel); color: var(--dial-text); border-right: 1px solid var(--dial-line); box-shadow: 0 20px 40px rgba(22,24,29,.18);
+  overflow-y: auto; overscroll-behavior: contain; padding: 0 10px calc(16px + env(safe-area-inset-bottom)); font-size: 15px; line-height: 1.5;
+  transform: translateX(-100%); transition: transform .22s cubic-bezier(.2,.9,.2,1); outline: none; }
+.hm-dial-root.compact .hm-drawer.show { transform: none; }
+.hm-drawer .dr-head { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; justify-content: space-between; gap: 8px; height: 56px; margin: 0 -10px 4px; padding: 0 6px 0 16px; background: var(--dial-panel); border-bottom: 1px solid var(--dial-line); }
+.hm-drawer .dr-title { display: flex; align-items: center; gap: 10px; font-weight: 600; font-size: 15px; }
+.hm-drawer .dr-title img, .hm-drawer .dr-title svg { width: 24px; height: 24px; }
+.hm-drawer .dr-close { width: 44px; height: 44px; border: none; background: none; color: var(--dial-mute); border-radius: 10px; display: grid; place-items: center; cursor: pointer; padding: 0; }
+.hm-drawer .dr-close:focus-visible, .hm-drawer .row:focus-visible, .hm-drawer .dr-move:focus-visible { outline: 2px solid var(--dial-a500); outline-offset: -2px; }
+.hm-drawer .row { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 8px 10px; border-radius: 8px; border: none; background: none; width: 100%; box-sizing: border-box; text-align: left; font: inherit; color: var(--dial-text); text-decoration: none; cursor: pointer; }
+.hm-drawer .row:active { background: var(--dial-row-hover); }
+.hm-drawer .row.current { background: var(--dial-a50); color: var(--dial-a800); font-weight: 600; }
+.hm-drawer .row.empty { cursor: default; color: var(--dial-mute); min-height: 36px; }
+.hm-drawer .row .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.hm-drawer .row .n { margin-left: auto; font-size: 13px; color: var(--dial-mute); white-space: nowrap; font-variant-numeric: tabular-nums; padding-left: 6px; }
+.hm-drawer .row .dr-ico { display: grid; place-items: center; width: 20px; flex: none; }
+.hm-drawer .row .dr-ico svg { width: 19px; height: 19px; }
+.hm-drawer .row .dr-badge { width: 8px; height: 8px; border-radius: 999px; background: var(--dial-a500); flex: none; }
+.hm-drawer .row .n + .dr-badge { margin-left: 2px; }
+.hm-drawer .row .t + .dr-badge, .hm-drawer .row .t + .dr-chev { margin-left: auto; }
+.hm-drawer .row .dr-chev { width: 14px; text-align: center; color: var(--dial-mute); font-size: 11px; flex: none; }
+.hm-drawer .row .twisty { display: grid; place-items: center; width: 28px; height: 28px; margin: -6px -4px -6px -8px; color: var(--dial-mute); font-size: 11px; flex: none; }
+.hm-drawer .row .emoji { width: 18px; text-align: center; flex: none; }
+.hm-drawer .row .sw { width: 8px; height: 8px; border-radius: 2px; flex: none; background: var(--dial-a300); }
+.hm-drawer .dr-section { margin: 2px 0 8px 10px; padding-left: 10px; border-left: 1px solid var(--dial-line); }
+.hm-drawer .dr-section .filter { width: 100%; box-sizing: border-box; margin: 6px 0 2px; border: 1px solid var(--dial-line); background: var(--dial-page); color: var(--dial-text); border-radius: 8px; padding: 10px 12px; font: 16px Inter, system-ui, sans-serif; }
+.hm-drawer .dr-section .filter:focus { outline: 2px solid var(--dial-a500); outline-offset: -1px; }
+.hm-drawer h3 { font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--dial-mute); margin: 14px 10px 4px; }
+.hm-drawer .children { margin-left: 14px; }
+.hm-drawer .children[hidden] { display: none; }
+.hm-drawer .dr-row { display: flex; align-items: center; gap: 4px; }
+.hm-drawer .dr-row > .row { flex: 1; min-width: 0; }
+.hm-drawer .dr-row > .children { flex-basis: 100%; }
+.hm-drawer .dr-row { flex-wrap: wrap; }
+.hm-drawer .dr-move { flex: none; min-width: 44px; height: 36px; padding: 0 8px; border: 1px solid var(--dial-line); border-radius: 8px; background: var(--dial-page); color: var(--dial-mute); font: 500 12px Inter, system-ui, sans-serif; cursor: pointer; }
+@media (prefers-reduced-motion: reduce) { .hm-drawer, .hm-drawer-backdrop { transition: none !important; } }

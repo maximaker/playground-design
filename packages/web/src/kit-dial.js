@@ -11,9 +11,16 @@
  *     activeId: 'home',
  *     panel: { title, filter, groups: [{ title, rows: [{ id, label, meta, emoji, swatch, current, open, children }] , empty }] },
  *     onSelect: (item) => {}, onRow: (row) => {},
+ *     onMove: ({ id, targetId, zone }) => {},                  // rows with reorderable: true; zone = before | after | inside
+ *     onMoveTo: (row) => {},                                 // Ctrl/Cmd Shift M on a focused reorderable row
  *     startClosed: false, corner: false,                      // corner: knob-only bottom-left (canvas editors)
  *   });
  *   dial.update({ items, activeId, panel }); dial.setOpen(true); dial.openPanel(); dial.destroy();
+ *
+ * Compact mode (isCompact(): <=860px wide, or a coarse pointer with no fine one):
+ * no ring. A 44px menu button sits at the left of the top bar and opens a
+ * left drawer with the ring items as a list and the deep list as an
+ * expandable section. Desktop is unchanged. The mini ring doesn't open there.
  */
 
 export const DIAL_ICONS = {
@@ -105,11 +112,40 @@ export function filterRows(rows, q) {
   return out;
 }
 
+/** Drop zone for a pointer over a row: top/bottom quarter reorders, the middle nests. */
+export function dropZone(pointerY, rect) {
+  const rel = (pointerY - rect.top) / rect.height;
+  return rel < 0.25 ? 'before' : rel > 0.75 ? 'after' : 'inside';
+}
+/** True if `id` is `ancestorId` or sits anywhere under it in `rows`. */
+export function isWithin(rows, ancestorId, id) {
+  const find = (list) => { for (const r of list || []) { if (r.id === ancestorId) return r; const f = find(r.children); if (f) return f; } return null; };
+  const walk = (r) => r.id === id || (r.children || []).some(walk);
+  const a = find(rows);
+  return !!a && walk(a);
+}
+
+/** Phones, small tablets and touch-only devices get the drawer instead of the ring. */
+export const COMPACT_QUERY = '(max-width: 860px), (pointer: coarse) and (not (any-pointer: fine))';
+export function isCompact() {
+  if (typeof matchMedia !== 'function') return false;
+  if (matchMedia('(max-width: 860px)').matches) return true;
+  return matchMedia('(pointer: coarse)').matches && !matchMedia('(any-pointer: fine)').matches;
+}
+/** Item hint for the drawer list: counts and badges, never keyboard shortcuts. */
+export function drawerHint(it) {
+  if (typeof it.badge === 'string') return it.badge;
+  const k = (it.kbd || '').trim();
+  return !k || /^(ctrl|⌘|cmd|alt|shift|option|⌥)/i.test(k) ? '' : k;
+}
+
 const store = {
   get(k) { try { return localStorage.getItem(k); } catch { return null; } },
   set(k, v) { try { localStorage.setItem(k, v); } catch { /* private mode */ } },
 };
 const PIN_SVG = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4h6l-1 6 3 3H7l3-3z"/><path d="M12 13v7"/></svg>';
+const BURGER_SVG = '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>';
+const CLOSE_SVG = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>';
 const MENU_SVG = '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" style="color:var(--dial-hint)"><path d="M7 8h10M7 12h10M7 16h10"/></svg>';
 const rowIcon = (k) => `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" style="color:var(--dial-mute)">${icon(k)}</svg>`;
 
@@ -131,7 +167,13 @@ export function createDial(opts) {
       <div class="fly-head"><input class="filter" autocomplete="off" type="text"><button type="button" class="pin" aria-pressed="false">${PIN_SVG}</button></div>
       <div class="fly-body"></div>
     </section>
-    <section class="hm-flyout hm-fly-more" aria-hidden="true"><h3>More</h3><div class="more-list"></div></section>`;
+    <section class="hm-flyout hm-fly-more" aria-hidden="true"><h3>More</h3><div class="more-list"></div></section>
+    <button type="button" class="hm-menu-btn" aria-haspopup="dialog" aria-expanded="false" aria-controls="hm-drawer-${key}">${BURGER_SVG}</button>
+    <div class="hm-drawer-backdrop" hidden></div>
+    <div class="hm-drawer" id="hm-drawer-${key}" role="dialog" aria-modal="true" tabindex="-1" hidden>
+      <div class="dr-head"><span class="dr-title"></span><button type="button" class="dr-close" aria-label="Close menu">${CLOSE_SVG}</button></div>
+      <nav class="dr-items"></nav>
+    </div>`;
   o.mount.appendChild(root);
   const $ = (s) => root.querySelector(s);
   const dial = $('.hm-dial'), ring = $('.hm-ring'), knob = $('.knob'), lab = $('.face .label'), kbdEl = $('.face .kbd');
@@ -139,6 +181,11 @@ export function createDial(opts) {
 
   let items = [], segs = [], focus = -1, openFly = null, pinned = store.get(`dial.pin.${key}`) === '1', q = '';
   const expanded = new Set();
+  let dragId = null;
+  const menuBtn = $('.hm-menu-btn'), drawer = $('.hm-drawer'), backdrop = $('.hm-drawer-backdrop');
+  let compact = isCompact(), drawerOpen = false, drawerPanelOpen = false, dq = '', lastFocus = null;
+  const allRows = () => (o.panel?.groups || []).flatMap((g) => g.rows || []);
+  const clearDrop = () => body.querySelectorAll('.drop-before, .drop-after, .drop-inside').forEach((x) => x.classList.remove('drop-before', 'drop-after', 'drop-inside'));
   const isMobile = () => matchMedia('(max-width: 860px)').matches;
 
   function paint() {
@@ -185,7 +232,7 @@ export function createDial(opts) {
     renderMore();
   }
 
-  function renderRows(rows, depth = 0) {
+  function renderRows(rows, depth = 0, inDrawer = false) {
     const frag = document.createDocumentFragment();
     for (const row of rows) {
       const wrap = document.createElement('div');
@@ -204,25 +251,178 @@ export function createDial(opts) {
         if (hasKids && (twisty || row.toggleOnly)) {
           e.preventDefault();
           if (open) { expanded.delete(row.id); expanded.add('!' + row.id); } else { expanded.add(row.id); expanded.delete('!' + row.id); }
-          renderPanel();
+          renderPanel(); if (drawerOpen) renderDrawer();
           return;
         }
         if (row.href && (e.metaKey || e.ctrlKey || e.shiftKey || e.button)) return;
         e.preventDefault();
-        if (!pinned || isMobile()) setFly(null);
+        if (inDrawer) closeDrawer(false);
+        else if (!pinned || isMobile()) setFly(null);
         o.onRow && o.onRow(row);
       });
+      if (row.reorderable && !inDrawer) wireReorder(el, row, rows);
       wrap.appendChild(el);
+      if (inDrawer && row.reorderable && o.onMoveTo) {
+        // touch: reordering goes through the app's "Move to…", no drag
+        wrap.classList.add('dr-row');
+        const mv = document.createElement('button');
+        mv.type = 'button'; mv.className = 'dr-move'; mv.textContent = 'Move…';
+        mv.setAttribute('aria-label', `Move ${row.label}`);
+        mv.addEventListener('click', (e) => { e.stopPropagation(); closeDrawer(false); o.onMoveTo(row); });
+        wrap.appendChild(mv);
+      }
       if (hasKids) {
         const box = document.createElement('div');
         box.className = 'children'; box.hidden = !open;
-        if (open) box.appendChild(renderRows(row.children, depth + 1));
+        if (open) box.appendChild(renderRows(row.children, depth + 1, inDrawer));
         wrap.appendChild(box);
       }
       frag.appendChild(wrap);
     }
     return frag;
   }
+
+  function renderDrawer() {
+    $('.dr-title').innerHTML = `${o.mark || ''}<span>${esc(o.name || key)}</span>`;
+    drawer.setAttribute('aria-label', `${o.name || key} menu`);
+    menuBtn.setAttribute('aria-label', `Open the ${o.name || key} menu`);
+    const nav = $('.dr-items');
+    const st = drawer.scrollTop;
+    nav.innerHTML = '';
+    nav.setAttribute('aria-label', o.name || key);
+    for (const it of o.items) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      const active = it.id === o.activeId;
+      const isPanel = !!(it.panel && o.panel);
+      b.className = 'row dr-item' + (active ? ' current' : '');
+      b.dataset.id = it.id;
+      if (active) b.setAttribute('aria-current', 'page');
+      const hint = drawerHint(it);
+      b.innerHTML = `<span class="dr-ico">${rowIcon(it.icon || it.id).replace('style="color:var(--dial-mute)"', '')}</span><span class="t">${esc(it.label)}</span>${hint ? `<span class="n">${esc(hint)}</span>` : ''}${it.badge ? '<span class="dr-badge" aria-hidden="true"></span>' : ''}${isPanel ? `<span class="dr-chev" aria-hidden="true">${drawerPanelOpen ? '▾' : '▸'}</span>` : ''}`;
+      if (isPanel) {
+        b.setAttribute('aria-expanded', String(drawerPanelOpen));
+        b.addEventListener('click', () => { drawerPanelOpen = !drawerPanelOpen; renderDrawer(); nav.querySelector(`[data-id="${CSS.escape(it.id)}"]`)?.focus(); });
+      } else {
+        b.addEventListener('click', () => { closeDrawer(false); o.onSelect && o.onSelect(it); });
+      }
+      nav.appendChild(b);
+      if (isPanel && drawerPanelOpen) nav.appendChild(drawerPanel());
+    }
+    drawer.scrollTop = st;
+  }
+  function drawerPanel() {
+    const box = document.createElement('div');
+    box.className = 'dr-section';
+    const f = document.createElement('input');
+    f.className = 'filter'; f.type = 'text'; f.autocomplete = 'off'; f.value = dq;
+    f.placeholder = o.panel.filter || 'Filter…'; f.setAttribute('aria-label', o.panel.filter || 'Filter');
+    const list = document.createElement('div');
+    const fill = () => {
+      list.innerHTML = '';
+      for (const g of o.panel.groups || []) {
+        const rows = filterRows(g.rows || [], dq);
+        if ((dq || g.hideEmpty) && !rows.length) continue;
+        if (g.title) { const h = document.createElement('h3'); h.textContent = g.title; list.appendChild(h); }
+        if (rows.length) list.appendChild(renderRows(rows, 0, true));
+        else { const d = document.createElement('div'); d.className = 'row empty'; d.textContent = g.empty || 'Nothing here yet'; list.appendChild(d); }
+      }
+    };
+    f.addEventListener('input', () => { dq = f.value.trim().toLowerCase(); fill(); });
+    fill();
+    box.append(f, list);
+    return box;
+  }
+  const focusables = () => [...drawer.querySelectorAll('button, a[href], input')].filter((x) => !x.disabled && x.getClientRects().length);
+  function openDrawer() {
+    if (drawerOpen) return;
+    drawerOpen = true; lastFocus = document.activeElement;
+    renderDrawer();
+    drawer.hidden = false; backdrop.hidden = false;
+    void drawer.offsetWidth; // start the slide from off-screen
+    drawer.classList.add('show'); backdrop.classList.add('show');
+    menuBtn.setAttribute('aria-expanded', 'true');
+    document.documentElement.classList.add('hm-drawer-open');
+    (drawer.querySelector('.dr-item.current') || drawer.querySelector('.dr-item') || drawer).focus();
+  }
+  function closeDrawer(restore = true) {
+    if (!drawerOpen) return;
+    drawerOpen = false;
+    drawer.classList.remove('show'); backdrop.classList.remove('show');
+    menuBtn.setAttribute('aria-expanded', 'false');
+    document.documentElement.classList.remove('hm-drawer-open');
+    const done = () => { if (!drawerOpen) { drawer.hidden = true; backdrop.hidden = true; } };
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) done(); else setTimeout(done, 220);
+    if (restore) (lastFocus && document.contains(lastFocus) && lastFocus !== document.body ? lastFocus : menuBtn).focus();
+  }
+  menuBtn.addEventListener('click', () => (drawerOpen ? closeDrawer() : openDrawer()));
+  $('.dr-close').addEventListener('click', () => closeDrawer());
+  backdrop.addEventListener('click', () => closeDrawer());
+  drawer.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeDrawer(); return; }
+    if (e.key !== 'Tab') return;
+    const f = focusables(); if (!f.length) return;
+    const first = f[0], last = f[f.length - 1];
+    if (e.shiftKey && (document.activeElement === first || document.activeElement === drawer)) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+  });
+  // keep focus inside while open
+  const onFocusIn = (e) => { if (drawerOpen && !drawer.contains(e.target)) (drawer.querySelector('.dr-item') || drawer).focus(); };
+  document.addEventListener('focusin', onFocusIn);
+  // swipe left closes
+  let sx = null, sy = 0;
+  drawer.addEventListener('touchstart', (e) => { const t = e.touches[0]; sx = t.clientX; sy = t.clientY; }, { passive: true });
+  drawer.addEventListener('touchend', (e) => {
+    if (sx === null) return;
+    const t = e.changedTouches[0], dx = t.clientX - sx, dy = t.clientY - sy; sx = null;
+    if (dx < -60 && Math.abs(dx) > Math.abs(dy) * 1.5) closeDrawer();
+  }, { passive: true });
+  function applyCompact() {
+    root.classList.toggle('compact', compact);
+    document.documentElement.classList.toggle('hm-dial-compact', compact);
+    if (compact) setFly(null); else closeDrawer(false);
+  }
+
+  function wireReorder(el, row, siblings) {
+    el.draggable = true;
+    el.dataset.rowId = row.id;
+    el.setAttribute('aria-roledescription', 'Reorderable page');
+    el.addEventListener('dragstart', (e) => {
+      dragId = row.id; el.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+      try { e.dataTransfer.setData('text/plain', row.label); } catch { /* old browsers */ }
+    });
+    el.addEventListener('dragend', () => { dragId = null; el.classList.remove('dragging'); clearDrop(); });
+    el.addEventListener('dragover', (e) => {
+      if (!dragId || dragId === row.id || !row.reorderable || isWithin(allRows(), dragId, row.id)) return;
+      e.preventDefault(); e.dataTransfer.dropEffect = 'move';
+      const zone = dropZone(e.clientY, el.getBoundingClientRect());
+      if (!el.classList.contains('drop-' + zone)) { clearDrop(); el.classList.add('drop-' + zone); }
+    });
+    el.addEventListener('dragleave', (e) => { if (!el.contains(e.relatedTarget)) el.classList.remove('drop-before', 'drop-after', 'drop-inside'); });
+    el.addEventListener('drop', (e) => {
+      if (!dragId) return;
+      e.preventDefault();
+      const zone = dropZone(e.clientY, el.getBoundingClientRect()), id = dragId;
+      dragId = null; clearDrop();
+      if (id === row.id || isWithin(allRows(), id, row.id)) return;
+      if (zone === 'inside') { expanded.add(row.id); expanded.delete('!' + row.id); }
+      o.onMove && o.onMove({ id, targetId: row.id, zone });
+    });
+    // keyboard: Alt+Up/Down reorders among siblings, Ctrl/Cmd Shift M opens the app's Move to…
+    el.addEventListener('keydown', (e) => {
+      if (e.altKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+        const i = siblings.findIndex((r) => r.id === row.id), j = i + (e.key === 'ArrowUp' ? -1 : 1);
+        e.preventDefault(); e.stopPropagation();
+        if (j < 0 || j >= siblings.length) return;
+        refocus = row.id;
+        o.onMove && o.onMove({ id: row.id, targetId: siblings[j].id, zone: e.key === 'ArrowUp' ? 'before' : 'after' });
+      } else if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'm' && o.onMoveTo) {
+        e.preventDefault(); e.stopPropagation(); o.onMoveTo(row);
+      }
+    });
+  }
+  let refocus = null;
 
   function renderPanel() {
     const p = o.panel;
@@ -240,6 +440,7 @@ export function createDial(opts) {
       else { const d = document.createElement('div'); d.className = 'row empty'; d.textContent = g.empty || 'Nothing here yet'; body.appendChild(d); }
     }
     fly.scrollTop = st;
+    if (refocus) { const r = body.querySelector(`[data-row-id="${CSS.escape(refocus)}"]`); if (r) { r.focus(); refocus = null; } }
   }
 
   function renderMore() {
@@ -328,10 +529,12 @@ export function createDial(opts) {
   const onKey = (e) => {
     if ((e.ctrlKey || e.metaKey) && e.key === '/') {
       e.preventDefault();
+      if (compact) { if (drawerOpen) closeDrawer(); else openDrawer(); return; }
       setOpen(!isOpen());
       if (isOpen()) setFocus(Math.max(0, items.findIndex((i) => i.id === o.activeId || (i.more && i.extra.some((x) => x.id === o.activeId)))));
       return;
     }
+    if (compact) return;
     if (e.key === 'Escape') {
       if (openFly) { const was = openFly; setFly(null); const i = items.findIndex((x) => (was === 'panel' ? x.panel : x.more)); if (i >= 0 && isOpen()) setFocus(i); else knob.focus(); e.stopPropagation(); return; }
       if (within(document.activeElement) && isOpen() && document.activeElement !== filter) { setOpen(false); knob.focus(); }
@@ -348,11 +551,12 @@ export function createDial(opts) {
     else if (/^[1-9]$/.test(e.key) && !e.ctrlKey && !e.metaKey && +e.key <= items.length) { e.preventDefault(); const i = +e.key - 1; setFocus(i); choose(i); }
   };
   const onDocClick = (e) => { if (openFly && !within(e.target)) setFly(null); };
-  const mq = matchMedia('(max-width: 860px)');
-  const onMq = () => { applyPinned(); if (mq.matches) setOpen(false); };
+  const mq = matchMedia('(max-width: 860px)'), cq = matchMedia(COMPACT_QUERY);
+  const onMq = () => { compact = isCompact(); applyCompact(); applyPinned(); if (mq.matches) setOpen(false); };
   document.addEventListener('keydown', onKey);
   document.addEventListener('click', onDocClick);
   mq.addEventListener?.('change', onMq);
+  cq.addEventListener?.('change', onMq);
 
   function applyChrome() {
     $('.gap-label').innerHTML = `${o.mark || ''}${esc(o.label ?? o.name ?? '')}`;
@@ -360,7 +564,7 @@ export function createDial(opts) {
     root.dataset.app = key;
   }
 
-  applyChrome(); layout(); renderPanel(); applyPinned();
+  applyChrome(); layout(); renderPanel(); applyPinned(); applyCompact();
   setOpen(!(o.startClosed || o.corner || isMobile()));
 
   return {
@@ -369,11 +573,14 @@ export function createDial(opts) {
       const prevCorner = o.corner;
       o = { ...o, ...next };
       applyChrome(); layout(); renderPanel(); applyPinned();
+      if (drawerOpen) renderDrawer();
       if (next.corner !== undefined && next.corner !== prevCorner) setOpen(!o.corner && !isMobile());
       if (next.startClosed !== undefined && next.startClosed) setOpen(false);
     },
     setOpen, isOpen,
-    openPanel() { setOpen(true); setFly('panel'); },
+    openPanel() { if (compact) { drawerPanelOpen = true; if (drawerOpen) renderDrawer(); else openDrawer(); return; } setOpen(true); setFly('panel'); },
+    get compact() { return compact; },
+    openDrawer, closeDrawer,
     closePanel() { setFly(null); },
     get pinned() { return pinned && !o.corner && !!o.panel; },
     setPinned,
@@ -381,12 +588,25 @@ export function createDial(opts) {
       document.removeEventListener('keydown', onKey);
       document.removeEventListener('click', onDocClick);
       mq.removeEventListener?.('change', onMq);
+      cq.removeEventListener?.('change', onMq);
+      document.removeEventListener('focusin', onFocusIn);
+      closeDrawer(false);
+      document.documentElement.classList.remove('hm-dial-compact');
       root.remove();
     },
   };
 }
 
 /* ---------- mini ring: 4–6 actions in a small full circle, opened at a point ---------- */
+// The last pointer the user used; the mini ring stays shut after a touch.
+let lastPointer = 'mouse';
+if (typeof document !== 'undefined') document.addEventListener('pointerdown', (e) => { lastPointer = e.pointerType || 'mouse'; }, true);
+/** The mini ring is desktop only: not in compact mode, not after touch or pen. */
+export function miniRingAllowed(pointerType) {
+  const p = pointerType || lastPointer;
+  return !isCompact() && p !== 'touch' && p !== 'pen';
+}
+
 export function createMiniRing({ accent, onAccent, hint = 'Esc', mount = document.body } = {}) {
   const MR = 80, mr = 34, PAD = 3;
   const arc = (a0, a1) => { const [x0, y0] = pt(MR, a0), [x1, y1] = pt(MR, a1), [x2, y2] = pt(mr, a1), [x3, y3] = pt(mr, a0), L = a1 - a0 > 180 ? 1 : 0;
@@ -420,8 +640,9 @@ export function createMiniRing({ accent, onAccent, hint = 'Esc', mount = documen
   }
   function pick(i) { const it = items[i]; close(); it && it.run && it.run(); }
   function openAt(x, y, list, opts = {}) {
+    if (!miniRingAllowed(opts.pointerType)) return false;
     items = list.slice(0, 6); onClose = opts.onClose || null; label = opts.label || 'Actions';
-    if (!items.length) return;
+    if (!items.length) return false;
     build();
     // keep inside the viewport and off the thing we're acting on
     const half = 84, m = 8; let px = x, py = y;
@@ -429,6 +650,7 @@ export function createMiniRing({ accent, onAccent, hint = 'Esc', mount = documen
     px = Math.min(Math.max(px, half + m), innerWidth - half - m); py = Math.min(Math.max(py, half + m), innerHeight - half - m);
     el.style.left = px + 'px'; el.style.top = py + 'px';
     setF(-1); el.classList.add('show'); open = true; near = false;
+    return true;
   }
   function close() { if (!open) return; open = false; el.classList.remove('show'); onClose && onClose(); }
 
