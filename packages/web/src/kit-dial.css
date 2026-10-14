@@ -146,6 +146,8 @@
 .hm-drawer .row.empty { cursor: default; color: var(--dial-mute); min-height: 36px; }
 .hm-drawer .row .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .hm-drawer .row .n { margin-left: auto; font-size: 13px; color: var(--dial-mute); white-space: nowrap; font-variant-numeric: tabular-nums; padding-left: 6px; }
+.hm-drawer .dr-section .row .t { flex: 1 1 auto; }
+.hm-drawer .dr-section .row .n { flex: 0 1 auto; max-width: 42%; overflow: hidden; text-overflow: ellipsis; }
 .hm-drawer .row .dr-ico { display: grid; place-items: center; width: 20px; flex: none; }
 .hm-drawer .row .dr-ico svg { width: 19px; height: 19px; }
 .hm-drawer .row .dr-badge { width: 8px; height: 8px; border-radius: 999px; background: var(--dial-a500); flex: none; }
