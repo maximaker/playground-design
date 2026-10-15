@@ -51,6 +51,9 @@
 }
 .hm-cx__tags .hm-cx__add { display: inline-block; margin-top: 0; }
 .hm-cx__add:hover { color: var(--ink, #16181d); text-decoration: underline; }
+.hm-cx__actions { display: flex; flex-wrap: wrap; column-gap: 16px; }
+.hm-cx__from { padding-right: 6px; font-size: 11.5px; color: var(--ink-mute, #6b6f76); }
+.hm-cx__hint { margin: 2px 0 4px; font-size: 11.5px; font-weight: 500; color: var(--ink-mute, #6b6f76); }
 .hm-cx__empty { margin: 8px 0 0; font-size: 12.5px; color: var(--ink-mute, #6b6f76); }
 .hm-cx__error { margin: 8px 0 0; font-size: 12.5px; color: #b42318; }
 

@@ -144,6 +144,7 @@ connect.get('/everywhere', async (c) => {
   return c.json(await searchEverywhere({
     self: SELF, q: c.req.query('q') ?? '', apps: apps.length ? apps : undefined,
     local: (q, limit) => search(user, q, limit), cookie: c.req.header('cookie'), cfg: connectConfig(),
+    limit: Math.min(Math.max(Number(c.req.query('limit')) || 6, 1), 50),
   }));
 });
 

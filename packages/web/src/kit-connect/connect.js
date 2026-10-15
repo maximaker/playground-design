@@ -46,3 +46,28 @@ export function orderGroups(groups, self) {
   const order = [self, ...APP_ORDER.filter((a) => a !== self)];
   return [...groups].sort((a, b) => order.indexOf(a.app) - order.indexOf(b.app));
 }
+
+/**
+ * What to offer first when attaching work for an engagement: items already
+ * tagged for or linked to it (as the links store returns them, newest first),
+ * then items matching its client, newest first. No repeats; `skip(item)` drops
+ * the item itself and what is already attached. Search results passed as
+ * `found` keep their order but move the suggested ones to the top.
+ */
+export function rankSuggestions({ linked = [], sameClient = [], found, skip = () => false }) {
+  const seen = new Set();
+  const take = (list) => list.filter((it) => it?.uri && !skip(it) && !seen.has(it.uri) && seen.add(it.uri));
+  const byRecent = (a, b) => String(b.updated ?? '').localeCompare(String(a.updated ?? ''));
+  const suggested = [...take(linked.filter((l) => l.app !== 'studio')), ...take([...sameClient].sort(byRecent))];
+  if (!found) return suggested;
+  const want = new Set(suggested.map((s) => s.uri));
+  const rest = found.filter((it) => !want.has(it.uri) && !skip(it));
+  const hits = found.filter((it) => want.has(it.uri));
+  return [...hits, ...rest];
+}
+
+/** The engagement an item is tagged for: its own `for` link, else one it inherits. */
+export function engagementOf(links = []) {
+  const tag = links.find((l) => l.kind === 'for' && l.direction === 'out' && !l.inherited) ?? links.find((l) => l.kind === 'for' && l.direction === 'out');
+  return tag?.uri ?? null;
+}
