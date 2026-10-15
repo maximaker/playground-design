@@ -38,7 +38,7 @@ import {
   GOOGLE_FONT_WEIGHTS, artboardTheme, REPEAT_DATA_ATTR, REPEAT_TEMPLATE_ATTR, REPEAT_STYLE_ATTR, expandRepeat,
 } from '@playground/shared';
 import {
-  applyOps, getDocument, getSnapshot, listSnapshots, StoreError, createSnapshot,
+  applyOps, ensureLoaded, getDocument, getSnapshot, listSnapshots, StoreError, createSnapshot,
   subscribe as subscribeToDocument,
 } from './store.ts';
 import { persistence } from './persistence.ts';
@@ -56,7 +56,10 @@ import { importUrlLive, tokenise, tokensFromVars } from './import-live.ts';
 import { getTemplate, templateSummaries } from './templates.ts';
 import {
   touchConnection, revokeConnection, switchConnectionDocument, projectDocuments, ConnectionError, type Connection,
+  accountOf, accountDocuments, createAccountDocument,
 } from './connections.ts';
+import { connectConfig, formatUri, linkItems, listItemLinks, parseUri, unlinkItems, type ConnectItem } from './kit-connect/server.mjs';
+import { publicBase } from './connect.ts';
 
 // ---------------------------------------------------------------------------
 // Helpers shared by the tool handlers
@@ -864,6 +867,26 @@ function matchNodes(doc: CanvasDocument, q: NodeQuery): CanvasNode[] {
 // Server construction
 // ---------------------------------------------------------------------------
 
+/** Tools that name documents themselves, so they do not get the documentId argument. */
+const DOCUMENT_TOOLS = new Set(['switch_document', 'list_documents', 'create_document', 'rename_document', 'link_items', 'list_links', 'unlink_items']);
+
+/** Puts the connection on another document it may reach (account or project links). */
+async function moveTo(ctx: McpContext, docId: string): Promise<void> {
+  const before = ctx.connection.docId;
+  await switchConnectionDocument(ctx.connection, docId);
+  clearAgentPresence(before, ctx.connection.code);
+  workingPage.delete(ctx.connection.code);
+}
+
+/** Documents this link reaches: the account's, the project's, or just its own. */
+async function reachableDocuments(ctx: McpContext) {
+  const c = ctx.connection;
+  const account = accountOf(c);
+  if (account) return accountDocuments(account);
+  if (c.projectId) return (await projectDocuments(c.projectId)).map((d) => ({ ...d, projectId: c.projectId }));
+  return [{ id: c.docId, name: c.docName, updatedAt: Date.now(), projectId: getDocument(c.docId)?.projectId ?? null }];
+}
+
 export function buildMcpServer(ctx: McpContext): McpServer {
   const server = new McpServer(
     { name: 'playground', version: '0.1.0' },
@@ -872,7 +895,10 @@ export function buildMcpServer(ctx: McpContext): McpServer {
       // by what gets registered below.
       capabilities: { logging: {} },
       instructions:
-        `You are connected to a Playground design document ("${ctx.connection.docName}"). ` +
+        (accountOf(ctx.connection)
+          ? `You are connected to a Playground account: every document its owner can open. You are on "${ctx.connection.docName}" now; ` +
+            `list_documents, create_document and rename_document manage documents, and every tool takes an optional documentId.\n\n`
+          : `You are connected to a Playground design document ("${ctx.connection.docName}"). `) +
         `Playground is a design tool whose documents are real HTML and CSS.\n\n` +
         `Start with get_basic_info, then get_tree_summary on the artboard you care about. ` +
         `Create with write_html. After any visual change, call get_screenshot to check your work — ` +
@@ -911,16 +937,33 @@ export function buildMcpServer(ctx: McpContext): McpServer {
      * schema now refuses keys it does not know, and the error names them.
      */
     const config = rest[0] as { inputSchema?: unknown } | undefined;
+    /*
+     * Account and project links reach many documents. Every tool takes an
+     * optional documentId so an agent can act on any of them without a
+     * separate switch_document call; the link stays on that document after.
+     */
+    const takesDocumentId = !!config?.inputSchema && !(config.inputSchema instanceof z.ZodType) && !DOCUMENT_TOOLS.has(name);
     if (config && config.inputSchema && !(config.inputSchema instanceof z.ZodType)) {
       rest[0] = {
         ...config,
-        inputSchema: z.object(config.inputSchema as z.ZodRawShape).strict(),
+        inputSchema: z.object({
+          ...(config.inputSchema as z.ZodRawShape),
+          ...(takesDocumentId ? { documentId: z.string().optional().describe('Act on this document (from list_documents) instead of the current one. Account and project links only.') } : {}),
+        }).strict(),
       };
     }
     // Scoped links are checked before any tool runs, so a refusal names the reason.
     const inner = rest[rest.length - 1] as (args: unknown, extra: unknown) => Promise<unknown>;
     const readOnlyHint = !!(rest[0] as { annotations?: { readOnlyHint?: boolean } } | undefined)?.annotations?.readOnlyHint;
     rest[rest.length - 1] = async (args: unknown, extra: unknown) => {
+      if (takesDocumentId && args && typeof args === 'object' && 'documentId' in args) {
+        const { documentId, ...restArgs } = args as { documentId?: string };
+        args = restArgs;
+        if (documentId && documentId !== ctx.connection.docId) {
+          const moved = await guard(() => moveTo(ctx, documentId));
+          if (moved && typeof moved === 'object' && 'isError' in moved) return moved;
+        }
+      }
       const denied = accessDenied(ctx, name, readOnlyHint, args);
       return denied ? fail(denied) : inner(args, extra);
     };
@@ -1084,7 +1127,9 @@ function registerReadTools(server: McpServer, ctx: McpContext): void {
       ...basicInfo(doc, page.id),
       liveTabConnected: hasLiveTab(doc.id),
       rev: doc.rev,
-      ...(ctx.connection.projectId
+      ...(accountOf(ctx.connection)
+        ? { account: { hint: 'This account link reaches every document you can open: list_documents, create_document, and documentId on any tool.' } }
+        : ctx.connection.projectId
         ? { project: { id: ctx.connection.projectId, hint: 'This connection covers the whole project: list_documents and switch_document move between its documents.' } }
         : {}),
       sections: sectionsOf(page).map((sec) => sectionSummary(doc, page, sec)),
@@ -1869,13 +1914,17 @@ function registerWriteTools(server: McpServer, ctx: McpContext): void {
     title: 'Apply a starter design system',
     description:
       'Merges a kit’s tokens into the document and adds its foundations artboard. Tokens that already ' +
-      'exist are left alone, so this never overwrites work.',
+      'exist are left alone, so this never overwrites work. Applying the same kit again adds no second ' +
+      'foundations artboard, and the blank starting frame of a brand-new document is removed rather than ' +
+      'left behind. foundations:false adds the tokens only.',
     inputSchema: {
       template: z.string().describe('Template id from list_templates.'),
       replaceTokens: z.boolean().optional().default(false)
         .describe('Overwrite tokens whose names already exist. Off by default so a kit never clobbers existing work.'),
+      foundations: z.boolean().optional().default(true)
+        .describe('Add the kit’s foundations artboard(s). false = tokens only.'),
     },
-  }, async ({ template, replaceTokens }) => guard(() => {
+  }, async ({ template, replaceTokens, foundations }) => guard(() => {
     const doc = requireDoc(ctx);
     const kit = getTemplate(template);
     if (!kit) return fail(`No template "${template}". Available: ${templateSummaries().map((t) => t.id).join(', ')}`);
@@ -1893,16 +1942,37 @@ function registerWriteTools(server: McpServer, ctx: McpContext): void {
 
     const ops: Op[] = [{ t: 'tokens', tokens: [...existing.values()] }];
     const created: string[] = [];
+    const alreadyThere: string[] = [];
 
-    for (const spec of kit.artboards) {
+    /*
+     * Stray artboards, as agents met them: the empty "Desktop" frame every new
+     * document starts with stayed next to the foundations, a second apply
+     * stacked another foundations board, and several boards from one kit all
+     * landed at the same x. None of that is wanted.
+     */
+    const specs = foundations ? kit.artboards : [];
+    const named = new Set(page.artboards.map((id) => getNode(doc, id)?.name));
+    const blank = page.artboards.length === 1 && doc.pages.length === 1
+      ? page.artboards.filter((id) => { const n = getNode(doc, id); return n?.name === 'Desktop' && n.children.length === 0; })
+      : [];
+    const adding = specs.filter((s) => !named.has(`${kit.name} — ${s.name}`));
+    const removeBlank = adding.length > 0 && blank.length === 1;
+    const keep = removeBlank ? [] : page.artboards;
+    let x = keep.length ? rightmostEdge(doc, keep) + 120 : 0;
+    if (removeBlank) ops.push({ t: 'remove', ids: blank });
+
+    for (const spec of specs) {
+      const name = `${kit.name} — ${spec.name}`;
+      if (named.has(name)) { alreadyThere.push(name); continue; }
       const artboard = makeNode({
         type: 'artboard',
-        name: `${kit.name} — ${spec.name}`,
+        name,
         styles: { ...DEFAULT_ARTBOARD_STYLES, ...spec.styles, width: `${spec.width}px`, height: `${spec.height}px` },
-        attrs: { 'data-x': String(rightmostEdge(doc, page.artboards) + 120), 'data-y': '0' },
+        attrs: { 'data-x': String(x), 'data-y': '0' },
       });
+      x += spec.width + 120;
       const parsed = parseHtml(spec.html);
-      ops.push({ t: 'insert', nodes: [artboard], parent: null, index: page.artboards.length, page: page.id });
+      ops.push({ t: 'insert', nodes: [artboard], parent: null, index: keep.length + created.length, page: page.id });
       ops.push({ t: 'insert', nodes: parsed.nodes, parent: artboard.id, index: 0 });
       created.push(artboard.id);
     }
@@ -1919,6 +1989,8 @@ function registerWriteTools(server: McpServer, ctx: McpContext): void {
           }
         : {}),
       artboards: created,
+      ...(alreadyThere.length ? { alreadyThere } : {}),
+      ...(removeBlank ? { removedBlankArtboard: blank[0] } : {}),
       next: 'Call get_tokens, then use those variables instead of literal colours.',
     });
   }));
@@ -5004,12 +5076,20 @@ function registerSessionTools(server: McpServer, ctx: McpContext): void {
   server.registerTool('list_documents', {
     title: 'List the project\'s documents',
     description:
-      'The documents this connection can work on. A project connection covers every document in the ' +
-      'project; a document connection covers just the one.',
+      'The documents this connection can work on, with ids for documentId. An account link (Settings → Agents) covers ' +
+      'every document you can open; a project connection every document in the project; a document connection just the one.',
     inputSchema: {},
     annotations: { readOnlyHint: true },
   }, async () => guard(async () => {
     const current = ctx.connection.docId;
+    if (accountOf(ctx.connection)) {
+      const docs = await reachableDocuments(ctx);
+      return json({
+        scope: 'account',
+        current,
+        documents: docs.map((d) => ({ ...d, updatedAt: new Date(d.updatedAt).toISOString(), url: `${publicBase()}/d/${d.id}`, current: d.id === current })),
+      });
+    }
     if (!ctx.connection.projectId) {
       return json({
         projectId: null,
@@ -5035,7 +5115,7 @@ function registerSessionTools(server: McpServer, ctx: McpContext): void {
     const c = ctx.connection;
     return json({
       label: c.label, document: { id: c.docId, name: c.docName },
-      scope: c.projectId ? 'project' : c.sectionIds?.length ? 'sections' : 'document',
+      scope: accountOf(c) ? 'account' : c.projectId ? 'project' : c.sectionIds?.length ? 'sections' : 'document',
       ...(c.sectionIds?.length ? { sectionIds: c.sectionIds } : {}),
       readOnly: c.readOnly,
       expiresAt: c.expiresAt ? new Date(c.expiresAt).toISOString() : null,
@@ -5069,6 +5149,68 @@ function registerSessionTools(server: McpServer, ctx: McpContext): void {
     workingPage.delete(ctx.connection.code);
     return json({ current: ctx.connection.docId, name: ctx.connection.docName, switched: true, previous: before });
   }));
+
+  server.registerTool('create_document', {
+    title: 'Create a document',
+    description:
+      'Makes a new, empty document owned by the link\'s account and moves this connection onto it. Account links only. ' +
+      'Follow with apply_template or write_html.',
+    inputSchema: { name: z.string().min(1).max(200) },
+  }, async ({ name }) => guard(async () => {
+    const account = accountOf(ctx.connection);
+    if (!account) return fail('Only an account link (Settings → Agents) can create documents.');
+    const doc = await createAccountDocument(account, name);
+    await moveTo(ctx, doc.id);
+    return json({ id: doc.id, name: doc.name, url: `${publicBase()}/d/${doc.id}`, uri: `heymax://playground/doc/${doc.id}`, current: true });
+  }));
+
+  server.registerTool('rename_document', {
+    title: 'Rename a document',
+    description: 'Renames a document this link can reach (the current one unless documentId is given).',
+    inputSchema: { name: z.string().min(1).max(200), documentId: z.string().optional() },
+  }, async ({ name, documentId }) => guard(async () => {
+    const id = documentId ?? ctx.connection.docId;
+    if (!(await reachableDocuments(ctx)).some((d) => d.id === id)) return fail(`No document "${id}" on this link. list_documents shows the ones it reaches.`);
+    await ensureLoaded(id);
+    applyOps(id, [{ op: { t: 'doc', name: name.trim() }, origin: agentOrigin(ctx) }]);
+    if (id === ctx.connection.docId) ctx.connection.docName = name.trim();
+    return json({ id, name: name.trim() });
+  }));
+
+  /* Across heymax: links to Studio OS, Notes and Artifactory (kit/docs/connect.md). */
+  const ref = z.string().describe(
+    'A heymax:// URI (heymax://playground/doc/<id>, heymax://studio/task/<id>, heymax://studio/engagement/<id>, ' +
+    'heymax://notes/page/<id>, heymax://artifactory/artifact/<id>), that item\'s page URL, or a bare Playground document id.');
+  const local = async (r: string): Promise<ConnectItem | null> => {
+    const p = parseUri(r);
+    const id = p ? (p.app === 'playground' && p.type === 'doc' ? p.id : null) : (/\/d\/([\w-]+)/.exec(r)?.[1] ?? null);
+    const d = id ? (await reachableDocuments(ctx)).find((x) => x.id === id) : undefined;
+    return d ? { app: 'playground', type: 'doc', id: d.id, uri: formatUri('playground', 'doc', d.id), title: d.name, url: `${publicBase()}/d/${d.id}`, updated: d.updatedAt ? new Date(d.updatedAt).toISOString() : null } : null;
+  };
+  const bare = (r: string) => (/^[\w-]{1,128}$/.test(r) ? formatUri('playground', 'doc', r) : r);
+  const out = (r: { ok: boolean; error?: string }) => (r.ok ? json(r) : fail(r.error!));
+
+  server.registerTool('link_items', {
+    title: 'Link items across heymax',
+    description:
+      'Links a Playground document to an item in another heymax app (a Studio OS task or engagement, a Notes page, an artifact). ' +
+      'It shows under Linked in both apps. kind "for" tags `from` with the Studio OS engagement in `to`.',
+    inputSchema: { from: ref, to: ref, kind: z.enum(['relates', 'for']).optional() },
+  }, async ({ from, to, kind }) => guard(async () => out(await linkItems({ self: 'playground', from: bare(from), to: bare(to), kind, local, cfg: connectConfig() }))));
+
+  server.registerTool('list_links', {
+    title: 'List cross-app links',
+    description: 'Everything in other heymax apps linked to one item, both directions, with ids for unlink_items.',
+    inputSchema: { item: ref },
+    annotations: { readOnlyHint: true },
+  }, async ({ item }) => guard(async () => out(await listItemLinks({ self: 'playground', ref: bare(item), local, cfg: connectConfig() }))));
+
+  server.registerTool('unlink_items', {
+    title: 'Remove a cross-app link',
+    description: 'Removes one cross-app link by the id that link_items or list_links gave.',
+    inputSchema: { id: z.string() },
+    annotations: { destructiveHint: true },
+  }, async ({ id }) => guard(async () => out(await unlinkItems({ id, cfg: connectConfig() }))));
 
   server.registerTool('start_working_on_nodes', {
     title: 'Mark artboards as being worked on',

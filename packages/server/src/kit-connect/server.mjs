@@ -148,3 +148,49 @@ export async function proxyLinks({ method, uri, id, body, cookie, cfg }) {
     return { status: 503, body: { error: 'Links unavailable', detail: String(e?.message || e) } };
   }
 }
+
+/*
+ * MCP: the same links, for agents. Every app's MCP server offers link_items,
+ * list_links and unlink_items on top of these, server to server with
+ * CONNECT_TOKEN (an agent has no browser cookie). Each returns
+ * { ok: true, ... } or { ok: false, error } with a sentence to show.
+ */
+
+const OFF = { ok: false, error: 'Cross-app linking is off on this app (CONNECT_ENABLED is not true).' };
+
+/** A URI or heymax page URL → ConnectItem, through this app or the item's own app. */
+export async function resolveItem({ self, ref, local, cfg }) {
+  return unfurl({ self, ref: String(ref || '').trim(), local, cookie: '', cfg });
+}
+
+/** Link two items (URIs or heymax URLs). kind `for` tags `from` with a Studio engagement `to`. */
+export async function linkItems({ self, from, to, kind = 'relates', local, cfg }) {
+  if (!cfg.enabled) return OFF;
+  const [a, b] = await Promise.all([from, to].map((ref) => resolveItem({ self, ref, local, cfg })));
+  if (!a) return { ok: false, error: `Could not find ${from}. Use a heymax:// URI or the item's page URL.` };
+  if (!b) return { ok: false, error: `Could not find ${to}. Use a heymax:// URI or the item's page URL.` };
+  if (kind === 'for' && !(b.app === 'studio' && b.type === 'engagement'))
+    return { ok: false, error: 'A "for" link tags an item with a Studio OS engagement: put the engagement in `to`.' };
+  const end = (x) => ({ uri: x.uri, title: x.title, url: x.url });
+  const r = await proxyLinks({ method: 'POST', body: { from: end(a), to: end(b), kind }, cookie: '', cfg });
+  if (r.status >= 300) return { ok: false, error: r.body?.error || `The links store answered ${r.status}.` };
+  return { ok: true, id: r.body?.id, kind, from: a, to: b };
+}
+
+/** Everything linked to one item, both directions. */
+export async function listItemLinks({ self, ref, local, cfg }) {
+  if (!cfg.enabled) return OFF;
+  const uri = parseUri(ref) ? ref : (await resolveItem({ self, ref, local, cfg }))?.uri;
+  if (!uri) return { ok: false, error: `Could not find ${ref}.` };
+  const r = await proxyLinks({ method: 'GET', uri, cookie: '', cfg });
+  if (r.status >= 300) return { ok: false, error: r.body?.error || `The links store answered ${r.status}.` };
+  return { ok: true, uri, links: r.body?.links ?? [] };
+}
+
+/** Remove one link by the id link_items or list_links gave. */
+export async function unlinkItems({ id, cfg }) {
+  if (!cfg.enabled) return OFF;
+  const r = await proxyLinks({ method: 'DELETE', id, cookie: '', cfg });
+  if (r.status >= 300) return { ok: false, error: r.body?.error || `The links store answered ${r.status}.` };
+  return { ok: true, id };
+}

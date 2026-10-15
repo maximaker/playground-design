@@ -26,6 +26,7 @@ import { peersOf, hasLiveTab } from './realtime.ts';
 import {
   ConnectionError, type ConnectionOptions, createConnection, createProjectConnection, listConnections, projectDocuments, resolveConnection, revokeConnection,
   type Connection,
+  createAccountConnection, listAccountConnections, accountOf,
 } from './connections.ts';
 import { handleMcpRequest } from './mcp.ts';
 import { getAsset, storeAsset, AssetError, MAX_ASSET_BYTES } from './assets.ts';
@@ -770,6 +771,29 @@ api.get('/projects/:id/connections', async (c) => {
   const store = await persistence();
   const rows = (await store.loadConnections()).filter((r) => r.projectId === c.req.param('id') && !r.revoked);
   return c.json({ connections: rows.map(({ revoked, ...rest }) => { void revoked; return rest; }) });
+});
+
+/*
+ * Agent links for the signed-in account (Settings → Agents): one link covers
+ * every document its owner can open, the same as the rest of the heymax family.
+ * The full link is shown once, when made.
+ */
+api.get('/agents', async (c) => {
+  return c.json({ links: await listAccountConnections(c.get('user')!.id) });
+});
+
+api.post('/agents', async (c) => {
+  const body = await c.req.json<{ label?: string }>().catch(() => ({} as { label?: string }));
+  const conn = await createAccountConnection(c.get('user')!.id, body.label?.trim() || 'Claude');
+  return c.json(connectionSetup(conn), 201);
+});
+
+api.delete('/agents/:code', async (c) => {
+  const store = await persistence();
+  const row = await store.loadConnection(c.req.param('code'));
+  if (!row || row.revoked || accountOf(row) !== c.get('user')!.id) return c.json({ error: 'No such link.' }, 404);
+  await revokeConnection(row.code);
+  return c.json({ ok: true });
 });
 
 function connectionSetup(conn: Connection) {

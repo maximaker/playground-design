@@ -13,7 +13,8 @@
 
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { persistence, type StoredConnection } from './persistence.ts';
-import { ensureLoaded, getDocument, listDocuments } from './store.ts';
+import { createDocument, ensureLoaded, getDocument, listDocuments } from './store.ts';
+import { documentsFor, grant } from './accounts.ts';
 
 /** Minutes a freshly minted code stays valid before anyone redeems it. */
 const UNREDEEMED_TTL_MS = 30 * 60 * 1000;
@@ -103,6 +104,57 @@ export async function createConnection(docId: string, label?: string, options: C
   return fromRow(row, doc.name);
 }
 
+/*
+ * Account links (Settings → Agents), the family standard: one link per agent
+ * for everything its owner can open, like Studio OS, Notes and Artifactory.
+ * Stored as a connection whose projectId is `account:<userId>`, so no schema
+ * change; `docId` is the document it is on now, and tools take a documentId
+ * to act on another. They are listed and revoked in Settings, so they do not
+ * expire on their own.
+ */
+const ACCOUNT = 'account:';
+
+/** The user an account link belongs to, or null for document/project links. */
+export function accountOf(c: { projectId?: string | null }): string | null {
+  return c.projectId?.startsWith(ACCOUNT) ? c.projectId.slice(ACCOUNT.length) : null;
+}
+
+/** Documents a user can open (theirs, shared with them, or owned by nobody), newest first. */
+export async function accountDocuments(userId: string): Promise<{ id: string; name: string; updatedAt: number; projectId: string | null }[]> {
+  const mine = await documentsFor(userId);
+  const owned = new Set((await (await persistence()).loadMemberships({})).map((m) => m.docId));
+  return (await listDocuments())
+    .filter((d) => mine.has(d.id) || !owned.has(d.id))
+    .sort((a, b) => b.updatedAt - a.updatedAt)
+    .map((d) => ({ id: d.id, name: d.name, updatedAt: d.updatedAt, projectId: d.projectId ?? null }));
+}
+
+/** A new document for an account link's owner, owned by them like one made in the app. */
+export async function createAccountDocument(userId: string, name: string) {
+  const doc = await createDocument(name.trim() || 'Untitled');
+  await grant(doc.id, userId, 'owner');
+  return doc;
+}
+
+export async function createAccountConnection(userId: string, label?: string): Promise<Connection> {
+  const docs = await accountDocuments(userId);
+  const start = docs[0] ? getDocument(docs[0].id) ?? (await ensureLoaded(docs[0].id)) : await createAccountDocument(userId, 'Untitled');
+  if (!start) throw new ConnectionError('Could not open a document for this link.');
+  const row: StoredConnection = {
+    code: randomCode(), docId: start.id, label: label ?? null, createdAt: Date.now(),
+    redeemedAt: null, lastUsedAt: null, revoked: false, projectId: `${ACCOUNT}${userId}`,
+  };
+  await (await persistence()).saveConnection(row);
+  return fromRow(row, start.name);
+}
+
+export async function listAccountConnections(userId: string) {
+  const rows = (await (await persistence()).loadConnections()).filter((c) => !c.revoked && c.projectId === `${ACCOUNT}${userId}`);
+  return rows
+    .sort((a, b) => b.createdAt - a.createdAt)
+    .map((r) => ({ code: r.code, label: r.label, createdAt: r.createdAt, lastUsedAt: r.lastUsedAt }));
+}
+
 /** The documents filed in a project, most recently changed first. */
 export async function projectDocuments(projectId: string): Promise<{ id: string; name: string; updatedAt: number }[]> {
   return (await listDocuments())
@@ -143,11 +195,14 @@ export async function createProjectConnection(
  */
 export async function switchConnectionDocument(connection: Connection, docId: string): Promise<Connection> {
   if (!connection.projectId) {
-    throw new ConnectionError('This connection is for one document. Ask for a project connection to move between documents.');
+    throw new ConnectionError('This connection is for one document. Make an account link in Settings → Agents to move between documents.');
   }
-  const docs = await projectDocuments(connection.projectId);
+  const account = accountOf(connection);
+  const docs = account ? await accountDocuments(account) : await projectDocuments(connection.projectId);
   if (!docs.some((d) => d.id === docId)) {
-    throw new ConnectionError(`Document "${docId}" is not in this project. list_documents shows the ones that are.`);
+    throw new ConnectionError(account
+      ? `No document "${docId}" you can open. list_documents shows the ones you can.`
+      : `Document "${docId}" is not in this project. list_documents shows the ones that are.`);
   }
   await ensureLoaded(docId);
   const doc = getDocument(docId);
@@ -187,7 +242,17 @@ export async function resolveConnection(code: string): Promise<Connection | null
     throw new ConnectionError(
       `This connection link expired at ${new Date(row.expiresAt).toISOString()}. Ask for a new one from the Connect agent panel.`);
   }
-  if (row.redeemedAt === null) {
+  const account = accountOf(row);
+  if (account) {
+    row.redeemedAt ??= t;
+    row.lastUsedAt = t;
+    // The document it was on may be gone; carry on from the newest one.
+    if (!(await ensureLoaded(row.docId))) {
+      const next = (await accountDocuments(account))[0] ?? (await createAccountDocument(account, 'Untitled'));
+      row.docId = next.id;
+    }
+    await store.saveConnection(row);
+  } else if (row.redeemedAt === null) {
     if (t - row.createdAt > UNREDEEMED_TTL_MS) { await revokeConnection(row.code); return null; }
     row.redeemedAt = t;
     row.lastUsedAt = t;

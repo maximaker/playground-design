@@ -11,6 +11,7 @@ import { type Appearance, type Theme, SCALE_RANGE } from '../state/appearance.ts
 import type { CanvasPrefs } from '../state/canvasPrefs.ts';
 import { useCanvas } from '../state/store.ts';
 import { Icon, type IconName } from './Icon.tsx';
+import { AgentLinks } from './AgentLinks.tsx';
 
 const CANVAS_TOGGLES: { key: keyof CanvasPrefs; label: string; hint: string }[] = [
   { key: 'grid', label: 'Dot grid', hint: 'The dotted background under the artboards.' },
@@ -71,7 +72,8 @@ export function Settings({ appearance, onChange, onClose }: {
   }, [onClose]);
 
   return (
-    <div className="settings-popover" ref={ref} role="dialog" aria-label="Appearance">
+    <div className="settings-popover" ref={ref} role="dialog" aria-label="Settings">
+      <AgentLinks />
       <div className="settings-group">
         <span>Theme</span>
         <div className="segmented">

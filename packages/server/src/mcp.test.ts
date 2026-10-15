@@ -1463,3 +1463,105 @@ test('scoped links: read-only, section-limited, expiring and self-revoking', asy
   assert.ok(listed.connections.find((x) => x.code === ro.connection.code)!.readOnly);
   void store;
 });
+
+test('account links (Settings → Agents): every document, documentId on tools, create and rename', async () => {
+  const made = await api('/api/agents', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ label: 'Claude' }) });
+  assert.equal(made.status, 201);
+  const setup = await made.json() as { url: string; connection: { code: string } };
+  assert.match(setup.url, /\/mcp\/[A-Z0-9-]+$/);
+  const listed = await (await api('/api/agents')).json() as { links: { code: string; label: string }[] };
+  assert.ok(listed.links.some((l) => l.code === setup.connection.code && l.label === 'Claude'));
+
+  const { agent, raw } = await agentFor(setup.connection.code);
+  const call = async <T>(tool: string, args: Record<string, unknown> = {}): Promise<T> => {
+    const res = await raw(tool, args);
+    if (isError(res)) throw new Error(`${tool}: ${textOf(res)}`);
+    return jsonOf<T>(res);
+  };
+  assert.equal((await call<{ scope: string }>('connection_info')).scope, 'account');
+
+  const a = await call<{ id: string; url: string }>('create_document', { name: 'Booking audit' });
+  assert.match(a.url, /\/d\/doc/);
+  const b = await call<{ id: string }>('create_document', { name: 'Second' });
+  const docs = await call<{ scope: string; current: string; documents: { id: string }[] }>('list_documents');
+  assert.equal(docs.scope, 'account');
+  assert.equal(docs.current, b.id);
+  assert.ok(docs.documents.some((d) => d.id === a.id));
+
+  // Any tool acts on another document when given documentId.
+  const info = await call<{ documentName: string; account?: unknown }>('get_basic_info', { documentId: a.id });
+  assert.equal(info.documentName, 'Booking audit');
+  assert.ok(info.account);
+
+  await call('rename_document', { documentId: a.id, name: 'Booking audit v2' });
+  assert.equal(getDocument(a.id)!.name, 'Booking audit v2');
+  assert.ok(isError(await raw('rename_document', { documentId: 'doc_nope', name: 'x' })));
+
+  // Revoking in Settings ends it.
+  assert.equal((await api(`/api/agents/${setup.connection.code}`, { method: 'DELETE' })).status, 200);
+  const after = await fetch(`${base}/mcp/${setup.connection.code}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+  assert.equal(after.status, 401);
+  await agent.close().catch(() => {});
+});
+
+test('a document link cannot create documents and ignores nothing silently', async () => {
+  const { agent, raw } = await freshAgent('Single');
+  assert.ok(isError(await raw('create_document', { name: 'Nope' })));
+  assert.ok(isError(await raw('get_basic_info', { documentId: 'doc_elsewhere' })));
+  await agent.close();
+});
+
+test('apply_template leaves no stray artboards', async () => {
+  const { id, agent, call } = await freshAgent('Template');
+  const kits = await call<{ templates?: { id: string }[] } | { id: string }[]>('list_templates');
+  const kit = (Array.isArray(kits) ? kits : kits.templates!)[0]!.id;
+  const first = await call<{ artboards: string[]; removedBlankArtboard?: string }>('apply_template', { template: kit });
+  assert.ok(first.removedBlankArtboard, 'the blank Desktop frame of a new document goes');
+  const page = getDocument(id)!.pages[0]!;
+  assert.deepEqual(page.artboards, first.artboards);
+  const xs = first.artboards.map((a) => getDocument(id)!.nodes[a]!.attrs['data-x']);
+  assert.equal(new Set(xs).size, xs.length, 'boards do not stack on one x');
+  const again = await call<{ artboards: string[]; alreadyThere?: string[] }>('apply_template', { template: kit });
+  assert.deepEqual(again.artboards, []);
+  assert.equal(getDocument(id)!.pages[0]!.artboards.length, first.artboards.length);
+  const tokensOnly = await freshAgent('Tokens only');
+  const t = await tokensOnly.call<{ artboards: string[] }>('apply_template', { template: kit, foundations: false });
+  assert.deepEqual(t.artboards, []);
+  assert.equal(getDocument(tokensOnly.id)!.pages[0]!.artboards.length, 1);
+  await agent.close();
+  await tokensOnly.agent.close();
+});
+
+test('link_items links a document to a Studio task through the links store', async () => {
+  const { id, agent, call, raw } = await freshAgent('Linked');
+  assert.ok(isError(await raw('link_items', { from: id, to: 'heymax://studio/task/t1' })), 'off without CONNECT_ENABLED');
+  const posted: { from: { uri: string }; to: { uri: string } }[] = [];
+  const real = globalThis.fetch;
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    const u = new URL(String(input instanceof Request ? input.url : input));
+    if (u.host !== 'links.test' && u.host !== 'studio.test') return real(input, init);
+    if (u.pathname === '/api/connect/item') return Response.json({ app: 'studio', type: 'task', id: 't1', uri: 'heymax://studio/task/t1', title: 'Audit', url: 'https://studio.test/work?task=t1', updated: null });
+    if (u.pathname === '/api/links' && init?.method === 'POST') {
+      posted.push(JSON.parse(String(init.body)));
+      return Response.json({ id: '00000000-0000-0000-0000-000000000001' }, { status: 201 });
+    }
+    if (u.pathname === '/api/links') return Response.json({ links: [{ id: '00000000-0000-0000-0000-000000000001' }] });
+    return Response.json({ ok: true });
+  }) as typeof fetch;
+  process.env.CONNECT_ENABLED = 'true';
+  process.env.LINKS_URL = 'http://links.test';
+  process.env.CONNECT_STUDIO_URL = 'http://studio.test';
+  try {
+    const linked = await call<{ id: string; to: { title: string } }>('link_items', { from: id, to: 'heymax://studio/task/t1' });
+    assert.equal(posted[0]!.from.uri, `heymax://playground/doc/${id}`);
+    assert.equal(linked.to.title, 'Audit');
+    assert.equal((await call<{ links: unknown[] }>('list_links', { item: id })).links.length, 1);
+    assert.ok((await call<{ ok: boolean }>('unlink_items', { id: linked.id })).ok);
+  } finally {
+    globalThis.fetch = real;
+    delete process.env.CONNECT_ENABLED;
+    delete process.env.LINKS_URL;
+    delete process.env.CONNECT_STUDIO_URL;
+  }
+  await agent.close();
+});

@@ -30,3 +30,8 @@ export function unfurl(args: {
 export function proxyLinks(args: {
   method: 'GET' | 'POST' | 'DELETE'; uri?: string; id?: string; body?: unknown; cookie?: string; cfg: ConnectConfig;
 }): Promise<{ status: number; body: unknown }>;
+type Fail = { ok: false; error: string };
+export function resolveItem(o: { self: string; ref: string; local: (ref: string) => Promise<ConnectItem | null>; cfg: ConnectConfig }): Promise<ConnectItem | null>;
+export function linkItems(o: { self: string; from: string; to: string; kind?: 'relates' | 'for'; local: (ref: string) => Promise<ConnectItem | null>; cfg: ConnectConfig }): Promise<{ ok: true; id: string; kind: string; from: ConnectItem; to: ConnectItem } | Fail>;
+export function listItemLinks(o: { self: string; ref: string; local: (ref: string) => Promise<ConnectItem | null>; cfg: ConnectConfig }): Promise<{ ok: true; uri: string; links: unknown[] } | Fail>;
+export function unlinkItems(o: { id: string; cfg: ConnectConfig }): Promise<{ ok: true; id: string } | Fail>;
