@@ -26,7 +26,7 @@ import { peersOf, hasLiveTab } from './realtime.ts';
 import {
   ConnectionError, type ConnectionOptions, createConnection, createProjectConnection, listConnections, projectDocuments, resolveConnection, revokeConnection,
   type Connection,
-  createAccountConnection, listAccountConnections, accountOf,
+  createAccountConnection, listAccountConnections, accountOf, parseLinkScope,
 } from './connections.ts';
 import { handleMcpRequest } from './mcp.ts';
 import { getAsset, storeAsset, AssetError, MAX_ASSET_BYTES } from './assets.ts';
@@ -60,6 +60,8 @@ import { idUrl, userFromCookies } from './sso.ts';
 import { connect } from './connect.ts';
 import { isOnMountedVolume } from './volume.ts';
 import { dirname } from 'node:path';
+import { rateLimit, securityHeaders } from './security.ts';
+import { bodyLimit } from 'hono/body-limit';
 
 const PORT = Number(process.env.PORT ?? 4000);
 const PUBLIC_URL =
@@ -111,6 +113,20 @@ app.use('/assets/*', async (c, next) => {
 });
 
 app.use('*', cors({ origin: (o) => o ?? '*', credentials: true }));
+app.use('*', securityHeaders);
+
+/*
+ * Per-IP limits on everything reachable without an account. Sign-in and
+ * sign-up are the brute-force targets and get the tightest bucket; share and
+ * invite tokens are long enough not to be guessed, so theirs only stops floods.
+ */
+const SMALL_BODY = bodyLimit({ maxSize: 64 * 1024, onError: (c) => c.json({ error: 'Request body too large.' }, 413) });
+app.use('/api/auth/*', rateLimit({ name: 'auth', limit: 10, windowMs: 60_000 }), SMALL_BODY);
+app.use('/api/invites/*', rateLimit({ name: 'invites', limit: 30, windowMs: 60_000 }), SMALL_BODY);
+app.use('/api/shares/*', rateLimit({ name: 'shares', limit: 120, windowMs: 60_000 }),
+  bodyLimit({ maxSize: 1024 * 1024, onError: (c) => c.json({ error: 'Request body too large.' }, 413) }));
+app.use('/api/connect/*', rateLimit({ name: 'connect', limit: 120, windowMs: 60_000 }));
+app.use('/mcp/*', rateLimit({ name: 'mcp', limit: 600, windowMs: 60_000 }));
 
 /**
  * Turns an unhandled failure into something the caller can act on.
@@ -757,7 +773,26 @@ api.post('/documents/:id/connections', async (c) => {
  * A connection for every document in a project. The agent starts on `docId`
  * (or the most recently changed document) and moves with switch_document.
  */
+/**
+ * Projects have no members of their own, so a project link is only as wide as
+ * the caller's access: they must be able to `needed` every document filed in it.
+ * Without this, any signed-in account could mint (or list) an agent link into
+ * documents it was never invited to.
+ */
+async function mayUseProject(userId: string, projectId: string, needed: MemberRole): Promise<boolean> {
+  const store = await persistence();
+  for (const d of await projectDocuments(projectId)) {
+    const unowned = (await store.loadMemberships({ docId: d.id })).length === 0;
+    if (unowned) continue;
+    if (!atLeast(await roleFor(d.id, userId), needed)) return false;
+  }
+  return true;
+}
+
 api.post('/projects/:id/connections', async (c) => {
+  if (!(await mayUseProject(c.get('user')!.id, c.req.param('id'), 'editor'))) {
+    return c.json({ error: 'You do not have access to every document in this project.' }, 403);
+  }
   const body = await c.req.json<ConnectionBody>().catch(() => ({} as ConnectionBody));
   try {
     const conn = await createProjectConnection(c.req.param('id'), body.label, body.docId, connectionOptions(body));
@@ -768,6 +803,9 @@ api.post('/projects/:id/connections', async (c) => {
 });
 
 api.get('/projects/:id/connections', async (c) => {
+  if (!(await mayUseProject(c.get('user')!.id, c.req.param('id'), 'editor'))) {
+    return c.json({ error: 'You do not have access to every document in this project.' }, 403);
+  }
   const store = await persistence();
   const rows = (await store.loadConnections()).filter((r) => r.projectId === c.req.param('id') && !r.revoked);
   return c.json({ connections: rows.map(({ revoked, ...rest }) => { void revoked; return rest; }) });
@@ -782,10 +820,26 @@ api.get('/agents', async (c) => {
   return c.json({ links: await listAccountConnections(c.get('user')!.id) });
 });
 
+/**
+ * Body: { label?, expiresAt?: epoch ms | ISO date | null, scope?: 'read' | 'write' }.
+ * No expiry and 'write' unless asked: the link is listed and revocable in Settings.
+ */
 api.post('/agents', async (c) => {
-  const body = await c.req.json<{ label?: string }>().catch(() => ({} as { label?: string }));
-  const conn = await createAccountConnection(c.get('user')!.id, body.label?.trim() || 'Claude');
-  return c.json(connectionSetup(conn), 201);
+  type Body = { label?: string; expiresAt?: number | string | null; scope?: unknown };
+  const body = await c.req.json<Body>().catch(() => ({} as Body));
+  try {
+    let expiresAt: number | null = null;
+    if (typeof body.expiresAt === 'string') expiresAt = Date.parse(body.expiresAt);
+    else if (typeof body.expiresAt === 'number') expiresAt = body.expiresAt;
+    if (expiresAt !== null && Number.isNaN(expiresAt)) throw new ConnectionError('expiresAt is not a date.');
+    const conn = await createAccountConnection(c.get('user')!.id, String(body.label ?? '').trim().slice(0, 80) || 'Claude', {
+      expiresAt, scope: parseLinkScope(body.scope),
+    });
+    return c.json(connectionSetup(conn), 201);
+  } catch (err) {
+    if (err instanceof ConnectionError) return c.json({ error: err.message }, 400);
+    throw err;
+  }
 });
 
 api.delete('/agents/:code', async (c) => {
@@ -1267,7 +1321,13 @@ api.post('/documents/:id/assets', async (c) => {
   if (file.size > MAX_ASSET_BYTES) return c.json({ error: `file exceeds ${MAX_ASSET_BYTES / 1e6}MB` }, 413);
 
   const bytes = Buffer.from(await file.arrayBuffer());
-  const id = await storeAsset(doc.id, file.type || 'application/octet-stream', file.name, bytes);
+  let id: string;
+  try {
+    id = await storeAsset(doc.id, file.type || 'application/octet-stream', file.name, bytes);
+  } catch (err) {
+    if (err instanceof AssetError) return c.json({ error: err.message }, 415);
+    throw err;
+  }
   return c.json({ id, url: `${PUBLIC_URL}/assets/${id}`, name: file.name, size: bytes.length }, 201);
 });
 

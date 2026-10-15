@@ -7,7 +7,13 @@
 
 import { useEffect, useState } from 'react';
 
-interface Link { code: string; label: string | null; createdAt: number; lastUsedAt: number | null }
+interface Link {
+  code: string; label: string | null; createdAt: number; lastUsedAt: number | null;
+  expiresAt?: number | null; scope?: 'read' | 'write'; expired?: boolean;
+}
+
+/** Expiry choices in days; 0 is never. */
+const EXPIRY_DAYS = [0, 7, 30, 90];
 
 const when = (ms: number | null) => (ms ? new Date(ms).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) : 'never');
 
@@ -16,6 +22,8 @@ export function AgentLinks() {
   const [fresh, setFresh] = useState<{ url: string; command: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState('');
+  const [scope, setScope] = useState<'read' | 'write'>('write');
+  const [days, setDays] = useState(0);
 
   const load = () =>
     fetch('/api/agents')
@@ -26,7 +34,7 @@ export function AgentLinks() {
 
   const make = async () => {
     setError(null);
-    const r = await fetch('/api/agents', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ label: 'Claude' }) });
+    const r = await fetch('/api/agents', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ label: 'Claude', scope, expiresAt: days ? Date.now() + days * 86_400_000 : null }) });
     if (!r.ok) return setError('Could not make a link. Try again.');
     const b = (await r.json()) as { url: string; setup: { claudeCode: string } };
     setFresh({ url: b.url, command: b.setup.claudeCode });
@@ -62,13 +70,28 @@ export function AgentLinks() {
         <ul className="agent-links-list">
           {links.map((l) => (
             <li key={l.code}>
-              <span>{l.label ?? 'Agent'} <em>last used {when(l.lastUsedAt)}</em></span>
+              <span>{l.label ?? 'Agent'} <em>{l.scope === 'read' ? 'read only · ' : ''}{l.expired ? 'expired · ' : l.expiresAt ? `until ${when(l.expiresAt)} · ` : ''}last used {when(l.lastUsedAt)}</em></span>
               <button className="button subtle" onClick={() => remove(l.code)} aria-label={`Remove ${l.label ?? 'agent'} link`}>Remove</button>
             </li>
           ))}
         </ul>
       ) : null}
       {error ? <p className="agent-links-hint">{error}</p> : null}
+      <div className="agent-links-options">
+        <label>
+          Access{' '}
+          <select value={scope} onChange={(e) => setScope(e.target.value as 'read' | 'write')}>
+            <option value="write">Read and write</option>
+            <option value="read">Read only</option>
+          </select>
+        </label>
+        <label>
+          Expires{' '}
+          <select value={days} onChange={(e) => setDays(Number(e.target.value))}>
+            {EXPIRY_DAYS.map((d) => <option key={d} value={d}>{d ? `in ${d} days` : 'never'}</option>)}
+          </select>
+        </label>
+      </div>
       <button className="button full" onClick={make}>Make an agent link</button>
     </div>
   );

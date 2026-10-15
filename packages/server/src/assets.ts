@@ -2,6 +2,7 @@
 
 import { newId } from '@playground/shared';
 import { persistence } from './persistence.ts';
+import { uploadProblem } from './security.ts';
 
 export const MAX_ASSET_BYTES = 25 * 1024 * 1024;
 
@@ -30,6 +31,8 @@ export async function storeAsset(
   if (!ALLOWED_MIME.has(mime)) {
     throw new AssetError(`Unsupported type "${mime}". Allowed: ${[...ALLOWED_MIME].join(', ')}`);
   }
+  const problem = uploadProblem(mime, bytes);
+  if (problem) throw new AssetError(problem);
   const id = newId('a');
   const store = await persistence();
   await store.saveAsset({ id, docId, mime, name, bytes, createdAt: Date.now() });

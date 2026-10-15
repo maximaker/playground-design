@@ -1476,6 +1476,7 @@ code { font-family: var(--mono); font-size: 0.92em; }
 .agent-links-fresh { display: flex; flex-direction: column; gap: var(--s2); }
 .agent-links-fresh code { font-family: var(--font-mono); font-size: 0.72rem; word-break: break-all; padding: var(--s2); background: var(--bg-input); border-radius: var(--radius-sm); }
 .agent-links-actions { display: flex; flex-wrap: wrap; gap: var(--s2); }
+.agent-links-options { display: flex; flex-wrap: wrap; gap: var(--s2); font-size: 12px; }
 .agent-links-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--s1); }
 .agent-links-list li { display: flex; align-items: center; justify-content: space-between; gap: var(--s2); font-size: 0.8rem; }
 .agent-links-list em { font-style: normal; color: var(--fg-muted); }

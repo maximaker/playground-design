@@ -136,13 +136,25 @@ export async function createAccountDocument(userId: string, name: string) {
   return doc;
 }
 
-export async function createAccountConnection(userId: string, label?: string): Promise<Connection> {
+/** What an account link may do: 'read' is reads and comments, 'write' is everything (the default). */
+export type LinkScope = 'read' | 'write';
+
+export function parseLinkScope(value: unknown): LinkScope {
+  if (value === undefined || value === null || value === 'write') return 'write';
+  if (value === 'read') return 'read';
+  throw new ConnectionError('scope must be "read" or "write".');
+}
+
+export async function createAccountConnection(
+  userId: string, label?: string, options: { expiresAt?: number | null; scope?: LinkScope } = {},
+): Promise<Connection> {
+  const opts = checkOptions({ expiresAt: options.expiresAt ?? null, readOnly: options.scope === 'read' }, null);
   const docs = await accountDocuments(userId);
   const start = docs[0] ? getDocument(docs[0].id) ?? (await ensureLoaded(docs[0].id)) : await createAccountDocument(userId, 'Untitled');
   if (!start) throw new ConnectionError('Could not open a document for this link.');
   const row: StoredConnection = {
     code: randomCode(), docId: start.id, label: label ?? null, createdAt: Date.now(),
-    redeemedAt: null, lastUsedAt: null, revoked: false, projectId: `${ACCOUNT}${userId}`,
+    redeemedAt: null, lastUsedAt: null, revoked: false, projectId: `${ACCOUNT}${userId}`, ...opts,
   };
   await (await persistence()).saveConnection(row);
   return fromRow(row, start.name);
@@ -152,7 +164,12 @@ export async function listAccountConnections(userId: string) {
   const rows = (await (await persistence()).loadConnections()).filter((c) => !c.revoked && c.projectId === `${ACCOUNT}${userId}`);
   return rows
     .sort((a, b) => b.createdAt - a.createdAt)
-    .map((r) => ({ code: r.code, label: r.label, createdAt: r.createdAt, lastUsedAt: r.lastUsedAt }));
+    .map((r) => ({
+      code: r.code, label: r.label, createdAt: r.createdAt, lastUsedAt: r.lastUsedAt,
+      expiresAt: r.expiresAt ?? null,
+      scope: (r.readOnly ? 'read' : 'write') as LinkScope,
+      ...(r.expiresAt && r.expiresAt < Date.now() ? { expired: true } : {}),
+    }));
 }
 
 /** The documents filed in a project, most recently changed first. */
