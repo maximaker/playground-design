@@ -294,7 +294,7 @@ function buildEntries({
 }
 
 /**
- * heymax connect: the same query across Studio OS, Notes, Artifactory and
+ * heymax connect: the same query across Studio, Notes, Artifactory and
  * Playground's library, through /api/connect/everywhere. Only once connect
  * says it is on, only for a typed query, and always after this document's own
  * results, so the palette's commands are never pushed down.

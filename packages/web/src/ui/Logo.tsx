@@ -4,7 +4,7 @@
  * The mark is the family ink tile on the 48-unit grid: the crop marks of an
  * artboard in white and the cursor working on it in blue 300 — one accent
  * shape, like every app in the family. The wordmark is Inter 600 in sentence
- * case with no tracking, the same as Studio OS, Artifactory and Notes.
+ * case with no tracking, the same as Studio, Artifactory and Notes.
  */
 
 interface Props {

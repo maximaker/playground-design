@@ -85,10 +85,12 @@ export function Home({ onOpen, appearance, onAppearance, session }: {
   const searchRef = useRef<HTMLInputElement>(null);
   const importRef = useRef<HTMLInputElement>(null);
   const makersRef = useRef<HTMLElement>(null);
-  // "Starting points" from the editor lands here with #start.
-  useEffect(() => {
-    if (location.hash === '#start') makersRef.current?.scrollIntoView({ block: 'start' });
-  }, []);
+  // Documents lead; the starting picker opens from New, the dial, or #start ("Starting points" in the editor).
+  const [startOpen, setStartOpen] = useState(() => location.hash === '#start');
+  const openStart = () => {
+    setStartOpen(true);
+    requestAnimationFrame(() => makersRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+  };
 
   const refresh = useCallback(async () => {
     try {
@@ -267,7 +269,7 @@ export function Home({ onOpen, appearance, onAppearance, session }: {
     onSelect: (id) => {
       if (id === 'search') searchRef.current?.focus();
       else if (id === 'new') void create();
-      else if (id === 'templates') makersRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      else if (id === 'templates') openStart();
       else if (id === 'import') importRef.current?.click();
       else if (id === 'home') { navigate('/'); window.scrollTo({ top: 0 }); }
     },
@@ -315,104 +317,121 @@ export function Home({ onOpen, appearance, onAppearance, session }: {
     />
     <div className="hm-dial-offset">
     <div className="home">
-      <section className="makers" id="start" ref={makersRef} aria-labelledby="makers-title">
-        <div className="makers-head">
-          <div>
-            <h1 id="makers-title">What are you making?</h1>
-            <p className="dim">Design a page and put it online, on your own or with an agent helping. Every word, picture and colour can be changed.</p>
-          </div>
-          <div className="home-actions">
-          {/*
-            * A label rather than a button: a file input cannot be opened from
-            * script without a user gesture on it, and hiding the input behind a
-            * label is the only way to have both a real picker and a styled
-            * control.
-            */}
-          <label className={`button${importing ? ' is-busy' : ''}`}>
-            <Icon name="upload" size={14} />
-            <span className="home-action-label">{importing ? 'Importing…' : 'Import a bundle'}</span>
-            <input
-              ref={importRef}
-              type="file"
-              accept="application/json,.json"
-              className="sr-only"
-              aria-label="Import a bundle"
-              onChange={(e) => {
-                const file = e.target.files?.[0];
-                // Reset first: picking the same file twice must fire again.
-                e.target.value = '';
-                if (file) void importBundle(file);
-              }}
-            />
-          </label>
-            <button className="button primary home-new" onClick={() => void create()} disabled={creating}>
-              <Icon name="plus" size={14} /> <span className="home-action-label">Blank page</span>
-            </button>
-          </div>
-        </div>
-        <div className="makers-style">
-          {templates.length > 0 && (
-            <div className="style-picker" role="radiogroup" aria-label="Style">
-              <span className="dim">Style</span>
-              {templates.map((t) => (
-                <button
-                  key={t.id}
-                  role="radio"
-                  aria-checked={style === t.id}
-                  className={`style-chip starter-${t.id}${style === t.id ? ' is-active' : ''}`}
-                  onClick={() => setStyle(t.id)}
-                  title={t.description}
-                >
-                  <span className="starter-swatches" aria-hidden />
-                  {t.name}
-                </button>
-              ))}
-            </div>
+      <div className="home-head">
+        <div className="library-title">
+          <h1 className="home-page-title">{title === 'All documents' ? 'Documents' : title}</h1>
+          {!loading && !error && (
+            <span className="dim">
+              {shown.length} document{shown.length === 1 ? '' : 's'}
+              {query && docs.length !== shown.length ? ` of ${docs.length}` : ''}
+            </span>
           )}
         </div>
-        <div className="maker-grid">
-          {starters.map((s) => (
-            <button
-              key={s.id}
-              className="maker"
-              onClick={() => void create(style, s.id)}
-              disabled={creating}
-            >
-              <MakerPreview html={s.preview} />
-              <span className="maker-text">
-                <strong>{s.name}</strong>
-                <span className="dim">{s.description}</span>
-              </span>
-            </button>
-          ))}
-        </div>
-        {templates.length > 0 && (
-          <details className="makers-more">
-            <summary>For designers: start from a design system instead</summary>
-            <p className="dim">
-              Each kit sets up tokens and a foundations sheet, so you — and any agent you
-              connect — have real variables to reference instead of inventing hex codes.
-            </p>
-            <div className="starter-row">
-              {templates.map((t) => (
-                <button
-                  key={t.id}
-                  className={`starter starter-${t.id}`}
-                  onClick={() => void create(t.id)}
-                  disabled={creating}
-                  title={t.description}
-                >
-                  <span className="starter-swatches" aria-hidden />
-                  <span className="starter-text">
-                    <strong>{t.name}</strong>
-                    <span className="dim">{t.description}</span>
-                  </span>
-                </button>
-              ))}
+        <button className="button primary home-new" onClick={() => (startOpen ? void create() : openStart())} disabled={creating}>
+          <Icon name="plus" size={14} /> <span className="home-action-label">{startOpen ? 'Blank page' : 'New'}</span>
+        </button>
+        <input
+          ref={importRef}
+          id="import-bundle"
+          type="file"
+          accept="application/json,.json"
+          className="sr-only"
+          aria-label="Import a bundle"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            // Reset first: picking the same file twice must fire again.
+            e.target.value = '';
+            if (file) void importBundle(file);
+          }}
+        />
+      </div>
+
+      {(startOpen || (!loading && !error && docs.length === 0)) && (
+      <section className="makers" id="start" ref={makersRef} aria-labelledby="makers-title">
+          <div className="makers-head">
+            <div>
+              <h2 id="makers-title">What are you making?</h2>
+              <p className="dim">Design a page and put it online, on your own or with an agent helping. Every word, picture and colour can be changed.</p>
             </div>
-          </details>
-        )}
-      </section>
+            <div className="home-actions">
+              <label className={`button subtle${importing ? ' is-busy' : ''}`} htmlFor="import-bundle">
+                <Icon name="upload" size={14} />
+                <span className="home-action-label">{importing ? 'Importing…' : 'Import a bundle'}</span>
+              </label>
+              <button className="button" onClick={() => void create()} disabled={creating}>
+                <Icon name="plus" size={14} /> <span className="home-action-label">Blank page</span>
+              </button>
+              {docs.length > 0 && (
+                <button className="icon-button" aria-label="Close" title="Close" onClick={() => setStartOpen(false)}>
+                  <Icon name="close" size={14} />
+                </button>
+              )}
+            </div>
+          </div>
+          <div className="makers-style">
+            {templates.length > 0 && (
+              <div className="style-picker" role="radiogroup" aria-label="Style">
+                <span className="dim">Style</span>
+                {templates.map((t) => (
+                  <button
+                    key={t.id}
+                    role="radio"
+                    aria-checked={style === t.id}
+                    className={`style-chip starter-${t.id}${style === t.id ? ' is-active' : ''}`}
+                    onClick={() => setStyle(t.id)}
+                    title={t.description}
+                  >
+                    <span className="starter-swatches" aria-hidden />
+                    {t.name}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          <div className="maker-grid">
+            {starters.map((s) => (
+              <button
+                key={s.id}
+                className="maker"
+                onClick={() => void create(style, s.id)}
+                disabled={creating}
+              >
+                <MakerPreview html={s.preview} />
+                <span className="maker-text">
+                  <strong>{s.name}</strong>
+                  <span className="dim">{s.description}</span>
+                </span>
+              </button>
+            ))}
+          </div>
+          {templates.length > 0 && (
+            <details className="makers-more">
+              <summary>For designers: start from a design system instead</summary>
+              <p className="dim">
+                Each kit sets up tokens and a foundations sheet, so you — and any agent you
+                connect — have real variables to reference instead of inventing hex codes.
+              </p>
+              <div className="starter-row">
+                {templates.map((t) => (
+                  <button
+                    key={t.id}
+                    className={`starter starter-${t.id}`}
+                    onClick={() => void create(t.id)}
+                    disabled={creating}
+                    title={t.description}
+                  >
+                    <span className="starter-swatches" aria-hidden />
+                    <span className="starter-text">
+                      <strong>{t.name}</strong>
+                      <span className="dim">{t.description}</span>
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </details>
+          )}
+        </section>
+      )}
 
       {error && (
         <p className="home-error">
@@ -426,13 +445,6 @@ export function Home({ onOpen, appearance, onAppearance, session }: {
 
           <section className="library-docs">
             <div className="library-docs-head">
-              <div className="library-title">
-                <h2 className="home-section-title">{title}</h2>
-                <span className="dim">
-                  {shown.length} document{shown.length === 1 ? '' : 's'}
-                  {query && docs.length !== shown.length ? ` of ${docs.length}` : ''}
-                </span>
-              </div>
 
               <div className="library-tools">
                 {/* What the sidebar used to choose: everything, unfiled, or one project. */}
@@ -545,9 +557,7 @@ export function Home({ onOpen, appearance, onAppearance, session }: {
 
                   <div className="home-card-body">
                     <h3>{d.name}</h3>
-                    <p className="dim" title={`Revision ${d.rev}`}>
-                      {d.nodeCount.toLocaleString()} layer{d.nodeCount === 1 ? '' : 's'}
-                      <span className="home-card-sep">·</span>
+                    <p className="dim" title={`${d.nodeCount.toLocaleString()} layer${d.nodeCount === 1 ? '' : 's'} · revision ${d.rev}`}>
                       {relativeTime(d.updatedAt)}
                       {d.projectId && projects.find((p) => p.id === d.projectId) && (
                         <>
@@ -566,29 +576,32 @@ export function Home({ onOpen, appearance, onAppearance, session }: {
                   <div className="home-card-actions" onClick={(e) => e.stopPropagation()}>
                     <span className="home-card-menu-anchor">
                       <button
-                        className="button subtle"
+                        className="icon-button home-card-more"
+                        aria-label={`More for ${d.name}`}
+                        aria-haspopup="menu"
                         aria-expanded={menuFor === d.id}
                         onClick={() => setMenuFor(menuFor === d.id ? null : d.id)}
-                      >Move…</button>
+                      ><Icon name="more" size={15} /></button>
                       {menuFor === d.id && (
-                        <div className="home-card-menu">
+                        <div className="home-card-menu" role="menu">
                           {/* The same action as dragging, for the keyboard and
                               for anyone who never discovers that dragging works. */}
+                          {projects.length > 0 && <span className="dim">Move to</span>}
                           {projects.map((p) => (
                             <button
                               key={p.id}
+                              role="menuitem"
                               disabled={d.projectId === p.id}
                               onClick={() => void file(d.id, p.id)}
                             >{p.name}</button>
                           ))}
-                          {projects.length === 0 && <span className="dim">No projects yet</span>}
                           {d.projectId && (
-                            <button onClick={() => void file(d.id, null)}>Remove from project</button>
+                            <button role="menuitem" onClick={() => void file(d.id, null)}>Remove from project</button>
                           )}
+                          <button role="menuitem" className="danger" onClick={() => { setMenuFor(null); void remove(d.id, d.name); }}>Delete</button>
                         </div>
                       )}
                     </span>
-                    <button className="button subtle" onClick={() => void remove(d.id, d.name)}>Delete</button>
                   </div>
                 </div>
               ))}

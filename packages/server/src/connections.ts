@@ -106,7 +106,7 @@ export async function createConnection(docId: string, label?: string, options: C
 
 /*
  * Account links (Settings → Agents), the family standard: one link per agent
- * for everything its owner can open, like Studio OS, Notes and Artifactory.
+ * for everything its owner can open, like Studio, Notes and Artifactory.
  * Stored as a connection whose projectId is `account:<userId>`, so no schema
  * change; `docId` is the document it is on now, and tools take a documentId
  * to act on another. They are listed and revoked in Settings, so they do not

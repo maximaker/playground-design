@@ -97,6 +97,7 @@ export function appForHref(href) {
   try {
     const host = new URL(href).hostname;
     if (host === 'id.heymax.im') return null;
+    if (host === 'studio-os.heymax.im') return 'studio'; // Studio's old address
     return Object.entries(CONNECT_APPS).find(([, a]) => new URL(a.url).hostname === host)?.[0] ?? null;
   } catch {
     return null;
@@ -170,7 +171,7 @@ export async function linkItems({ self, from, to, kind = 'relates', local, cfg }
   if (!a) return { ok: false, error: `Could not find ${from}. Use a heymax:// URI or the item's page URL.` };
   if (!b) return { ok: false, error: `Could not find ${to}. Use a heymax:// URI or the item's page URL.` };
   if (kind === 'for' && !(b.app === 'studio' && b.type === 'engagement'))
-    return { ok: false, error: 'A "for" link tags an item with a Studio OS engagement: put the engagement in `to`.' };
+    return { ok: false, error: 'A "for" link tags an item with a Studio engagement: put the engagement in `to`.' };
   const end = (x) => ({ uri: x.uri, title: x.title, url: x.url });
   const r = await proxyLinks({ method: 'POST', body: { from: end(a), to: end(b), kind }, cookie: '', cfg });
   if (r.status >= 300) return { ok: false, error: r.body?.error || `The links store answered ${r.status}.` };

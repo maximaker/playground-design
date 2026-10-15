@@ -7,7 +7,7 @@
  */
 
 export const CONNECT_APPS = {
-  studio: { name: 'Studio OS', url: 'https://studio-os.heymax.im' },
+  studio: { name: 'Studio', url: 'https://studio.heymax.im' },
   artifactory: { name: 'Artifactory', url: 'https://artifactory.heymax.im' },
   playground: { name: 'Playground', url: 'https://playground.heymax.im' },
   notes: { name: 'Notes', url: 'https://notes.heymax.im' },

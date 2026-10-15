@@ -5177,7 +5177,7 @@ function registerSessionTools(server: McpServer, ctx: McpContext): void {
     return json({ id, name: name.trim() });
   }));
 
-  /* Across heymax: links to Studio OS, Notes and Artifactory (kit/docs/connect.md). */
+  /* Across heymax: links to Studio, Notes and Artifactory (kit/docs/connect.md). */
   const ref = z.string().describe(
     'A heymax:// URI (heymax://playground/doc/<id>, heymax://studio/task/<id>, heymax://studio/engagement/<id>, ' +
     'heymax://notes/page/<id>, heymax://artifactory/artifact/<id>), that item\'s page URL, or a bare Playground document id.');
@@ -5193,8 +5193,8 @@ function registerSessionTools(server: McpServer, ctx: McpContext): void {
   server.registerTool('link_items', {
     title: 'Link items across heymax',
     description:
-      'Links a Playground document to an item in another heymax app (a Studio OS task or engagement, a Notes page, an artifact). ' +
-      'It shows under Linked in both apps. kind "for" tags `from` with the Studio OS engagement in `to`.',
+      'Links a Playground document to an item in another heymax app (a Studio task or engagement, a Notes page, an artifact). ' +
+      'It shows under Linked in both apps. kind "for" tags `from` with the Studio engagement in `to`.',
     inputSchema: { from: ref, to: ref, kind: z.enum(['relates', 'for']).optional() },
   }, async ({ from, to, kind }) => guard(async () => out(await linkItems({ self: 'playground', from: bare(from), to: bare(to), kind, local, cfg: connectConfig() }))));
 

@@ -6,7 +6,7 @@
  *   <hm-linked-work uri="heymax://notes/page/abc" item-title="Kickoff notes" item-url="https://…"></hm-linked-work>
  *     optional: engagement="heymax://studio/engagement/<id>" (else its own or inherited tag) puts
  *     that engagement's work first in the picker; link-label="Attach" renames "+ Link work".
- *   <hm-unfurl href="https://studio-os.heymax.im/engagements/xyz"></hm-unfurl>
+ *   <hm-unfurl href="https://studio.heymax.im/engagements/xyz"></hm-unfurl>
  *   <hm-connect-search self="notes"></hm-connect-search>   (⌘K palette; call .open())
  *
  * If connect is switched off the routes 404 and every element removes itself.
@@ -253,7 +253,7 @@ class HmConnectSearch extends HTMLElement {
     this.classList.add('hm-cx');
     this.dialog = document.createElement('dialog');
     this.dialog.className = 'hm-cx-palette';
-    this.dialog.innerHTML = `<input class="hm-cx__input" type="search" placeholder="Search Studio OS, Notes, Artifactory, Playground…" aria-label="Search all apps" />
+    this.dialog.innerHTML = `<input class="hm-cx__input" type="search" placeholder="Search Studio, Notes, Artifactory, Playground…" aria-label="Search all apps" />
       <div class="hm-cx__results"></div>`;
     this.append(this.dialog);
     const input = this.dialog.querySelector('input');

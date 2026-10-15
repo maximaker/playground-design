@@ -8,7 +8,7 @@ import { LogoMark } from './Logo';
  * five-dot position indicator and the screen's actions.
  */
 const APPS = [
-  { key: 'studio', name: 'Studio OS', role: 'Run the business', url: 'https://studio-os.heymax.im' },
+  { key: 'studio', name: 'Studio', role: 'Run the business', url: 'https://studio.heymax.im' },
   { key: 'artifactory', name: 'Artifactory', role: 'Keep the work', url: 'https://artifactory.heymax.im' },
   { key: 'playground', name: 'Playground', role: 'Make the work', url: 'https://playground.heymax.im' },
   { key: 'notes', name: 'Notes', role: 'Think it through', url: 'https://notes.heymax.im' },
