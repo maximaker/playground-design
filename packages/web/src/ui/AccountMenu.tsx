@@ -77,7 +77,7 @@ export function AccountMenu({ user, onSignedOut, onAppearance }: {
           </div>
           {onAppearance && (
             <button className="account-item" onClick={() => { setOpen(false); onAppearance(); }}>
-              <Icon name="settings" size={14} /> Appearance
+              <Icon name="settings" size={14} /> Settings
             </button>
           )}
           <button

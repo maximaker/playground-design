@@ -558,7 +558,7 @@ function Editor({ source, onHome, appearance, onAppearance, session }: {
                   ...(readOnly ? [] : [viewing
                     ? { group: 'This phone', label: 'Edit on this phone', icon: 'edit' as IconName, run: () => setEditingOnPhone(true) }
                     : { group: 'This phone', label: 'Back to viewing', icon: 'eye' as IconName, run: () => setEditingOnPhone(false) }]),
-                  { group: 'This phone', label: 'Appearance', icon: 'settings' as IconName, run: () => setShowSettings(true) },
+                  { group: 'This phone', label: 'Settings', icon: 'settings' as IconName, run: () => setShowSettings(true) },
                 ]}
               />
             )}
@@ -591,7 +591,7 @@ function Editor({ source, onHome, appearance, onAppearance, session }: {
                   { group: 'Help', label: 'Keyboard shortcuts', hint: '?', icon: 'keyboard' as IconName, run: () => setModal('shortcuts') },
                   // Signed in, appearance lives in the avatar menu.
                   ...(session.user ? [] : [
-                    { group: 'Help', label: 'Appearance', icon: 'settings' as IconName, run: () => setShowSettings(true) },
+                    { group: 'Help', label: 'Settings', icon: 'settings' as IconName, run: () => setShowSettings(true) },
                   ]),
                 ]}
               />

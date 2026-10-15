@@ -181,7 +181,7 @@ function buildEntries({
   action('present', 'Present this page', 'play', actions.present, 'P');
   action('share', 'Share a link', 'share', actions.openShare);
   action('shortcuts', 'Keyboard shortcuts', 'keyboard', actions.openShortcuts, '?');
-  action('appearance', 'Appearance', 'settings', actions.openAppearance, undefined, 'Theme and interface scale');
+  action('appearance', 'Settings', 'settings', actions.openAppearance, undefined, 'Agents, theme and interface scale');
 
   action('undo', 'Undo', 'undo', () => useCanvas.getState().undo(), `${MOD}Z`);
   action('redo', 'Redo', 'redo', () => useCanvas.getState().redo(), `${MOD}⇧Z`);
