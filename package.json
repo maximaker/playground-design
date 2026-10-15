@@ -15,7 +15,9 @@
     "typecheck": "tsc -p packages/shared/tsconfig.json --noEmit && tsc -p packages/server/tsconfig.json --noEmit && tsc -p packages/web/tsconfig.json --noEmit",
     "test": "npm run test --workspace=@playground/shared && npm run test --workspace=@playground/server",
     "build:api": "node scripts/build-api.mjs",
-    "cli": "npm run cli --workspace @playground/server --"
+    "cli": "npm run cli --workspace @playground/server --",
+    "kit:check": "node ../kit/scripts/sync.mjs . --check --soft",
+    "pretest": "npm run kit:check"
   },
   "devDependencies": {
     "esbuild": "^0.28.2",

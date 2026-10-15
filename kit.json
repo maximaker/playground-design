@@ -1,0 +1,26 @@
+{
+  "app": "playground",
+  "files": {
+    "packages/web/src/kit-tokens.css": "tokens.css",
+    "packages/web/src/kit-topbar.css": "topbar/topbar.css",
+    "packages/web/src/kit-dial.css": "dial/dial.css",
+    "packages/web/src/kit-dial.js": "dial/dial.js",
+    "packages/web/src/kit-connect/connect.js": "connect/connect.js",
+    "packages/web/src/kit-connect/connect.css": "connect/connect.css",
+    "packages/web/src/kit-connect/ui.js": "connect/ui.js",
+    "packages/server/src/kit-connect/connect.js": "connect/connect.js",
+    "packages/web/public/kit/marks/artifactory.svg": "marks/artifactory.svg",
+    "packages/web/public/kit/marks/kit.svg": "marks/kit.svg",
+    "packages/web/public/kit/marks/notes.svg": "marks/notes.svg",
+    "packages/web/public/kit/marks/playground.svg": "marks/playground.svg",
+    "packages/web/public/kit/marks/studio.svg": "marks/studio.svg",
+    "packages/web/public/apple-touch-icon.png": "icons/playground/apple-touch-icon.png",
+    "packages/web/public/favicon-32.png": "icons/playground/favicon-32.png",
+    "packages/web/public/favicon.ico": "icons/playground/favicon.ico",
+    "packages/web/public/favicon.svg": "icons/playground/favicon.svg",
+    "packages/web/public/icon-192.png": "icons/playground/icon-192.png",
+    "packages/web/public/icon-512.png": "icons/playground/icon-512.png",
+    "packages/web/public/icon-maskable-512.png": "icons/playground/icon-maskable-512.png"
+  },
+  "kit": "27d42d2"
+}

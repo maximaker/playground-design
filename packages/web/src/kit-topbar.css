@@ -207,3 +207,12 @@
     display: none;
   }
 }
+
+/* Account menu on the avatar (Studio OS): same surface as the switcher, right-aligned. */
+.hm-avatar-menu { position: relative; }
+.hm-avatar-menu > summary { list-style: none; cursor: pointer; }
+.hm-avatar-menu > summary::-webkit-details-marker { display: none; }
+.hm-avatar-menu .hm-avatar-menu__panel { left: auto; right: 0; width: 220px; }
+.hm-avatar-menu > summary.hm-avatar,
+.hm-avatar-menu[open] > summary.hm-avatar,
+.hm-avatar-menu > summary.hm-avatar:hover { width: 28px; height: 28px; border-radius: 999px; background: var(--ink-raised); color: #fff; font-size: 12px; font-weight: 600; }

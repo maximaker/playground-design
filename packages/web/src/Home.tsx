@@ -52,6 +52,7 @@ export function Home({ onOpen, appearance, onAppearance, session }: {
 }) {
   const layout = useLayoutMode();
   const [showSettings, setShowSettings] = useState(false);
+  useEffect(() => { document.title = 'Playground'; }, []);
   const [docs, setDocs] = useState<DocSummary[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [templates, setTemplates] = useState<TemplateSummary[]>([]);

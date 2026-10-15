@@ -210,6 +210,10 @@ function Editor({ source, onHome, appearance, onAppearance, session }: {
   const pageId = useCanvas((s) => s.pageId);
   const setPage = useCanvas((s) => s.setPage);
   const peers = useCanvas((s) => s.peers);
+  // Tab title: "Document · Playground".
+  useEffect(() => {
+    document.title = doc?.name ? `${doc.name} · Playground` : 'Playground';
+  }, [doc?.name]);
   // The project crumb in the header. Projects are library metadata, read over
   // REST; a viewer on a share link has no access, so a failure just hides it.
   const projectId = doc?.projectId;

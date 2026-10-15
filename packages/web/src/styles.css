@@ -13,9 +13,9 @@
   --ui-scale: 1;
 
   /* The heymax family: Inter only, JetBrains Mono for small figures. */
-  --font: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
-  --font-display: 'Inter', system-ui, sans-serif;
-  --mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  --font: var(--font-sans);
+  --font-display: var(--font-sans);
+  --mono: var(--font-mono);
 
   /* Spacing scale, in rem so it tracks the UI scale. */
   --s1: 0.25rem;
@@ -3806,3 +3806,30 @@ code { font-family: var(--mono); font-size: 0.92em; }
    button sits inside the bar. Home's family bar repeats the kit rule. */
 :root.hm-dial-compact { --topbar: 56px; }
 .hm-dial-compact .topbar, .hm-dial-compact .family-topbar { padding-left: 56px; }
+
+/* The error boundary's page: plain sentence, one action. */
+.app-error {
+  min-height: 100vh;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 8px;
+  padding: 24px;
+  text-align: center;
+  background: var(--ground);
+  color: var(--ink);
+  font-family: var(--font-sans);
+}
+.app-error__title { margin: 0; font-size: var(--text-section); font-weight: 600; }
+.app-error__body { margin: 0; color: var(--ink-soft); }
+.app-error__action {
+  margin-top: 8px;
+  padding: 8px 14px;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: var(--accent-fill);
+  color: var(--accent-fill-text);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
