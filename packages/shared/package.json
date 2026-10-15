@@ -11,10 +11,10 @@
     "test": "node --experimental-strip-types --test src/*.test.ts"
   },
   "dependencies": {
-    "node-html-parser": "^7.0.1"
+    "node-html-parser": "^9.0.4"
   },
   "devDependencies": {
-    "@types/node": "^26.5.1",
-    "typescript": "^5.7.2"
+    "@types/node": "^26.6.5",
+    "typescript": "^7.0.2"
   }
 }
