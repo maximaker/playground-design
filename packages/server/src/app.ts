@@ -62,7 +62,8 @@ import { dirname } from 'node:path';
 
 const PORT = Number(process.env.PORT ?? 4000);
 const PUBLIC_URL =
-  process.env.PLAYGROUND_PUBLIC_URL ??
+  (process.env.APP_URL ||
+  process.env.PLAYGROUND_PUBLIC_URL) ??
   (process.env.VERCEL_PROJECT_PRODUCTION_URL ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}` : null) ??
   (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null) ??
   `http://localhost:${PORT}`;
@@ -74,7 +75,7 @@ const app = new Hono();
 
 /**
  * Old addresses (REDIRECT_HOSTS, comma-separated) send page loads on to
- * PLAYGROUND_PUBLIC_URL, path and query kept so shared links still land. The
+ * APP_URL (or the older PLAYGROUND_PUBLIC_URL), path and query kept so shared links still land. The
  * shared sign-in cookie only exists under .heymax.im, so a page opened anywhere
  * else could never be signed in. API, MCP and WebSocket calls are left alone:
  * clients configured with the old address keep working.
@@ -245,7 +246,7 @@ api.get('/health', async (c) => {
     ok: true,
     version: '0.1.0',
     publicUrl: PUBLIC_URL,
-    publicUrlConfigured: !!process.env.PLAYGROUND_PUBLIC_URL,
+    publicUrlConfigured: !!(process.env.APP_URL || process.env.PLAYGROUND_PUBLIC_URL),
     storage: store.kind,
     ...(store.kind === 'sqlite' ? {
       database: DB_PATH,

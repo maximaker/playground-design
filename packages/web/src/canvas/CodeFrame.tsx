@@ -130,8 +130,8 @@ export const CodeFrame = memo(function CodeFrame({ component, props, interactive
     return (
       <div
         style={{
-          font: '12px ui-monospace, monospace', color: '#b42318', background: '#fef3f2',
-          border: '1px dashed #fda29b', borderRadius: 6, padding: '8px 10px', maxWidth: 360,
+          font: '12px ui-monospace, monospace', color: 'var(--hue-red)', background: 'var(--ground)',
+          border: '1px dashed var(--hue-red)', borderRadius: 6, padding: '8px 10px', maxWidth: 360,
         }}
       >
         <strong>{component.name}</strong> failed to render: {error}

@@ -21,13 +21,13 @@ import {
 
 function cardShadow(zoom: number): string {
   const z = Math.max(0.25, zoom);
-  return `0 ${z}px ${2 * z}px rgba(30, 41, 59, 0.05), 0 ${2 * z}px ${8 * z}px ${-2 * z}px rgba(30, 41, 59, 0.06)`;
+  return `0 ${z}px ${2 * z}px color-mix(in srgb, var(--shade) 5%, transparent), 0 ${2 * z}px ${8 * z}px ${-2 * z}px color-mix(in srgb, var(--shade) 6%, transparent)`;
 }
 
 /** BOARD_STYLE's section shadow at the canvas zoom, so a sheet lifts the same at any scale. */
 function sheetShadow(zoom: number): string {
   const z = Math.max(0.25, zoom);
-  return `0 ${z}px ${2 * z}px rgba(30, 41, 59, 0.05), 0 ${12 * z}px ${32 * z}px ${-8 * z}px rgba(30, 41, 59, 0.14)`;
+  return `0 ${z}px ${2 * z}px color-mix(in srgb, var(--shade) 5%, transparent), 0 ${12 * z}px ${32 * z}px ${-8 * z}px color-mix(in srgb, var(--shade) 14%, transparent)`;
 }
 import { useCanvas, getDoc, currentPage } from '../state/store.ts';
 import { Icon } from '../ui/Icon.tsx';
@@ -149,7 +149,7 @@ const ShapeView = memo(function ShapeView({ shape: s, zoom, selected, editing }:
   });
   // A section is a sheet: white, lifted off the canvas, no edge.
   if (isSection) Object.assign(style, {
-    background: '#ffffff', borderRadius: S.sectionRadius * zoom, boxShadow: sheetShadow(zoom),
+    background: 'var(--white)', borderRadius: S.sectionRadius * zoom, boxShadow: sheetShadow(zoom),
   });
 
   return (
@@ -307,7 +307,7 @@ const ConnectorView = memo(function ConnectorView({ connector: c, zoom, selected
       {c.arrow === 'both'
         ? <polygon points={head(pts[0]!, pts[1]!)} fill={color} pointerEvents="none" />
         // Where a line starts, a small hollow ring: the flow's "from here".
-        : <circle cx={pts[0]!.x} cy={pts[0]!.y} r={Math.max(1.5, BOARD_STYLE.originDot * zoom)} fill="#ffffff" stroke={color} strokeWidth={1} pointerEvents="none" />}
+        : <circle cx={pts[0]!.x} cy={pts[0]!.y} r={Math.max(1.5, BOARD_STYLE.originDot * zoom)} style={{ fill: 'var(--white)' }} stroke={color} strokeWidth={1} pointerEvents="none" />}
     </g>
   );
 });
@@ -333,8 +333,8 @@ function ConnectorLabel({ connector: c, zoom, editing }: { connector: Connector;
       >
         <svg viewBox="-9 -9 18 18" width="100%" height="100%">
           {verdict === 'yes'
-            ? <path d="M-4 0 L-1 3 L4.5 -3" fill="none" stroke="#fff" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" />
-            : <path d="M-3.5 -3.5 L3.5 3.5 M3.5 -3.5 L-3.5 3.5" stroke="#fff" strokeWidth={1.8} strokeLinecap="round" />}
+            ? <path d="M-4 0 L-1 3 L4.5 -3" fill="none" style={{ stroke: 'var(--white)' }} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" />
+            : <path d="M-3.5 -3.5 L3.5 3.5 M3.5 -3.5 L-3.5 3.5" style={{ stroke: 'var(--white)' }} strokeWidth={1.8} strokeLinecap="round" />}
         </svg>
       </div>
     );

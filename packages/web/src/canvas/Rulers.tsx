@@ -70,9 +70,9 @@ export function Rulers({ origin, pointer, highlight }: Props) {
         ctx.clearRect(0, 0, w, h);
 
         const style = getComputedStyle(el);
-        const fg = style.getPropertyValue('--ruler-fg').trim() || '#888';
-        const line = style.getPropertyValue('--ruler-line').trim() || '#ccc';
-        const accent = style.getPropertyValue('--ruler-accent').trim() || '#6b5cff';
+        const fg = style.getPropertyValue('--ruler-fg').trim() || style.getPropertyValue('--ink-mute').trim();
+        const line = style.getPropertyValue('--ruler-line').trim() || style.getPropertyValue('--line-strong').trim();
+        const accent = style.getPropertyValue('--ruler-accent').trim() || style.getPropertyValue('--accent-500').trim();
 
         // Screen position of canvas coordinate 0 along this axis.
         const zero = (axis === 'x' ? viewport.x - origin.x : viewport.y - origin.y);

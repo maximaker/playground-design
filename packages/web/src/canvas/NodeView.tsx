@@ -122,8 +122,8 @@ const ExpandedView = memo(function ExpandedView({ expanded, isRoot, editingText 
 function MissingComponent({ name }: { name: string }) {
   return (
     <div style={{
-      font: '12px ui-monospace, monospace', color: '#b54708', background: '#fffaeb',
-      border: '1px dashed #f79009', borderRadius: 6, padding: '8px 10px',
+      font: '12px ui-monospace, monospace', color: 'var(--orange-600)', background: 'var(--orange-50)',
+      border: '1px dashed var(--hue-amber)', borderRadius: 6, padding: '8px 10px',
     }}>
       {name} is no longer registered
     </div>

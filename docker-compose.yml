@@ -19,6 +19,8 @@ services:
       # built from it, so if it is wrong or missing, every link an agent is
       # handed will point at localhost and quietly fail on someone else's
       # machine. No trailing slash.
+      # APP_URL is the family name; PLAYGROUND_PUBLIC_URL is read when it is unset.
+      APP_URL: ${APP_URL:-}
       PLAYGROUND_PUBLIC_URL: ${PLAYGROUND_PUBLIC_URL:?set this to the public https:// URL}
       PORT: "4000"
       PLAYGROUND_DB: /data/playground.db

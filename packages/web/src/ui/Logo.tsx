@@ -31,16 +31,16 @@ export function Logo({ variant = 'full', size = 18, className }: Props) {
 export function LogoMark({ size = 18 }: { size?: number }) {
   return (
     <svg className="logo-mark" width={size} height={size} viewBox="0 0 48 48" aria-hidden focusable="false">
-      <rect width="48" height="48" rx="12" fill="#16181d" />
+      <rect width="48" height="48" rx="12" />
       <path
         d="M13.75 21V13.75H21 M27 13.75H34.25V21 M13.75 27V34.25H21"
         fill="none"
-        stroke="#fff"
+        style={{ stroke: 'var(--white)' }}
         strokeWidth="3.5"
         strokeLinecap="round"
         strokeLinejoin="round"
       />
-      <path d="M25 25 L37 29.5 L31.6 31.6 L29.5 37 Z" fill="#86a3ff" stroke="#86a3ff" strokeWidth="1.5" strokeLinejoin="round" />
+      <path d="M25 25 L37 29.5 L31.6 31.6 L29.5 37 Z" style={{ fill: 'var(--blue-300)', stroke: 'var(--blue-300)' }} strokeWidth="1.5" strokeLinejoin="round" />
     </svg>
   );
 }

@@ -76,7 +76,7 @@ export const PeerCursors = memo(function PeerCursors() {
               <path
                 d="M1 1l12.2 6.4-5.6 1.3-2.4 5.3z"
                 fill="currentColor"
-                stroke="#fff"
+                style={{ stroke: 'var(--white)' }}
                 strokeWidth="1.2"
                 strokeLinejoin="round"
               />

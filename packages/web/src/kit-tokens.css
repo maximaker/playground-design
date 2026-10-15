@@ -55,6 +55,30 @@
   --purple-600: #6c3fd6;
   --purple-800: #36196e;
 
+
+  /* constants — the same in both themes (paper, print, shadows, scrims) */
+  --white: #ffffff;
+  --black: #000000;
+  --shade: #16181d;
+  --scrim: color-mix(in srgb, var(--black) 50%, transparent);
+
+  /*
+   * Hues for status chips, categories and charts, not app identity.
+   * Each has a text/stroke step and a -wash for the chip ground.
+   */
+  --hue-navy: #152740;    --hue-navy-wash: #e8eaee;
+  --hue-slate: #4a5b74;   --hue-slate-wash: #eef1f6;
+  --hue-gray: #6b6b75;    --hue-gray-wash: #ebebea;
+  --hue-blue: #2f6d94;    --hue-blue-wash: #e7f1f8;
+  --hue-sky: #3b74cc;     --hue-sky-wash: #e6eefb;
+  --hue-teal: #0d8a72;    --hue-teal-wash: #e0f4ef;
+  --hue-green: #14855c;   --hue-green-wash: #e2f4ec;
+  --hue-gold: #8a6512;    --hue-gold-wash: #faf1da;
+  --hue-amber: #a85e14;   --hue-amber-wash: #fbeedd;
+  --hue-rose: #b03258;    --hue-rose-wash: #fce8ec;
+  --hue-red: #c0262d;     --hue-red-wash: #fdecea;
+  --hue-violet: #6d4f99;  --hue-violet-wash: #f0ebfa;
+
   /* type scale — the same in every app */
   --text-root: 16px;
   --text-ui: 14px;        /* body and UI */
@@ -147,6 +171,18 @@
   --ink-mute: #9ea2a9;
   --accent-fill: var(--accent-300);
   --accent-fill-text: #16181d;
+  --hue-navy: #a9b8d0; --hue-navy-wash: #1f2837;
+  --hue-slate: #aab6c8; --hue-slate-wash: #232a35;
+  --hue-gray: #b3b3bb; --hue-gray-wash: #2a2b30;
+  --hue-blue: #8cc3e6; --hue-blue-wash: #182b38;
+  --hue-sky: #9dbcf2; --hue-sky-wash: #1a2840;
+  --hue-teal: #6fd6c0; --hue-teal-wash: #13302b;
+  --hue-green: #74d6aa; --hue-green-wash: #153024;
+  --hue-gold: #e9c870; --hue-gold-wash: #322813;
+  --hue-amber: #f0b072; --hue-amber-wash: #34230f;
+  --hue-rose: #f29ab4; --hue-rose-wash: #3a1b25;
+  --hue-red: #f39a93; --hue-red-wash: #3a1a1a;
+  --hue-violet: #c5aef0; --hue-violet-wash: #2a2238;
 }
 
 /* Shared type roles, for apps that want the classes rather than the values. */

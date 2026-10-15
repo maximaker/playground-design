@@ -26,7 +26,7 @@ const SELF = 'playground';
 
 /** The address people open Playground at; every item URL is built on it. */
 export function publicBase(): string {
-  return (process.env.PLAYGROUND_PUBLIC_URL || 'https://playground.heymax.im').replace(/\/$/, '');
+  return (process.env.APP_URL || process.env.PLAYGROUND_PUBLIC_URL || 'https://playground.heymax.im').replace(/\/$/, '');
 }
 
 const subtitle = (s: string | undefined) => (s ? { subtitle: s } : {});
