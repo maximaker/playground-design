@@ -25,6 +25,8 @@ import { dialItems, dialPanel, firstName, navigate, openRow, useDial } from './u
 interface DocSummary {
   id: string; name: string; rev: number; updatedAt: number; nodeCount: number;
   projectId?: string;
+  /** Live as a web page. */
+  published?: boolean;
   /** The caller's own role, so a document shared with you says so. */
   role?: 'owner' | 'editor' | 'viewer';
 }
@@ -557,14 +559,15 @@ export function Home({ onOpen, appearance, onAppearance, session }: {
 
                   <div className="home-card-body">
                     <h3>{d.name}</h3>
-                    <p className="dim" title={`${d.nodeCount.toLocaleString()} layer${d.nodeCount === 1 ? '' : 's'} · revision ${d.rev}`}>
-                      {relativeTime(d.updatedAt)}
+                    <p className="dim home-card-meta" title={`${d.nodeCount.toLocaleString()} layer${d.nodeCount === 1 ? '' : 's'} · revision ${d.rev}`}>
                       {d.projectId && projects.find((p) => p.id === d.projectId) && (
-                        <>
-                          <span className="home-card-sep">·</span>
+                        <span className="home-card-project">
+                          <span className="hm-dot" style={faceStyle(d.projectId)} />
                           {projects.find((p) => p.id === d.projectId)!.name}
-                        </>
+                        </span>
                       )}
+                      <span className="numeral">{relativeTime(d.updatedAt)}</span>
+                      {d.published ? <span className="hm-chip" data-s="ok">Live</span> : null}
                     </p>
                   </div>
 

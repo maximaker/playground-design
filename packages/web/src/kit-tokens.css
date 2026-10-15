@@ -224,3 +224,58 @@
 .hm-section-title { font-size: var(--text-section); font-weight: 600; letter-spacing: 0; line-height: 1.3; }
 .hm-label { font-size: var(--text-label); font-weight: 600; letter-spacing: var(--tracking-label); text-transform: uppercase; }
 .hm-reading { font-size: var(--text-read); line-height: var(--leading-read); }
+
+/*
+ * Scan parts: state at a glance, the same in every app.
+ * Status colours are fixed across the family (not the app accent):
+ * ok = done / on track, warn = needs you, stop = overdue / blocked,
+ * info = waiting on someone else, idle = not started / draft.
+ * A chip always carries a word, so colour is never the only signal.
+ */
+:root {
+  --status-ok: var(--hue-green);   --status-ok-wash: var(--hue-green-wash);
+  --status-warn: var(--hue-gold);  --status-warn-wash: var(--hue-gold-wash);
+  --status-stop: var(--hue-red);   --status-stop-wash: var(--hue-red-wash);
+  --status-info: var(--hue-sky);   --status-info-wash: var(--hue-sky-wash);
+  --status-idle: var(--hue-gray);  --status-idle-wash: var(--hue-gray-wash);
+}
+
+.hm-chip {
+  --c: var(--status-idle); --w: var(--status-idle-wash);
+  display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 9px;
+  border-radius: 999px; background: var(--w); color: var(--c);
+  font-size: 12px; font-weight: 500; line-height: 1; white-space: nowrap; font-variant-numeric: tabular-nums;
+}
+.hm-chip::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex: none; }
+.hm-chip[data-plain]::before { display: none; }
+.hm-chip[data-s='ok'], .hm-dot[data-s='ok'] { --c: var(--status-ok); --w: var(--status-ok-wash); }
+.hm-chip[data-s='warn'], .hm-dot[data-s='warn'] { --c: var(--status-warn); --w: var(--status-warn-wash); }
+.hm-chip[data-s='stop'], .hm-dot[data-s='stop'] { --c: var(--status-stop); --w: var(--status-stop-wash); }
+.hm-chip[data-s='info'], .hm-dot[data-s='info'] { --c: var(--status-info); --w: var(--status-info-wash); }
+.hm-chip[data-s='idle'], .hm-dot[data-s='idle'] { --c: var(--status-idle); --w: var(--status-idle-wash); }
+
+.hm-dot { --c: var(--status-idle); width: 8px; height: 8px; border-radius: 50%; background: var(--c); flex: none; display: inline-block; }
+
+/* Stage track: one segment per stage; done ones filled, the current one ringed. */
+.hm-stage { display: inline-grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 2px; width: 84px; flex: none; }
+.hm-stage > i { height: 6px; border-radius: 2px; background: var(--line); }
+.hm-stage > i[data-on] { background: var(--accent-500); }
+.hm-stage > i[data-now] { background: var(--accent-500); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-500) 30%, transparent); }
+
+/* Progress bar: children are segments with an inline width; colour by data-s or the accent. */
+.hm-bar { display: flex; gap: 2px; height: 6px; border-radius: 999px; background: var(--line); overflow: hidden; min-width: 40px; }
+.hm-bar > i { display: block; height: 100%; background: var(--accent-500); }
+.hm-bar > i[data-s='ok'] { background: var(--status-ok); }
+.hm-bar > i[data-s='warn'] { background: var(--status-warn); }
+.hm-bar > i[data-s='stop'] { background: var(--status-stop); }
+.hm-bar > i[data-s='info'] { background: var(--status-info); }
+
+/* Ring: set --p (0–100) and a short label in data-v. */
+.hm-ring {
+  --p: 0; width: 40px; height: 40px; border-radius: 50%; flex: none; display: inline-grid; place-items: center;
+  background: conic-gradient(var(--accent-500) calc(var(--p) * 1%), var(--line) 0);
+}
+.hm-ring::after {
+  content: attr(data-v); width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center;
+  background: var(--panel); color: var(--ink); font-size: 10px; font-weight: 600; font-variant-numeric: tabular-nums;
+}

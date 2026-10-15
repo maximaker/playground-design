@@ -3832,3 +3832,15 @@ code { font-family: var(--mono); font-size: 0.92em; }
 .home-card-more { width: 32px; height: 32px; }
 .home-card-menu .danger { color: var(--hue-red); }
 @media (pointer: coarse) { .home-card-more { width: 44px; height: 44px; } }
+
+/* Scan pass: one meta row per card (project dot, time, state), hint tiles in the empty inspector. */
+.home-card-meta { display: flex; align-items: center; gap: var(--s2); flex-wrap: wrap; }
+.home-card-meta .hm-chip { margin-left: auto; }
+.home-card-project { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.home-card-project .hm-dot { background: oklch(0.62 0.13 calc(var(--tint) * 1deg)); }
+.hint-tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding: var(--s3); }
+.hint-tile {
+  display: grid; gap: 2px; padding: 10px 12px; border-radius: var(--radius-control, 8px);
+  background: var(--panel-fill); font-size: 12px; color: var(--ink-mute);
+}
+.hint-tile b, .hint-tile kbd { font-size: 12.5px; font-weight: 600; color: var(--ink); justify-self: start; }

@@ -83,15 +83,17 @@ export function Properties() {
   if (nodes.length === 0) {
     return (
       <div className="properties">
-        <p className="panel-empty">
-          Click anything on the page to change it.<br />
-          <span className="dim">
-            {readOnly
-              // Telling a viewer to press F would be an invitation to a refusal.
-              ? 'You have a view-only link: everything here is readable, nothing is editable.'
-              : <>Double-click text to rewrite it. To add something new, press <kbd>T</kbd> for text or <kbd>F</kbd> for a box.</>}
-          </span>
-        </p>
+        {readOnly ? (
+          // Telling a viewer to press F would be an invitation to a refusal.
+          <p className="panel-empty dim">You have a view-only link: everything here is readable, nothing is editable.</p>
+        ) : (
+          <div className="hint-tiles" aria-label="How to edit">
+            <span className="hint-tile"><b>Click</b><span>Change anything</span></span>
+            <span className="hint-tile"><b>Double-click</b><span>Rewrite text</span></span>
+            <span className="hint-tile"><kbd>T</kbd><span>Add text</span></span>
+            <span className="hint-tile"><kbd>F</kbd><span>Add a box</span></span>
+          </div>
+        )}
         {doc && <LinkedWork type="doc" id={doc.id} title={doc.name} url={`${location.origin}/d/${doc.id}`} />}
       </div>
     );

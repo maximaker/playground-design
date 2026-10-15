@@ -431,9 +431,11 @@ api.get('/documents', async (c) => {
   const user = c.get('user')!;
   const mine = await documentsFor(user.id);
   const owned = new Set((await (await persistence()).loadMemberships({})).map((m) => m.docId));
-  const documents = (await listDocuments())
-    .filter((d) => mine.has(d.id) || !owned.has(d.id))
-    .map((d) => ({ ...d, role: mine.get(d.id) ?? 'owner' }));
+  const store = await persistence();
+  const visible = (await listDocuments()).filter((d) => mine.has(d.id) || !owned.has(d.id));
+  // Whether each is live as a web page, so the library can say so at a glance.
+  const published = await Promise.all(visible.map((d) => store.loadPublicationFor(d.id).then(Boolean, () => false)));
+  const documents = visible.map((d, i) => ({ ...d, role: mine.get(d.id) ?? 'owner', published: published[i] }));
   return c.json({ documents });
 });
 
