@@ -270,12 +270,12 @@
 .hm-bar > i[data-s='stop'] { background: var(--status-stop); }
 .hm-bar > i[data-s='info'] { background: var(--status-info); }
 
-/* Ring: set --p (0–100) and a short label in data-v. */
-.hm-ring {
+/* Meter ring: set --p (0–100) and a short label in data-v. Not .hm-ring: that is the dial's menu ring. */
+.hm-meter {
   --p: 0; width: 40px; height: 40px; border-radius: 50%; flex: none; display: inline-grid; place-items: center;
   background: conic-gradient(var(--accent-500) calc(var(--p) * 1%), var(--line) 0);
 }
-.hm-ring::after {
+.hm-meter::after {
   content: attr(data-v); width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center;
   background: var(--panel); color: var(--ink); font-size: 10px; font-weight: 600; font-variant-numeric: tabular-nums;
 }
