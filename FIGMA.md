@@ -55,10 +55,11 @@ reverse-engineered (vertices, segments with tangents, regions of loops).
 
 Ordered by how much they cost on the deck.
 
-1. **Components arrive as plain layers.** The footer component appears on all 62
-   slides as 62 copies. Next: turn each Figma component used more than once into a
-   Playground component (`create_component` on the first, `replace_with_instance` on
-   the rest), carrying overrides.
+1. **Components arrive as plain layers.** On the deck, `componentise` turned them
+   into Playground components afterwards (Footer x57, Footer on dark x5, eyebrows x47,
+   slide and section titles x13, logo x6) with no visual change. Next: do this in the
+   paste itself for every Figma component and instance, carrying overrides, and offer
+   it for repeated hand-made structures.
 2. **Shared colour and text styles become literal values.** Next: map Figma
    styles to document tokens (`set_tokens`) and reference them as `var(--...)`.
 3. **Image adjustments are approximate in CSS.** Temperature and tint have no CSS
@@ -73,6 +74,15 @@ Ordered by how much they cost on the deck.
 8. **Prototype links** (slide order, transitions) do not travel in the clipboard;
    slide order came from the canvas positions.
 9. **Image links expire** about a week after the copy; paste soon after copying.
+
+## Bugs found on the way (fixed)
+
+- Pretty-printed export put whitespace between inline runs (a space before a
+  styled full stop) and inside `pre-wrap` (blank lines between list items).
+- Fonts used only inside a component were not loaded where an instance appeared.
+- A deploy could leave browsers with a cached HTML page in place of the app bundle.
+- `componentise` with a bare word matched 915 unrelated text nodes in a dry run:
+  always dry-run first on short texts.
 
 ## MCP gaps found on the way
 
