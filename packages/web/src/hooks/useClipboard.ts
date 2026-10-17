@@ -177,12 +177,22 @@ function imageSize(file: File): Promise<{ width: number; height: number }> {
     const url = URL.createObjectURL(file);
     const img = new Image();
     img.onload = () => {
-      // Cap the placed size so a 4000px screenshot does not dwarf the artboard.
-      const scale = Math.min(1, 600 / Math.max(img.width, img.height));
-      resolve({ width: Math.round(img.width * scale), height: Math.round(img.height * scale) });
+      resolve(placedSize(img.width, img.height));
       URL.revokeObjectURL(url);
     };
     img.onerror = () => { resolve({ width: 200, height: 200 }); URL.revokeObjectURL(url); };
     img.src = url;
   });
+}
+
+/**
+ * The size an image lands at. Pasted and dropped images are almost always
+ * high-density (Figma's Copy as PNG, retina screenshots), so they are placed at
+ * half their pixel size and stay sharp; the file keeps every pixel. Tiny images
+ * (icons under 32px) stay 1:1, and nothing lands wider or taller than 600.
+ */
+export function placedSize(w: number, h: number): { width: number; height: number } {
+  const density = Math.min(w, h) >= 32 ? 2 : 1;
+  const scale = Math.min(1 / density, 600 / Math.max(w, h));
+  return { width: Math.max(1, Math.round(w * scale)), height: Math.max(1, Math.round(h * scale)) };
 }
