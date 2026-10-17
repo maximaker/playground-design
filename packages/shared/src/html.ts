@@ -588,6 +588,20 @@ export function parseHtml(html: string, opts: ParseOptions = {}): ParseResult {
     } else if (type === 'vector') {
       node.text = el.innerHTML;
       node.children = [];
+      // The canvas sizes layers from CSS, so an SVG sized only by attributes
+      // (as Figma's "Copy as SVG" is) collapsed to 0 high. Width/height come
+      // from the attributes, else the viewBox; the box never shrinks in flex.
+      const vb = (el.getAttribute('viewBox') ?? '').trim().split(/[\s,]+/).map(Number);
+      const dim = (attr: string, fallback: number | undefined) => {
+        const v = el.getAttribute(attr) ?? '';
+        if (/^\d+(\.\d+)?(px)?$/.test(v)) return `${parseFloat(v)}px`;
+        return fallback && Number.isFinite(fallback) ? `${fallback}px` : undefined;
+      };
+      const w = dim('width', vb.length === 4 ? vb[2] : undefined);
+      const h = dim('height', vb.length === 4 ? vb[3] : undefined);
+      if (w && !node.styles.width) node.styles.width = w;
+      if (h && !node.styles.height) node.styles.height = h;
+      if ((w || h) && !node.styles['flex-shrink']) node.styles['flex-shrink'] = '0';
     } else {
       const kids = el.childNodes;
       const layout = String(styles.display ?? '');

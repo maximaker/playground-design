@@ -97,6 +97,13 @@ test('pasted SVG markup becomes one vector layer', () => {
   const r = parseHtml('<svg width="24" height="24" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="#F25A12"/></svg>');
   assert.equal(r.nodes.length, 1);
   assert.equal(r.nodes[0]!.type, 'vector');
+  // Sized only by attributes, as Figma's Copy as SVG is: it used to paste 0 high.
+  assert.equal(r.nodes[0]!.styles.width, '24px');
+  assert.equal(r.nodes[0]!.styles.height, '24px');
+  const vb = parseHtml('<svg viewBox="0 0 987 388"><rect width="987" height="388"/></svg>').nodes[0]!;
+  assert.deepEqual([vb.styles.width, vb.styles.height], ['987px', '388px']);
+  // A size the author set in CSS wins.
+  assert.equal(parseHtml('<svg width="24" height="24" style="width:48px"></svg>').nodes[0]!.styles.width, '48px');
 });
 
 test('style rules respect descendant, child and sibling combinators', () => {
