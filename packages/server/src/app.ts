@@ -1441,12 +1441,18 @@ if (SERVE_CLIENT && existsSync(WEB_DIST)) {
     await next();
     if (c.res.headers.has('cache-control')) return;
     if (c.req.path.startsWith('/assets/app/')) {
-      c.res.headers.set('cache-control', 'public, max-age=31536000, immutable');
+      // Only a real file is forever: anything else caching here would stick.
+      c.res.headers.set('cache-control', c.res.status === 200 ? 'public, max-age=31536000, immutable' : 'no-store');
     } else if (c.res.headers.get('content-type')?.startsWith('text/html')) {
       c.res.headers.set('cache-control', 'no-cache');
     }
   });
   app.use('/assets/app/*', serveStatic({ root: relRoot }));
+  // A bundle that is not here (a browser asking for the next build while this
+  // one still serves, mid-deploy) is a 404, never the SPA shell: the shell came
+  // back as text/html under an immutable bundle name, browsers cached it, and
+  // the app stayed blank until the cache was cleared.
+  app.get('/assets/app/*', (c) => c.text('Not found', 404, { 'cache-control': 'no-store' }));
   app.use('/*', serveStatic({ root: relRoot }));
   // The editor is a SPA: every unmatched path serves the shell so /d/:id works
   // on a hard refresh.
