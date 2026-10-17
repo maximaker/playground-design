@@ -139,3 +139,24 @@ test('outlined display text and Figma lists come across', () => {
   assert.match(html, /-webkit-text-stroke:2px #FFFFFF/);
   assert.match(html, /<ul[^>]*><li[^>]*>One<\/li><li[^>]*>Two<\/li><\/ul><div[^>]*>After<\/div>/);
 });
+
+test('nested absolute groups stay absolute, and absolute children in auto layout have a positioned parent', () => {
+  const nodes: FigNode[] = [page,
+    { guid: g(1, 1), type: 'FRAME', name: 'Outer', parentIndex: { guid: g(0, 1), position: '!' }, size: { x: 100, y: 100 }, stackMode: 'VERTICAL' },
+    { guid: g(1, 2), type: 'FRAME', name: 'Free', parentIndex: { guid: g(1, 1), position: '!' }, size: { x: 50, y: 50 }, stackPositioning: 'ABSOLUTE', transform: { m00: 1, m01: 0, m02: 5, m10: 0, m11: 1, m12: 5 } },
+    { guid: g(1, 3), type: 'RECTANGLE', name: 'Dot', parentIndex: { guid: g(1, 2), position: '!' }, size: { x: 10, y: 10 }, transform: { m00: 1, m01: 0, m02: 20, m10: 0, m11: 1, m12: 0 } },
+  ];
+  const { html } = figmaToHtml({ nodeChanges: nodes });
+  const style = (name: string) => new RegExp(`data-name="${name}" style="([^"]*)"`).exec(html)![1]!;
+  assert.match(style('Outer'), /position:relative/);
+  assert.match(style('Free'), /position:absolute/);
+  assert.doesNotMatch(style('Free'), /position:relative/);
+});
+
+test('a hugging frame whose children are all hidden keeps its Figma size', () => {
+  const nodes: FigNode[] = [page,
+    { guid: g(1, 1), type: 'FRAME', name: 'Column', parentIndex: { guid: g(0, 1), position: '!' }, size: { x: 800, y: 600 }, stackMode: 'VERTICAL', stackCounterSizing: 'RESIZE_TO_FIT_WITH_IMPLICIT_SIZE' },
+    { guid: g(1, 2), type: 'TEXT', name: 'Hidden', visible: false, parentIndex: { guid: g(1, 1), position: '!' }, size: { x: 800, y: 100 } },
+  ];
+  assert.match(figmaToHtml({ nodeChanges: nodes }).html, /data-name="Column" style="[^"]*width:800px/);
+});

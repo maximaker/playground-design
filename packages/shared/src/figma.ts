@@ -319,6 +319,8 @@ export interface FigmaPaste {
 export interface FigmaOptions {
   /** The clipboard's image table (figmeta.imageHashes): hash hex to signed link. */
   images?: Record<string, string>;
+  /** Layers already rendered by Figma (guid to image URL), e.g. from Copy as PNG: used as-is instead of their fills. */
+  rendered?: Record<string, string>;
   /** Convert only these top-level frames (guid strings like "1203:4881"). */
   only?: string[];
 }
@@ -364,9 +366,13 @@ export function figmaToHtml(message: FigMessage, opts: FigmaOptions = {}): Figma
     if (!isRoot && (!inFlow || n.stackPositioning === 'ABSOLUTE')) {
       s.push('position:absolute', `left:${px(t?.m02)}`, `top:${px(t?.m12)}`);
     }
-    if (t && (Math.abs(t.m01) > 1e-6 || t.m00 < 0)) {
-      const deg = Math.round((Math.atan2(t.m10, t.m00) * 180) / Math.PI * 100) / 100;
-      if (deg) s.push(`transform:rotate(${deg}deg)`, 'transform-origin:0 0');
+    if (t && (Math.abs(t.m01) > 1e-6 || Math.abs(t.m10) > 1e-6 || t.m00 < 0 || t.m11 < 0)) {
+      // Figma's 2x2 matrix covers rotation and mirroring in one; freely placed
+      // layers pivot on their top-left (their position is that corner), layers
+      // in auto layout pivot on the centre of the slot the flow gives them.
+      const r4 = (v: number) => Math.round(v * 10000) / 10000;
+      const free = isRoot || !inFlow || n.stackPositioning === 'ABSOLUTE';
+      s.push(`transform:matrix(${r4(t.m00)}, ${r4(t.m10)}, ${r4(t.m01)}, ${r4(t.m11)}, 0, 0)`, `transform-origin:${free ? '0 0' : 'center'}`);
     }
     if (n.opacity !== undefined && n.opacity < 1) s.push(`opacity:${Math.round(n.opacity * 1000) / 1000}`);
     if (n.blendMode && !/NORMAL|PASS_THROUGH/.test(n.blendMode)) s.push(`mix-blend-mode:${n.blendMode.toLowerCase().replace(/_/g, '-')}`);
@@ -380,6 +386,10 @@ export function figmaToHtml(message: FigMessage, opts: FigmaOptions = {}): Figma
       const hugCross = /RESIZE_TO_FIT/.test(n.stackCounterSizing ?? '') ;
       if (n.stackMode === 'HORIZONTAL') { if (hugMain) setW = false; if (hugCross) setH = false; }
       else { if (hugMain) setH = false; if (hugCross) setW = false; }
+      // Figma keeps a hugging frame's size when nothing in it is visible; CSS
+      // would collapse it to nothing and pull its neighbours over.
+      const shown = (kids.get(gid(n.guid)) ?? []).some((c) => c.visible !== false);
+      if (!shown && n.type !== 'INSTANCE') { setW = true; setH = true; }
     }
     // A pasted root lands in a flex artboard: it keeps its Figma size there.
     if (isRoot) s.push('flex-shrink:0');
@@ -535,8 +545,9 @@ export function figmaToHtml(message: FigMessage, opts: FigmaOptions = {}): Figma
       } else warnings.push(`Component "${n.name}" was not in the clipboard; pasted its frame only.`);
     }
 
-    const fills = visiblePaints(styled(box.styleIdForFill, 'fillPaints', box.fillPaints));
-    const bg = background(fills, images);
+    const rendered = opts.rendered?.[gid(n.guid)];
+    const fills = rendered ? [] : visiblePaints(styled(box.styleIdForFill, 'fillPaints', box.fillPaints));
+    const bg = rendered ? `background:url('${rendered}') center / 100% 100% no-repeat` : background(fills, images);
     if (bg) s.push(bg);
     const strokeP = visiblePaints(styled(box.styleIdForStrokeFill, 'strokePaints', box.strokePaints))[0];
     if (strokeP?.color && (box.strokeWeight ?? 0) > 0) {
@@ -584,7 +595,10 @@ export function figmaToHtml(message: FigMessage, opts: FigmaOptions = {}): Figma
       const A: Record<string, string> = { MIN: 'flex-start', CENTER: 'center', MAX: 'flex-end', BASELINE: 'baseline' };
       s.push(`justify-content:${J[box.stackPrimaryAlignItems ?? 'MIN'] ?? 'flex-start'}`, `align-items:${A[box.stackCounterAlignItems ?? 'MIN'] ?? 'flex-start'}`);
       if (!s.some((x) => x.startsWith('box-sizing'))) s.push('box-sizing:border-box');
-    } else if (children.length) s.push('position:relative');
+    }
+    // Absolutely placed children need a positioned parent, auto layout or not;
+    // a frame that is itself absolute already is one.
+    if (children.length && !s.some((x) => x.startsWith('position:'))) s.push('position:relative');
 
     const inner = children.map((c) => render(c, boxAuto, false, childOverrides, childPath ? `${childPath}/${gid(c.guid)}` : gid(c.guid))).join('');
     return `<div data-name="${name}" style="${s.join(';')}">${inner}</div>`;
