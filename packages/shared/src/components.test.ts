@@ -1,3 +1,4 @@
+import { fontFamiliesIn } from './fonts.ts';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
@@ -387,4 +388,12 @@ test('a component used inside another component is reported as used', () => {
   const cardUsage = usageOf(doc, 'cmp_card');
   assert.equal(cardUsage.onPages.length, 1);
   assert.equal(cardUsage.inComponents.length, 0);
+});
+
+test('a font used only inside a component is still loaded where an instance appears', () => {
+  const { doc, artboard, componentId, label } = seedComponent();
+  label.styles['font-family'] = "'Ubuntu', system-ui, sans-serif";
+  instantiate(doc, componentId, artboard);
+  // The definition lives on no page; the artboard reaches it only through the instance.
+  assert.deepEqual(fontFamiliesIn(doc, artboard), ['Ubuntu']);
 });

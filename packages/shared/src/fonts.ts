@@ -36,16 +36,29 @@ export function fontFamiliesIn(doc: CanvasDocument, rootId: NodeId): string[] {
     return token ? (token.values.default ?? '') : '';
   };
 
-  for (const id of [rootId, ...descendants(doc, rootId)]) {
-    const node = doc.nodes[id];
-    if (!node) continue;
-    for (const source of [node.styles, ...node.variants.map((v) => v.styles)]) {
-      const family = source['font-family'];
-      if (!family) continue;
-      const first = resolve(family).split(',')[0]!.trim().replace(/^['"]|['"]$/g, '');
-      if (first && !GENERIC.has(first.toLowerCase())) families.add(first);
+  /*
+   * Instances render their component's definition, which lives on no page:
+   * walking only the page's own nodes missed every font a component brought,
+   * so a slide whose title was an instance rendered it in a fallback face.
+   */
+  const seen = new Set<NodeId>();
+  const walk = (root: NodeId) => {
+    for (const id of [root, ...descendants(doc, root)]) {
+      if (seen.has(id)) continue;
+      seen.add(id);
+      const node = doc.nodes[id];
+      if (!node) continue;
+      for (const source of [node.styles, ...node.variants.map((v) => v.styles)]) {
+        const family = source['font-family'];
+        if (!family) continue;
+        const first = resolve(family).split(',')[0]!.trim().replace(/^['"]|['"]$/g, '');
+        if (first && !GENERIC.has(first.toLowerCase())) families.add(first);
+      }
+      const def = node.type === 'instance' ? doc.components?.[node.componentRef ?? ''] : undefined;
+      if (def?.root) walk(def.root);
     }
-  }
+  };
+  walk(rootId);
   return [...families];
 }
 
