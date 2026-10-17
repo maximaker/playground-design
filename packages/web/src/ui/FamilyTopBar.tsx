@@ -17,7 +17,7 @@ const APPS = [
 
 export function FamilyTopBar({ middle, end }: { middle?: ReactNode; end?: ReactNode }) {
   return (
-    <header className="hm-topbar family-topbar">
+    <header className="hm-topbar hm-topbar--float family-topbar">
       <div className="hm-topbar__brand">
         <LogoMark size={28} />
         <a className="hm-topbar__name" href="/">Playground</a>

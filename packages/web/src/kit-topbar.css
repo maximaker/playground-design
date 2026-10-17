@@ -222,3 +222,42 @@
 .hm-avatar-menu > summary.hm-avatar,
 .hm-avatar-menu[open] > summary.hm-avatar,
 .hm-avatar-menu > summary.hm-avatar:hover { width: 28px; height: 28px; border-radius: 999px; background: var(--ink-raised); color: #fff; font-size: 12px; font-weight: 600; }
+
+/*
+ * Floating bar (opt-in: add hm-topbar--float). On desktop the dial already
+ * says which app you are in, so the 56px bar folds into a small pill top-right:
+ * mark + switcher, search as an icon (Ctrl K), account. Compact mode (phones,
+ * touch: html.hm-dial-compact) keeps the full bar, since the menu button lives
+ * there. Apps reserve room for the pill with var(--hm-float-room).
+ */
+:root { --hm-float-room: 0px; }
+html:not(.hm-dial-compact):has(.hm-topbar--float) { --hm-float-room: 176px; }
+html:not(.hm-dial-compact):has(.hm-topbar--float) .hm-dial-root { --dial-top: 20px; }
+html:not(.hm-dial-compact) .hm-topbar--float {
+  position: fixed;
+  top: 6px;
+  right: 10px;
+  height: 36px;
+  gap: 4px;
+  padding: 0 4px 0 6px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  box-shadow: 0 2px 8px -4px rgba(22, 24, 29, 0.16);
+}
+html:not(.hm-dial-compact) .hm-topbar--float .hm-topbar__name,
+html:not(.hm-dial-compact) .hm-topbar--float .hm-dots { display: none; }
+html:not(.hm-dial-compact) .hm-topbar--float .hm-topbar__brand { gap: 0; }
+html:not(.hm-dial-compact) .hm-topbar--float .hm-topbar__mark,
+html:not(.hm-dial-compact) .hm-topbar--float .hm-topbar__brand > svg:first-of-type { width: 24px; height: 24px; }
+html:not(.hm-dial-compact) .hm-topbar--float .hm-topbar__brand .hm-switcher > summary { width: 20px; height: 28px; }
+html:not(.hm-dial-compact) .hm-topbar--float .hm-topbar__brand .hm-switcher__menu { top: 34px; left: -30px; }
+html:not(.hm-dial-compact) .hm-topbar--float .hm-topbar__search { flex: none; max-width: none; margin: 0; display: block; }
+html:not(.hm-dial-compact) .hm-topbar--float .hm-search { width: auto; height: 28px; gap: 6px; padding: 0 8px; border: 0; border-radius: 999px; background: transparent; cursor: pointer; }
+html:not(.hm-dial-compact) .hm-topbar--float .hm-search:hover { background: var(--ground); color: var(--ink); }
+html:not(.hm-dial-compact) .hm-topbar--float .hm-search > span { display: none; }
+html:not(.hm-dial-compact) .hm-topbar--float .hm-topbar__end { gap: 0; margin-left: 0; }
+/* Apps whose search is their own button (Studio's command bar) fold the same way. */
+html:not(.hm-dial-compact) .hm-topbar--float .hm-topbar__search > button { width: auto; height: 28px; padding: 0 8px; border: 0; border-radius: 999px; background: transparent; }
+html:not(.hm-dial-compact) .hm-topbar--float .hm-topbar__search > button:hover { background: var(--ground); }
+html:not(.hm-dial-compact) .hm-topbar--float .hm-topbar__search > button > span { display: none; }
