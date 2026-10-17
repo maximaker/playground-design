@@ -21,7 +21,7 @@
  * The format is undocumented and can change; anything unrecognised degrades to
  * a plain box rather than failing the paste.
  */
-import { decodeBinarySchema, compileSchema } from 'kiwi-schema';
+import { decodeBinarySchema, ByteBuffer } from 'kiwi-schema';
 import { decompress as zstd } from 'fzstd';
 import { inflateSync } from 'fflate';
 
@@ -97,8 +97,70 @@ export function decodeFigKiwi(bytes: Uint8Array): FigMessage {
     off += 4 + len;
   }
   if (chunks.length < 2) throw new Error('Figma clipboard is incomplete');
-  const schema = compileSchema(decodeBinarySchema(unpack(chunks[0]!))) as { decodeMessage(b: Uint8Array): FigMessage };
-  return schema.decodeMessage(unpack(chunks[1]!));
+  return decodeWithSchema(decodeBinarySchema(unpack(chunks[0]!)) as KiwiSchema, unpack(chunks[1]!), 'Message') as FigMessage;
+}
+
+/*
+ * kiwi's own decoder compiles the schema to JavaScript with `new Function`,
+ * which the app's Content Security Policy (rightly) forbids. This walks the
+ * schema instead: same wire format, no code generation.
+ */
+type KiwiField = { name: string; type: string; isArray: boolean; isDeprecated?: boolean; value: number };
+type KiwiDef = { name: string; kind: 'ENUM' | 'STRUCT' | 'MESSAGE'; fields: KiwiField[] };
+type KiwiSchema = { definitions: KiwiDef[] };
+
+function decodeWithSchema(schema: KiwiSchema, bytes: Uint8Array, root: string): unknown {
+  const defs = new Map(schema.definitions.map((d) => [d.name, d]));
+  const byValue = new Map<KiwiDef, Map<number, KiwiField>>();
+  for (const d of schema.definitions) byValue.set(d, new Map(d.fields.map((f) => [f.value, f])));
+  const bb = new ByteBuffer(bytes);
+
+  const scalar = (type: string): unknown => {
+    switch (type) {
+      case 'bool': return !!bb.readByte();
+      case 'byte': return bb.readByte();
+      case 'int': return bb.readVarInt();
+      case 'uint': return bb.readVarUint();
+      case 'float': return bb.readVarFloat();
+      case 'string': return bb.readString();
+      case 'int64': return bb.readVarInt64();
+      case 'uint64': return bb.readVarUint64();
+    }
+    const def = defs.get(type);
+    if (!def) throw new Error(`Unknown kiwi type ${type}`);
+    if (def.kind === 'ENUM') {
+      const v = bb.readVarUint();
+      return byValue.get(def)!.get(v)?.name ?? v;
+    }
+    return read(def);
+  };
+  const field = (f: KiwiField): unknown => {
+    if (!f.isArray) return scalar(f.type);
+    if (f.type === 'byte') return bb.readByteArray();
+    const n = bb.readVarUint();
+    const out = new Array(n);
+    for (let i = 0; i < n; i++) out[i] = scalar(f.type);
+    return out;
+  };
+  const read = (def: KiwiDef): Record<string, unknown> => {
+    const result: Record<string, unknown> = {};
+    if (def.kind === 'STRUCT') {
+      for (const f of def.fields) { const v = field(f); if (!f.isDeprecated) result[f.name] = v; }
+      return result;
+    }
+    const fields = byValue.get(def)!;
+    for (;;) {
+      const id = bb.readVarUint();
+      if (id === 0) return result;
+      const f = fields.get(id);
+      if (!f) throw new Error('Attempted to parse invalid message');
+      const v = field(f);
+      if (!f.isDeprecated) result[f.name] = v;
+    }
+  };
+  const top = defs.get(root);
+  if (!top) throw new Error(`No ${root} in the Figma schema`);
+  return read(top);
 }
 
 export function decodeFigmaClipboard(html: string): { message: FigMessage; meta: Record<string, unknown> } {

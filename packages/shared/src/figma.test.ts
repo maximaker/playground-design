@@ -40,6 +40,18 @@ test('decodes a fig-kiwi clipboard: schema and message both travel', () => {
   assert.equal(Math.round(message.nodeChanges![1]!.size!.x), 200);
 });
 
+test('decoding needs no eval, so it runs under the app CSP', () => {
+  const html = clipboardHtml({ nodeChanges: [page] });
+  const real = globalThis.Function;
+  // kiwi's compiled decoder used `new Function`, which the CSP blocks in the browser.
+  (globalThis as { Function: unknown }).Function = function blocked() { throw new EvalError('blocked by CSP'); };
+  try {
+    assert.equal(decodeFigmaClipboard(html).message.nodeChanges?.[0]?.name, 'Page 1');
+  } finally {
+    (globalThis as { Function: unknown }).Function = real;
+  }
+});
+
 const red = { type: 'SOLID', color: { r: 1, g: 0, b: 0, a: 1 }, opacity: 1, visible: true };
 
 test('auto layout becomes flexbox; fills, radius and text runs come across', () => {
