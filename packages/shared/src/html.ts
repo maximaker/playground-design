@@ -550,7 +550,7 @@ export function parseHtml(html: string, opts: ParseOptions = {}): ParseResult {
 
     const attrs: Record<string, string> = {};
     for (const [k, v] of Object.entries(el.attributes ?? {})) {
-      if (k === 'style' || k === 'class') continue;
+      if (k === 'style' || k === 'class' || k === 'data-name') continue;
       attrs[k] = String(v);
     }
     // The authored class list is gone once its rules are resolved into styles,
@@ -765,6 +765,9 @@ function compoundMatches(el: ParsedElement, raw: string): boolean {
 }
 
 function nameFor(el: ParsedElement, type: NodeType, tag: string): string {
+  // An explicit layer name (Figma paste, agents) wins over anything inferred.
+  const given = el.getAttribute('data-name');
+  if (given?.trim()) return truncate(given, 60);
   const aria = el.getAttribute('aria-label');
   if (aria) return truncate(aria, 32);
   if (type === 'text') return truncate(decodeEntities(el.textContent ?? '').trim() || 'Text', 28);

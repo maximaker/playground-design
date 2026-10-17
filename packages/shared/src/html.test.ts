@@ -126,3 +126,9 @@ test('style rules respect descendant, child and sibling combinators', () => {
   assert.equal(by('c').styles.color, undefined, '+ is the immediate sibling only');
   assert.equal(by('h').styles['font-weight'], '700');
 });
+
+test('data-name names the layer and is not kept as an attribute', () => {
+  const { nodes } = parseHtml('<div data-name="Hero card"><p data-name="Title">Hi</p></div>');
+  assert.deepEqual(nodes.map((n) => n.name).sort(), ['Hero card', 'Title']);
+  assert.ok(nodes.every((n) => n.attrs['data-name'] === undefined));
+});
