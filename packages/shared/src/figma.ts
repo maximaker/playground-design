@@ -344,6 +344,8 @@ export function figmaToHtml(message: FigMessage): FigmaPaste {
       if (n.stackMode === 'HORIZONTAL') { if (hugMain) setW = false; if (hugCross) setH = false; }
       else { if (hugMain) setH = false; if (hugCross) setW = false; }
     }
+    // A pasted root lands in a flex artboard: it keeps its Figma size there.
+    if (isRoot) s.push('flex-shrink:0');
     if (inFlow && !isRoot) {
       if (n.stackChildPrimaryGrow) { s.push('flex:1 1 0'); }
       if (n.stackChildAlignSelf === 'STRETCH') s.push('align-self:stretch');
