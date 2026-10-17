@@ -77,9 +77,13 @@
 .hm-flyout .row .n { margin-left: auto; font-size: 12px; color: var(--dial-mute); white-space: nowrap; font-variant-numeric: tabular-nums; padding-left: 6px; }
 .hm-flyout .row .sw { width: 8px; height: 8px; border-radius: 2px; flex: none; background: var(--dial-a300); }
 .hm-flyout .row svg { flex: none; }
-.hm-flyout .row.dragging { opacity: .4; }
-.hm-flyout .row.drop-before { box-shadow: inset 0 2px 0 var(--dial-a500); border-radius: 0 0 8px 8px; }
-.hm-flyout .row.drop-after { box-shadow: inset 0 -2px 0 var(--dial-a500); border-radius: 8px 8px 0 0; }
+.hm-flyout .row[data-row-id] { -webkit-touch-callout: none; }
+.hm-flyout .row.dragging { opacity: .35; }
+.hm-dragging, .hm-dragging * { cursor: grabbing !important; user-select: none !important; -webkit-user-select: none !important; }
+.hm-drop-line { position: fixed; height: 2px; border-radius: 2px; background: var(--dial-a500); pointer-events: none; z-index: 60; }
+.hm-drop-line::before { content: ""; position: absolute; left: -5px; top: -3px; width: 8px; height: 8px; border-radius: 50%; border: 2px solid var(--dial-a500); background: var(--dial-panel, #fff); box-sizing: border-box; }
+.hm-drag-ghost { position: fixed; left: 0; top: 0; z-index: 61; pointer-events: none; display: flex; align-items: center; gap: 6px; max-width: 220px; padding: 5px 10px; border-radius: 8px; font-size: 13px; color: var(--dial-text); background: var(--dial-panel, #fff); box-shadow: 0 6px 18px rgba(22,24,29,.16); opacity: .95; }
+.hm-drag-ghost span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .hm-flyout .row.drop-inside { background: var(--dial-a50); box-shadow: inset 0 0 0 1.5px var(--dial-a500); }
 .hm-flyout .children { margin-left: 18px; }
 .hm-flyout .children[hidden] { display: none; }

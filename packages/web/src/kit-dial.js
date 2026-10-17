@@ -112,10 +112,20 @@ export function filterRows(rows, q) {
   return out;
 }
 
-/** Drop zone for a pointer over a row: top/bottom quarter reorders, the middle nests. */
+/** Drop zone for a pointer over a row: top third goes before, bottom third after, the middle nests. */
 export function dropZone(pointerY, rect) {
   const rel = (pointerY - rect.top) / rect.height;
-  return rel < 0.25 ? 'before' : rel > 0.75 ? 'after' : 'inside';
+  return rel < 1 / 3 ? 'before' : rel > 2 / 3 ? 'after' : 'inside';
+}
+/**
+ * The drop a zone really means. Below an open parent the line sits where its
+ * first child starts, so "after" becomes "before the first child" (the dragged
+ * page itself doesn't count as a child).
+ */
+export function resolveDrop(row, zone, isOpen, dragId) {
+  if (zone !== 'after' || !isOpen) return { targetId: row.id, zone };
+  const first = (row.children || []).find((c) => c.id !== dragId);
+  return first ? { targetId: first.id, zone: 'before' } : { targetId: row.id, zone: 'inside' };
 }
 /** True if `id` is `ancestorId` or sits anywhere under it in `rows`. */
 export function isWithin(rows, ancestorId, id) {
@@ -181,11 +191,11 @@ export function createDial(opts) {
 
   let items = [], segs = [], focus = -1, openFly = null, pinned = store.get(`dial.pin.${key}`) === '1', q = '';
   const expanded = new Set();
-  let dragId = null;
+  let drag = null; // live pointer drag, see wireReorder
   const menuBtn = $('.hm-menu-btn'), drawer = $('.hm-drawer'), backdrop = $('.hm-drawer-backdrop');
   let compact = isCompact(), drawerOpen = false, drawerPanelOpen = false, dq = '', lastFocus = null;
   const allRows = () => (o.panel?.groups || []).flatMap((g) => g.rows || []);
-  const clearDrop = () => body.querySelectorAll('.drop-before, .drop-after, .drop-inside').forEach((x) => x.classList.remove('drop-before', 'drop-after', 'drop-inside'));
+  const clearDrop = () => body.querySelectorAll('.drop-inside').forEach((x) => x.classList.remove('drop-inside'));
   const isMobile = () => matchMedia('(max-width: 860px)').matches;
 
   function paint() {
@@ -260,7 +270,7 @@ export function createDial(opts) {
         else if (!pinned || isMobile()) setFly(null);
         o.onRow && o.onRow(row);
       });
-      if (row.reorderable && !inDrawer) wireReorder(el, row, rows);
+      if (row.reorderable && !inDrawer) wireReorder(el, row, rows, !!open);
       wrap.appendChild(el);
       if (inDrawer && row.reorderable && o.onMoveTo) {
         // touch: reordering goes through the app's "Move to…", no drag
@@ -383,31 +393,25 @@ export function createDial(opts) {
     if (compact) setFly(null); else closeDrawer(false);
   }
 
-  function wireReorder(el, row, siblings) {
-    el.draggable = true;
+  /*
+   * Drag to reorder and nest, on pointer events so mouse, pen and touch share one
+   * path. A mouse drag starts after 5px of travel; touch after a 350ms press
+   * (a quick swipe still scrolls). Top third of a row = before, middle = inside,
+   * bottom third = after. A line at the target depth shows where it lands,
+   * collapsed parents open after a short hover, the list scrolls near its edges,
+   * Esc cancels.
+   */
+  function wireReorder(el, row, siblings, open) {
     el.dataset.rowId = row.id;
     el.setAttribute('aria-roledescription', 'Reorderable page');
-    el.addEventListener('dragstart', (e) => {
-      dragId = row.id; el.classList.add('dragging');
-      e.dataTransfer.effectAllowed = 'move';
-      try { e.dataTransfer.setData('text/plain', row.label); } catch { /* old browsers */ }
-    });
-    el.addEventListener('dragend', () => { dragId = null; el.classList.remove('dragging'); clearDrop(); });
-    el.addEventListener('dragover', (e) => {
-      if (!dragId || dragId === row.id || !row.reorderable || isWithin(allRows(), dragId, row.id)) return;
-      e.preventDefault(); e.dataTransfer.dropEffect = 'move';
-      const zone = dropZone(e.clientY, el.getBoundingClientRect());
-      if (!el.classList.contains('drop-' + zone)) { clearDrop(); el.classList.add('drop-' + zone); }
-    });
-    el.addEventListener('dragleave', (e) => { if (!el.contains(e.relatedTarget)) el.classList.remove('drop-before', 'drop-after', 'drop-inside'); });
-    el.addEventListener('drop', (e) => {
-      if (!dragId) return;
-      e.preventDefault();
-      const zone = dropZone(e.clientY, el.getBoundingClientRect()), id = dragId;
-      dragId = null; clearDrop();
-      if (id === row.id || isWithin(allRows(), id, row.id)) return;
-      if (zone === 'inside') { expanded.add(row.id); expanded.delete('!' + row.id); }
-      o.onMove && o.onMove({ id, targetId: row.id, zone });
+    el._row = row; el._open = open && !!(row.children && row.children.length);
+    if (drag && drag.started && drag.id === row.id) el.classList.add('dragging');
+    el.addEventListener('dragstart', (e) => e.preventDefault()); // no native drag for links
+    el.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0 || e.target.closest('[data-twisty]')) return;
+      endDrag(false);
+      drag = { id: row.id, label: row.label, x: e.clientX, y: e.clientY, started: false, touch: e.pointerType !== 'mouse', pid: e.pointerId };
+      if (drag.touch) drag.timer = setTimeout(() => { if (drag && !drag.started) startDrag(); }, 350);
     });
     // keyboard: Alt+Up/Down reorders among siblings, Ctrl/Cmd Shift M opens the app's Move to…
     el.addEventListener('keydown', (e) => {
@@ -422,6 +426,88 @@ export function createDial(opts) {
       }
     });
   }
+  function startDrag() {
+    drag.started = true;
+    if (drag.touch && navigator.vibrate) try { navigator.vibrate(8); } catch { /* not allowed */ }
+    document.documentElement.classList.add('hm-dragging');
+    drag.ghost = document.createElement('div');
+    drag.ghost.className = 'hm-drag-ghost';
+    drag.ghost.innerHTML = `${rowIcon('doc')}<span>${esc(drag.label)}</span>`;
+    drag.line = document.createElement('div');
+    drag.line.className = 'hm-drop-line'; drag.line.hidden = true;
+    root.append(drag.ghost, drag.line);
+    body.querySelector(`[data-row-id="${CSS.escape(drag.id)}"]`)?.classList.add('dragging');
+    moveGhost();
+    const tick = () => { if (!drag || !drag.started) return; autoScroll(); drag.raf = requestAnimationFrame(tick); };
+    drag.raf = requestAnimationFrame(tick);
+  }
+  const moveGhost = () => { drag.ghost.style.transform = `translate(${drag.x + 12}px, ${drag.y + 10}px)`; };
+  function autoScroll() {
+    const r = fly.getBoundingClientRect(), edge = 36;
+    const v = drag.y < r.top + edge ? -(r.top + edge - drag.y) : drag.y > r.bottom - edge ? drag.y - (r.bottom - edge) : 0;
+    const before = fly.scrollTop;
+    if (v) fly.scrollTop += Math.max(-14, Math.min(14, v / 3));
+    if (fly.scrollTop !== before || drag.hoverId) locate();
+  }
+  function locate() {
+    const hit = document.elementFromPoint(drag.x, drag.y);
+    const el = hit && body.contains(hit) ? hit.closest('.row[data-row-id]') : null;
+    clearDrop(); drag.line.hidden = true; drag.target = null;
+    if (!el || !el._row || el._row.id === drag.id || isWithin(allRows(), drag.id, el._row.id)) { drag.hoverId = null; return; }
+    const row = el._row, zone = dropZone(drag.y, el.getBoundingClientRect());
+    const t = resolveDrop(row, zone, el._open, drag.id);
+    drag.target = t;
+    // a collapsed parent opens after a short hover in its middle
+    if (zone === 'inside' && row.children && row.children.length && !el._open) {
+      if (drag.hoverId !== row.id) { drag.hoverId = row.id; drag.hoverAt = Date.now(); }
+      else if (Date.now() - drag.hoverAt > 600) { expanded.add(row.id); expanded.delete('!' + row.id); drag.hoverId = null; renderPanel(); return locate(); }
+    } else drag.hoverId = null;
+    const tEl = body.querySelector(`[data-row-id="${CSS.escape(t.targetId)}"]`) || el;
+    if (t.zone === 'inside') { tEl.classList.add('drop-inside'); return; }
+    const tr = tEl.getBoundingClientRect(), lead = tEl.querySelector('.twisty + *') || tEl.querySelector('.t');
+    const left = lead ? lead.getBoundingClientRect().left - 2 : tr.left + 8;
+    Object.assign(drag.line.style, { left: left + 'px', width: Math.max(24, tr.right - left - 6) + 'px', top: (t.zone === 'before' ? tr.top : tr.bottom) - 1 + 'px' });
+    drag.line.hidden = false;
+  }
+  function endDrag(commit) {
+    if (!drag) return;
+    const d = drag; drag = null;
+    clearTimeout(d.timer);
+    if (!d.started) return;
+    cancelAnimationFrame(d.raf);
+    d.ghost?.remove(); d.line?.remove();
+    document.documentElement.classList.remove('hm-dragging');
+    body.querySelectorAll('.dragging').forEach((x) => x.classList.remove('dragging'));
+    clearDrop();
+    // the click that ends a drag shouldn't open the page
+    const swallow = (e) => { e.stopPropagation(); e.preventDefault(); };
+    document.addEventListener('click', swallow, true);
+    setTimeout(() => document.removeEventListener('click', swallow, true), 0);
+    if (!commit || !d.target) return;
+    if (d.target.zone === 'inside') { expanded.add(d.target.targetId); expanded.delete('!' + d.target.targetId); }
+    o.onMove && o.onMove({ id: d.id, ...d.target });
+  }
+  const onDragMove = (e) => {
+    if (!drag || e.pointerId !== drag.pid) return;
+    if (!drag.started) {
+      const far = Math.hypot(e.clientX - drag.x, e.clientY - drag.y);
+      if (drag.touch) { if (far > 8) endDrag(false); return; } // a swipe: let it scroll
+      if (far < 5) return;
+      startDrag();
+    }
+    drag.x = e.clientX; drag.y = e.clientY;
+    moveGhost(); locate();
+  };
+  const onDragUp = (e) => { if (drag && e.pointerId === drag.pid) endDrag(e.type === 'pointerup'); };
+  const onDragKey = (e) => { if (drag && drag.started && e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); endDrag(false); } };
+  // once a touch drag is live, the finger moves the page, not the list
+  const onTouchMove = (e) => { if (drag && drag.started) e.preventDefault(); };
+  document.addEventListener('pointermove', onDragMove);
+  document.addEventListener('pointerup', onDragUp);
+  document.addEventListener('pointercancel', onDragUp);
+  document.addEventListener('keydown', onDragKey, true);
+  document.addEventListener('touchmove', onTouchMove, { passive: false });
+  fly.addEventListener('contextmenu', (e) => { if (drag && drag.touch) e.preventDefault(); });
   let refocus = null;
 
   function renderPanel() {
@@ -550,7 +636,7 @@ export function createDial(opts) {
     else if (e.key === 'Tab') { setFocus(-1, false); }
     else if (/^[1-9]$/.test(e.key) && !e.ctrlKey && !e.metaKey && +e.key <= items.length) { e.preventDefault(); const i = +e.key - 1; setFocus(i); choose(i); }
   };
-  const onDocClick = (e) => { if (openFly && !within(e.target)) setFly(null); };
+  const onDocClick = (e) => { if (openFly && !e.composedPath().includes(root)) setFly(null); };
   const mq = matchMedia('(max-width: 860px)'), cq = matchMedia(COMPACT_QUERY);
   const onMq = () => { compact = isCompact(); applyCompact(); applyPinned(); if (mq.matches) setOpen(false); };
   document.addEventListener('keydown', onKey);
@@ -590,6 +676,12 @@ export function createDial(opts) {
       mq.removeEventListener?.('change', onMq);
       cq.removeEventListener?.('change', onMq);
       document.removeEventListener('focusin', onFocusIn);
+      endDrag(false);
+      document.removeEventListener('pointermove', onDragMove);
+      document.removeEventListener('pointerup', onDragUp);
+      document.removeEventListener('pointercancel', onDragUp);
+      document.removeEventListener('keydown', onDragKey, true);
+      document.removeEventListener('touchmove', onTouchMove);
       closeDrawer(false);
       document.documentElement.classList.remove('hm-dial-compact');
       root.remove();
