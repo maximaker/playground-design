@@ -10,7 +10,7 @@ import { useMemo, useState } from 'react';
 import {
   type Breakpoint, type CanvasNode, type ComponentDef, type NodeId, type StyleMap,
   breakpointSelector, breakpointsOf, maxWidthOf, resolvedProps,
-  codeComponentOf,
+  codeComponentOf, parseHtml, svgColors, replaceSvgColor, vectorMarkup,
 } from '@playground/shared';
 import { useCanvas, getDoc } from '../state/store.ts';
 import { attrOps, resolveKey, resetOverrideOps } from '../state/keys.ts';
@@ -180,6 +180,8 @@ export function Properties() {
         <button role="radio" aria-checked={simple} className={simple ? 'is-active' : ''} onClick={() => setSimple(true)}>Simple</button>
         <button role="radio" aria-checked={!simple} className={!simple ? 'is-active' : ''} onClick={() => setSimple(false)}>All controls</button>
       </div>
+
+      {nodes.length === 1 && first.type === 'vector' && !insideInstance && !readOnly && <VectorProps node={first} tokens={tokens} />}
 
       {simple ? <SimpleEdit read={read} set={set} isText={allText} tokens={tokens} /> : <>
 
@@ -1018,4 +1020,63 @@ function kindLabel(type: string): string {
     artboard: 'Page', frame: 'Box', text: 'Text', image: 'Image', vector: 'Shape',
     instance: 'Component copy', code: 'Code component', note: 'Note',
   } as Record<string, string>)[type] ?? type;
+}
+
+/**
+ * A vector layer's own controls: the colours it paints with, each one a swatch
+ * (a hex or a document token), and its SVG code for anything the swatches do
+ * not cover. Shown in both panel modes, since recolouring a pasted logo is the
+ * first thing anyone wants to do with it.
+ */
+function VectorProps({ node, tokens }: { node: CanvasNode; tokens: Parameters<typeof ColorInput>[0]['tokens'] }) {
+  const version = useCanvas((s) => s.version);
+  const markup = useMemo(
+    () => vectorMarkup(node.attrs, node.text ?? ''),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [node, version],
+  );
+  const colors = useMemo(() => svgColors(markup), [markup]);
+  const [error, setError] = useState('');
+
+  /** Writes new markup back as the layer's attributes and inner SVG, in one step. */
+  const apply = (next: string) => {
+    const parsed = parseHtml(next.trim());
+    const v = parsed.nodes.length ? parsed.nodes[0] : undefined;
+    if (!v || v.type !== 'vector') { setError('That is not an <svg> element. Nothing was changed.'); return; }
+    setError('');
+    const attrs: Record<string, string | null> = { ...v.attrs };
+    for (const k of Object.keys(node.attrs)) if (!(k in v.attrs)) attrs[k] = null;
+    useCanvas.getState().dispatch([
+      { t: 'attrs', updates: [{ id: node.id, attrs }] },
+      { t: 'text', updates: [{ id: node.id, text: v.text ?? '' }] },
+    ]);
+  };
+
+  return (
+    <>
+      <Section title="Shape colours">
+        {colors.length === 0 ? (
+          <p className="panel-empty dim">This shape paints with no fixed colours (it may follow the text colour).</p>
+        ) : colors.map((c) => (
+          <Row key={c}>
+            <Field label={c.startsWith('var(') ? c.slice(4, -1).replace(/^--/, '') : c} prop="fill / stroke" wide>
+              <ColorInput value={c} tokens={tokens} onCommit={(to) => { if (to && to !== c) apply(replaceSvgColor(markup, c, to)); }} />
+            </Field>
+          </Row>
+        ))}
+      </Section>
+      <Section title="SVG code" defaultOpen={false}>
+        <textarea
+          className="css-editor"
+          key={`${node.id}-${version}`}
+          defaultValue={markup}
+          spellCheck={false}
+          onBlur={(e) => { if (e.target.value.trim() !== markup.trim()) apply(e.target.value); }}
+          onKeyDown={(e) => e.stopPropagation()}
+          aria-label="SVG code"
+        />
+        {error ? <p className="panel-hint" role="alert">{error}</p> : <p className="panel-hint">Edits apply on blur. The layer keeps its size and position.</p>}
+      </Section>
+    </>
+  );
 }
