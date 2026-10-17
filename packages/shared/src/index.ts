@@ -26,3 +26,4 @@ export * from './sections.ts';
 export * from './versions.ts';
 export * from './decisions.ts';
 export * from './svg.ts';
+export * from './figma.ts';

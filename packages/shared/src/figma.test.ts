@@ -1,0 +1,100 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { parseSchema, compileSchema, encodeBinarySchema } from 'kiwi-schema';
+import { deflateSync } from 'fflate';
+import { decodeFigmaClipboard, figmaToHtml, isFigmaClipboard, vectorNetworkToPath, type FigMessage, type FigNode } from './figma.ts';
+import { parseHtml } from './html.ts';
+
+/* A tiny stand-in for Figma's schema: the decoder reads whatever schema travels. */
+const SCHEMA = `
+struct GUID { uint sessionID; uint localID; }
+message ParentIndex { GUID guid = 1; string position = 2; }
+message Vector { float x = 1; float y = 2; }
+message NodeChange { GUID guid = 1; string type = 2; string name = 3; ParentIndex parentIndex = 4; Vector size = 5; }
+message Message { NodeChange[] nodeChanges = 1; }
+`;
+
+function clipboardHtml(message: FigMessage): string {
+  const schema = parseSchema(SCHEMA);
+  const data = (compileSchema(schema) as { encodeMessage(m: unknown): Uint8Array }).encodeMessage(message);
+  const chunks = [deflateSync(encodeBinarySchema(schema)), deflateSync(data)];
+  const head = new TextEncoder().encode('fig-kiwi');
+  const out = new Uint8Array(12 + chunks.reduce((n, c) => n + 4 + c.length, 0));
+  out.set(head, 0);
+  const dv = new DataView(out.buffer);
+  dv.setUint32(8, 20, true);
+  let o = 12;
+  for (const c of chunks) { dv.setUint32(o, c.length, true); out.set(c, o + 4); o += 4 + c.length; }
+  const b64 = Buffer.from(out).toString('base64');
+  return `<meta charset="utf-8"><span data-metadata="<!--(figmeta)e30=(/figmeta)-->"></span><span data-buffer="<!--(figma)${b64}(/figma)-->"></span>`;
+}
+
+const g = (sessionID: number, localID: number) => ({ sessionID, localID });
+const page: FigNode = { guid: g(0, 1), type: 'CANVAS', name: 'Page 1' };
+
+test('decodes a fig-kiwi clipboard: schema and message both travel', () => {
+  const html = clipboardHtml({ nodeChanges: [page, { guid: g(1, 2), type: 'FRAME', name: 'Card', parentIndex: { guid: g(0, 1), position: '!' }, size: { x: 200, y: 100 } }] });
+  assert.ok(isFigmaClipboard(html));
+  const { message } = decodeFigmaClipboard(html);
+  assert.equal(message.nodeChanges?.[1]?.name, 'Card');
+  assert.equal(Math.round(message.nodeChanges![1]!.size!.x), 200);
+});
+
+const red = { type: 'SOLID', color: { r: 1, g: 0, b: 0, a: 1 }, opacity: 1, visible: true };
+
+test('auto layout becomes flexbox; fills, radius and text runs come across', () => {
+  const nodes: FigNode[] = [
+    page,
+    { guid: g(1, 1), type: 'FRAME', name: 'Row', parentIndex: { guid: g(0, 1), position: '!' }, size: { x: 300, y: 40 },
+      stackMode: 'HORIZONTAL', stackSpacing: 8, stackHorizontalPadding: 12, stackVerticalPadding: 4, stackCounterAlignItems: 'CENTER',
+      fillPaints: [red], cornerRadius: 6, frameMaskDisabled: true },
+    { guid: g(1, 2), type: 'TEXT', name: 'Label', parentIndex: { guid: g(1, 1), position: '!' }, size: { x: 120, y: 20 },
+      textAutoResize: 'WIDTH_AND_HEIGHT', fontSize: 16, fontName: { family: 'Inter', style: 'Semi Bold' },
+      textData: { characters: 'Hi there', characterStyleIDs: [0, 0, 0, 5, 5, 5, 5, 5], styleOverrideTable: [{ styleID: 5, fillPaints: [red] }] } },
+  ];
+  const { html, layers } = figmaToHtml({ nodeChanges: nodes });
+  assert.equal(layers, 2);
+  assert.match(html, /display:flex;flex-direction:row;gap:8px;padding:4px 12px 4px 12px/);
+  assert.match(html, /background-color:#FF0000/);
+  assert.match(html, /border-radius:6px/);
+  assert.match(html, /font-weight:600/);
+  // The space before the coloured run stays outside it, so it survives parsing.
+  assert.match(html, /Hi <span style="color:#FF0000">there<\/span>/);
+  const parsed = parseHtml(html);
+  assert.ok(parsed.nodes.some((n) => n.text === 'there'));
+});
+
+test('an instance renders its component, with overrides applied', () => {
+  const nodes: FigNode[] = [
+    page,
+    { guid: g(9, 9), type: 'CANVAS', name: 'Internal Only Canvas' },
+    { guid: g(2, 1), type: 'SYMBOL', name: 'Badge', parentIndex: { guid: g(9, 9), position: '!' }, size: { x: 80, y: 24 } },
+    { guid: g(2, 2), type: 'TEXT', name: 'Text', parentIndex: { guid: g(2, 1), position: '!' }, size: { x: 60, y: 20 }, textData: { characters: 'Default' } },
+    { guid: g(3, 1), type: 'INSTANCE', name: 'Badge', parentIndex: { guid: g(0, 1), position: '!' }, size: { x: 80, y: 24 },
+      symbolData: { symbolID: g(2, 1), symbolOverrides: [{ guidPath: { guids: [g(2, 2)] }, textData: { characters: 'New' } }] } },
+  ];
+  const { html } = figmaToHtml({ nodeChanges: nodes });
+  assert.match(html, />New</);
+  assert.doesNotMatch(html, /Default/);
+});
+
+test('image fills become placeholders with a hint', () => {
+  const nodes: FigNode[] = [page, { guid: g(1, 1), type: 'RECTANGLE', name: 'Photo', parentIndex: { guid: g(0, 1), position: '!' }, size: { x: 10, y: 10 }, fillPaints: [{ type: 'IMAGE', visible: true }] }];
+  const r = figmaToHtml({ nodeChanges: nodes });
+  assert.match(r.warnings.join(' '), /Copy as PNG/);
+});
+
+test('a vector network becomes an SVG path', () => {
+  // Two vertices, one straight segment, no regions: an open line.
+  const buf = new ArrayBuffer(12 + 2 * 12 + 28);
+  const dv = new DataView(buf);
+  let o = 0;
+  const u = (v: number) => { dv.setUint32(o, v, true); o += 4; };
+  const f = (v: number) => { dv.setFloat32(o, v, true); o += 4; };
+  u(2); u(1); u(0);
+  u(0); f(0); f(0);
+  u(0); f(10); f(5);
+  u(0); u(0); f(0); f(0); u(1); f(0); f(0);
+  const { d } = vectorNetworkToPath(new Uint8Array(buf), 2, 2);
+  assert.equal(d, 'M0 0L20 10');
+});

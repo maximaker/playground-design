@@ -7,7 +7,7 @@
  */
 
 import { useEffect } from 'react';
-import { type CanvasNode, type NodeId, emitHtml, parseHtml, makeNode, defaultStylesFor } from '@playground/shared';
+import { type CanvasNode, type NodeId, emitHtml, parseHtml, makeNode, defaultStylesFor, isFigmaClipboard, decodeFigmaClipboard, figmaToHtml } from '@playground/shared';
 import { useCanvas, getDoc, currentPage, topLevelSelection } from '../state/store.ts';
 
 export function useClipboard(): void {
@@ -73,7 +73,22 @@ export function useClipboard(): void {
       }
 
       if (html) {
-        const parsed = parseHtml(html);
+        // A normal Figma copy is Figma's own binary scene; decode it into
+        // HTML first. If the format ever changes under us, fall back to the
+        // hint to use Copy as SVG instead of failing the paste.
+        let source = html;
+        const notes: string[] = [];
+        if (!svgText && isFigmaClipboard(html)) {
+          try {
+            const figma = figmaToHtml(decodeFigmaClipboard(html).message);
+            if (figma.html) { source = figma.html; notes.push(...figma.warnings); }
+          } catch (err) {
+            console.warn('Figma paste could not be read', err);
+            notes.push("Couldn't read this Figma copy; try Copy as SVG (Ctrl Shift C).");
+          }
+        }
+        const parsed = parseHtml(source);
+        parsed.warnings.unshift(...notes);
         if (!parsed.nodes.length) {
           useCanvas.getState().toast(parsed.warnings[0] ?? 'Nothing to paste from that clipboard.', 'info');
           return;
