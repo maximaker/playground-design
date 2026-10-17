@@ -171,7 +171,10 @@ export function emitHtml(doc: CanvasDocument, rootId: NodeId, opts: EmitOptions 
     if (node.type === 'text') return `${pad}<${tag}${attrStr}>${escapeText(node.text ?? '')}</${tag}>`;
 
     // Mixed text and inline elements are one run: no whitespace between them.
-    const run = flat || expanded.children.some((c) => c?.node.type === 'text' && INLINE_TAGS.has(c.node.tag));
+    // Also flat where whitespace is significant: under pre-wrap the indentation
+    // between children rendered as blank lines.
+    const run = flat || /^pre/.test(node.styles['white-space'] ?? '')
+      || expanded.children.some((c) => c?.node.type === 'text' && INLINE_TAGS.has(c.node.tag));
     const kids = expanded.children.map((c) => emitNode(c, depth + 1, run)).filter(Boolean);
     if (kids.length === 0) return `${pad}<${tag}${attrStr}></${tag}>`;
     const sep = pretty && !run ? '\n' : '';

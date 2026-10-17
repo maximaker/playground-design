@@ -35,6 +35,7 @@ type Paint = {
   transform?: { m00: number; m01: number; m02: number; m10: number; m11: number; m12: number };
   image?: { hash?: Uint8Array | string; name?: string }; imageScaleMode?: string; scale?: number;
   originalImageWidth?: number; originalImageHeight?: number;
+  paintFilter?: { exposure?: number; contrast?: number; saturation?: number; vibrance?: number; temperature?: number; tint?: number; highlights?: number; shadows?: number };
 };
 type Effect = { type: string; color?: Color; offset?: { x: number; y: number }; radius?: number; spread?: number; visible?: boolean };
 type Num = { value: number; units: string };
@@ -60,7 +61,7 @@ export interface FigNode extends TextStyle {
   stackPrimaryAlignItems?: string; stackCounterAlignItems?: string; stackPrimarySizing?: string; stackCounterSizing?: string;
   stackChildPrimaryGrow?: number; stackChildAlignSelf?: string; stackPositioning?: string;
   textData?: { characters?: string; characterStyleIDs?: number[]; styleOverrideTable?: TextStyle[]; lines?: { lineType?: string }[] };
-  textAlignHorizontal?: string; textAutoResize?: string;
+  textAlignHorizontal?: string; textAutoResize?: string; paragraphSpacing?: number; listSpacing?: number;
   symbolData?: { symbolID?: Guid; symbolOverrides?: (FigNode & { guidPath?: { guids: Guid[] } })[] };
   derivedSymbolData?: (FigNode & { guidPath?: { guids: Guid[] } })[];
   vectorData?: { vectorNetworkBlob?: number; normalizedSize?: { x: number; y: number } };
@@ -346,6 +347,7 @@ export function figmaToHtml(message: FigMessage, opts: FigmaOptions = {}): Figma
   const pageIds = new Set(nodes.filter((n) => n.type === 'CANVAS' && n !== internal).map((n) => gid(n.guid)));
   const roots = nodes.filter((n) => pageIds.has(gid(n.parentIndex?.guid)) && (!opts.only || opts.only.includes(gid(n.guid))));
   const images: ImageState = { n: 0, urls: opts.images ?? {}, used: new Set() };
+  const approximated = new Set<string>();
   let layers = 0;
   const warnings: string[] = [];
 
@@ -423,24 +425,65 @@ export function figmaToHtml(message: FigMessage, opts: FigmaOptions = {}): Figma
       s.push(...runCss(base, false), 'margin:0', 'white-space:pre-wrap');
       if (n.textAlignHorizontal && n.textAlignHorizontal !== 'LEFT') s.push(`text-align:${n.textAlignHorizontal === 'JUSTIFIED' ? 'justify' : n.textAlignHorizontal.toLowerCase()}`);
       if (shadows.length) s.push(`text-shadow:${shadows.map((x) => x.replace(/^inset /, '').replace(/ [^ ]+px (#|rgba)/, ' $1')).join(', ')}`);
+      // A fill that is there but invisible is a transparent fill (outlined
+      // display text), not "no fill": without this it fell back to black.
+      const allFills = styled(n.styleIdForFill, 'fillPaints', n.fillPaints) ?? [];
+      if (allFills.length && !fills.length) s.push('color:transparent');
+      const outline = visiblePaints(n.strokePaints)[0];
+      if (outline?.color && (n.strokeWeight ?? 0) > 0) {
+        // CSS strokes are centred; Figma's outside stroke shows its full weight.
+        const w = (n.strokeWeight ?? 1) * (n.strokeAlign === 'OUTSIDE' && fills.length ? 2 : 1);
+        s.push(`-webkit-text-stroke:${px(w)} ${css(outline.color, outline.opacity ?? 1)}`, 'paint-order:stroke fill');
+      }
       const chars = n.textData?.characters ?? '';
       const ids = n.textData?.characterStyleIDs ?? [];
       const table = new Map((n.textData?.styleOverrideTable ?? []).map((o) => [o.styleID ?? -1, o]));
-      let html = '';
-      for (let i = 0; i < chars.length;) {
-        const id = ids[i] ?? 0;
-        let j = i + 1;
-        while (j < chars.length && (ids[j] ?? 0) === id) j++;
-        const text = esc(chars.slice(i, j)).replace(LINE_BREAKS, '<br>');
-        const st = id ? table.get(id) : undefined;
-        const extra = st ? runCss(st, true) : [];
-        // Spaces at a run's edges stay outside its span: the parser trims a
-        // styled run, which glued "How to" onto "validate".
-        const [, lead = '', core = '', trail = ''] = /^(\s*)([\s\S]*?)(\s*)$/.exec(text) ?? [];
-        html += extra.length && core ? `${lead}<span style="${extra.join(';')}">${core}</span>${trail}` : text;
-        i = j;
+      const runs = (from: number, to: number) => {
+        let out = '';
+        for (let i = from; i < to;) {
+          const id = ids[i] ?? 0;
+          let j = i + 1;
+          while (j < to && (ids[j] ?? 0) === id) j++;
+          const text = esc(chars.slice(i, j)).replace(LINE_BREAKS, '<br>');
+          const st = id ? table.get(id) : undefined;
+          const extra = st ? runCss(st, true) : [];
+          // Spaces at a run's edges stay outside its span: the parser trims a
+          // styled run, which glued "How to" onto "validate".
+          const [, lead = '', core = '', trail = ''] = /^(\s*)([\s\S]*?)(\s*)$/.exec(text) ?? [];
+          out += extra.length && core ? `${lead}<span style="${extra.join(';')}">${core}</span>${trail}` : text;
+          i = j;
+        }
+        return out;
+      };
+      const lines = n.textData?.lines ?? [];
+      const isList = (t?: string) => t === 'UNORDERED_LIST' || t === 'ORDERED_LIST';
+      if (!lines.some((l) => isList(l.lineType))) {
+        return `<p data-name="${name}" style="${s.join(';')}">${runs(0, chars.length) || '&#8203;'}</p>`;
       }
-      return `<p data-name="${name}" style="${s.join(';')}">${html || '&#8203;'}</p>`;
+      // Figma lists are per line: bullets or numbers on some lines, plain text
+      // on others, with paragraph and list spacing between them.
+      const gap = n.paragraphSpacing ?? 0, listGap = n.listSpacing ?? gap;
+      let html = '', open = '', at = 0;
+      const ranges: [number, number][] = [];
+      for (let k = 0, i = 0; k <= chars.length; k++) {
+        if (k === chars.length || chars[k] === '\n') { ranges.push([i, k]); i = k + 1; }
+      }
+      ranges.forEach(([a, b], k) => {
+        const type = lines[k]?.lineType;
+        const tag = type === 'ORDERED_LIST' ? 'ol' : type === 'UNORDERED_LIST' ? 'ul' : '';
+        if (open && open !== tag) { html += `</${open}>`; open = ''; }
+        const body = runs(a, b) || '&#8203;';
+        const space = k < ranges.length - 1 ? (tag ? listGap : gap) : 0;
+        const mb = space ? `margin:0 0 ${px(space)} 0` : 'margin:0';
+        if (tag) {
+          if (!open) { html += `<${tag} style="margin:0;padding-left:1.4em;list-style:${tag === 'ol' ? 'decimal' : 'disc'}">`; open = tag; }
+          html += `<li style="${mb}">${body}</li>`;
+        } else html += `<div style="${mb}">${body}</div>`;
+        at = b;
+      });
+      if (open) html += `</${open}>`;
+      void at;
+      return `<div data-name="${name}" style="${s.join(';').replace('white-space:pre-wrap', 'white-space:normal;display:block')}">${html}</div>`;
     }
 
     /* ---------- vectors ---------- */
@@ -509,7 +552,22 @@ export function figmaToHtml(message: FigMessage, opts: FigmaOptions = {}): Figma
       s.push(`border-radius:${px(box.rectangleTopLeftCornerRadius)} ${px(box.rectangleTopRightCornerRadius)} ${px(box.rectangleBottomRightCornerRadius)} ${px(box.rectangleBottomLeftCornerRadius)}`);
     } else if (box.cornerRadius) s.push(`border-radius:${px(box.cornerRadius)}`);
     if (shadows.length) s.push(`box-shadow:${shadows.join(', ')}`);
-    if (blur?.radius) s.push(`filter:blur(${px(blur.radius / 2)})`);
+    // Figma's image adjustments have no CSS twin; filters get the direction
+    // right (lighter, warmer, more saturated) but not the exact pixels.
+    const adjust = fills.find((p) => p.type === 'IMAGE' && p.paintFilter)?.paintFilter;
+    const filters: string[] = [];
+    if (adjust) {
+      const r2 = (v: number) => Math.round(v * 100) / 100;
+      if (adjust.exposure) filters.push(`brightness(${r2(1 + adjust.exposure)})`);
+      if (adjust.contrast) filters.push(`contrast(${r2(1 + adjust.contrast)})`);
+      const sat = (adjust.saturation ?? 0) + (adjust.vibrance ?? 0) * 0.5;
+      if (adjust.temperature && adjust.temperature > 0) filters.push(`sepia(${r2(adjust.temperature * 0.6)})`);
+      if (sat) filters.push(`saturate(${r2(1 + sat)})`);
+      if (adjust.tint) filters.push(`hue-rotate(${Math.round(adjust.tint * -20)}deg)`);
+      approximated.add('image adjustments');
+    }
+    if (blur?.radius) filters.push(`blur(${px(blur.radius / 2)})`);
+    if (filters.length) s.push(`filter:${filters.join(' ')}`);
     if (bgBlur?.radius) s.push(`backdrop-filter:blur(${px(bgBlur.radius / 2)})`);
     const clips = (box.type === 'FRAME' || box.type === 'INSTANCE' || box.type === 'SYMBOL' || box.type === 'COMPONENT') && box.frameMaskDisabled !== true;
     if (clips) s.push('overflow:hidden');
@@ -535,5 +593,6 @@ export function figmaToHtml(message: FigMessage, opts: FigmaOptions = {}): Figma
   const html = roots.map((r) => render(r, false, true, new Map(), '')).join('');
   if (images.n) warnings.push(`${images.n} image fill${images.n === 1 ? '' : 's'} had no link in Figma's clipboard; they are grey placeholders. Paste those with Copy as PNG.`);
   if (!roots.length) warnings.push('Nothing to paste from that Figma selection.');
+  if (approximated.size) warnings.push(`Approximated: ${[...approximated].join(', ')}.`);
   return { html, warnings, layers, images: [...images.used] };
 }

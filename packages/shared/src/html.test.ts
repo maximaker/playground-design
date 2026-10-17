@@ -132,3 +132,11 @@ test('data-name names the layer and is not kept as an attribute', () => {
   assert.deepEqual(nodes.map((n) => n.name).sort(), ['Hero card', 'Title']);
   assert.ok(nodes.every((n) => n.attrs['data-name'] === undefined));
 });
+
+test('export adds no whitespace inside pre-wrap, where it would show as blank lines', () => {
+  const doc = createEmptyDocument('Pre');
+  const artboard = doc.pages[0]!.artboards[0]!;
+  const parsed = parseHtml('<div style="white-space:pre-wrap"><ul><li>One</li><li>Two</li></ul></div>');
+  applyOp(doc, { t: 'insert', nodes: parsed.nodes, parent: artboard, index: 0 });
+  assert.match(emitStandalone(doc, artboard), /<ul[^>]*><li[^>]*>One<\/li><li[^>]*>Two<\/li><\/ul>/);
+});

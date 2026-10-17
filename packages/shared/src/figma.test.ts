@@ -125,3 +125,17 @@ test('image fills use the clipboard links: fill, fit and crop', () => {
   // The single quotes keep the URL inside the style attribute when parsed.
   assert.ok(parseHtml(r.html).nodes.every((n) => !n.styles.background || n.styles.background.includes('figma.com')));
 });
+
+test('outlined display text and Figma lists come across', () => {
+  const white = { r: 1, g: 1, b: 1, a: 1 };
+  const nodes: FigNode[] = [page,
+    { guid: g(1, 1), type: 'TEXT', name: '0', parentIndex: { guid: g(0, 1), position: '!' }, size: { x: 100, y: 100 }, textData: { characters: '0' },
+      fillPaints: [{ type: 'SOLID', color: white, opacity: 0, visible: true }], strokePaints: [{ type: 'SOLID', color: white, visible: true }], strokeWeight: 2, strokeAlign: 'OUTSIDE' },
+    { guid: g(1, 2), type: 'TEXT', name: 'List', parentIndex: { guid: g(0, 1), position: '"' }, size: { x: 100, y: 100 }, paragraphSpacing: 8,
+      textData: { characters: 'One\nTwo\nAfter', lines: [{ lineType: 'UNORDERED_LIST' }, { lineType: 'UNORDERED_LIST' }, { lineType: 'PLAIN' }] } },
+  ];
+  const { html } = figmaToHtml({ nodeChanges: nodes });
+  assert.match(html, /color:transparent/);
+  assert.match(html, /-webkit-text-stroke:2px #FFFFFF/);
+  assert.match(html, /<ul[^>]*><li[^>]*>One<\/li><li[^>]*>Two<\/li><\/ul><div[^>]*>After<\/div>/);
+});
