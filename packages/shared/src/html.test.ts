@@ -83,6 +83,22 @@ test('export keeps running text together: no space before a styled full stop', (
   assert.match(html, /<\/p>\n\s+<p/);
 });
 
+test('a Figma clipboard becomes a hint, not a <meta> layer that crashes the editor', () => {
+  const figma = `<meta charset='utf-8'><span data-metadata="<!--(figmeta)eyJmIjoxfQ==(/figmeta)-->"></span><span data-buffer="<!--(figma)ZmlnLWtpd2k=(/figma)-->"></span>`;
+  const r = parseHtml(figma);
+  assert.equal(r.nodes.length, 0);
+  assert.match(r.warnings.join(' '), /Copy as SVG/);
+  // A whole document pastes as its content, without the scaffolding.
+  const doc = parseHtml('<html><head><meta charset="utf-8"><title>x</title></head><body><p>Hi</p></body></html>');
+  assert.deepEqual(doc.nodes.map((n) => n.tag), ['p']);
+});
+
+test('pasted SVG markup becomes one vector layer', () => {
+  const r = parseHtml('<svg width="24" height="24" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="#F25A12"/></svg>');
+  assert.equal(r.nodes.length, 1);
+  assert.equal(r.nodes[0]!.type, 'vector');
+});
+
 test('style rules respect descendant, child and sibling combinators', () => {
   const html = `<style>
     .nav span { color: red; }

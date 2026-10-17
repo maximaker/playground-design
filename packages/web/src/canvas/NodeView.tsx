@@ -19,7 +19,8 @@ import { CodeFrame } from './CodeFrame.tsx';
 import { useCanvas, getDoc, getNodeById } from '../state/store.ts';
 import { toReactStyle } from './styles.ts';
 
-const VOID_TAGS = new Set(['img', 'br', 'hr', 'input', 'source', 'track', 'wbr']);
+// Every HTML void element: React throws if one is given children, which took the whole editor down.
+const VOID_TAGS = new Set(['img', 'br', 'hr', 'input', 'source', 'track', 'wbr', 'meta', 'link', 'area', 'base', 'col', 'embed', 'param']);
 
 /** Attributes that must not reach the DOM — they would break editing or escape the canvas. */
 const BLOCKED_ATTRS = new Set(['style', 'class', 'contenteditable', 'onclick', 'onload', 'onerror']);

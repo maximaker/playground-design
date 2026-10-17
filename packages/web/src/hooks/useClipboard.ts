@@ -59,8 +59,10 @@ export function useClipboard(): void {
 
       if (files.length) { e.preventDefault(); void insertImages(files); return; }
 
-      const html = e.clipboardData?.getData('text/html');
       const plain = e.clipboardData?.getData('text/plain');
+      // Figma's "Copy as SVG" (and most icon sites) put the markup in plain text.
+      const svgText = plain && /^\s*(<\?xml[^>]*>\s*)?<svg[\s>]/i.test(plain) ? plain : '';
+      const html = svgText || e.clipboardData?.getData('text/html');
       if (!html && !plain) return;
       e.preventDefault();
 
@@ -72,7 +74,10 @@ export function useClipboard(): void {
 
       if (html) {
         const parsed = parseHtml(html);
-        if (!parsed.nodes.length) return;
+        if (!parsed.nodes.length) {
+          useCanvas.getState().toast(parsed.warnings[0] ?? 'Nothing to paste from that clipboard.', 'info');
+          return;
+        }
         useCanvas.getState().dispatch([{
           t: 'insert',
           nodes: parsed.nodes,

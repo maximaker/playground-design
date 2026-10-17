@@ -389,6 +389,17 @@ export function parseHtml(html: string, opts: ParseOptions = {}): ParseResult {
     warnings.push('Removed a <script> element; Canvas does not execute pasted scripts.');
     scriptEl.remove();
   }
+  // Figma's clipboard is its own binary format inside two marker spans; only
+  // "Copy as SVG" gives markup a canvas can use.
+  const figma = root.querySelectorAll('[data-buffer], [data-metadata]');
+  if (figma.some((el) => /\(figma\)|\(figmeta\)/.test(el.getAttribute('data-buffer') ?? el.getAttribute('data-metadata') ?? ''))) {
+    warnings.push('Figma copies in its own format. In Figma, use Copy as SVG (Ctrl Shift C), then paste.');
+    for (const el of figma) el.remove();
+  }
+  // Document scaffolding is not content: <meta>, <title> and friends would
+  // become layers that cannot render (a void <meta> crashed the editor).
+  for (const el of root.querySelectorAll('meta, link, title, base, head, noscript, template')) el.remove();
+  for (const el of root.querySelectorAll('html, body')) el.replaceWith(...el.childNodes);
 
   const nodes: CanvasNode[] = [];
   const roots: NodeId[] = [];
