@@ -1052,8 +1052,43 @@ function VectorProps({ node, tokens }: { node: CanvasNode; tokens: Parameters<ty
     ]);
   };
 
+  /*
+   * The outline is CSS on the layer, not markup: `stroke` inherits into every
+   * path that does not set its own, tokens work (var() is fine in CSS), and
+   * hover or breakpoint variants come for free.
+   */
+  const outline = node.styles.stroke ?? '';
+  const outlineOn = !!outline && outline !== 'none';
+  const setOutline = (styles: StyleMap) => useCanvas.getState().setNodeStyles([node.id], styles);
+
   return (
     <>
+      <Section title="Outline">
+        <Row>
+          <Field label="Outline" prop="stroke">
+            <SegmentedControl
+              value={outlineOn ? 'on' : 'off'}
+              options={[{ value: 'off', label: 'None' }, { value: 'on', label: 'On' }]}
+              onCommit={(v) => setOutline(v === 'on'
+                ? { stroke: 'var(--color-ink, #363A48)', 'stroke-width': node.styles['stroke-width'] || '2', 'stroke-linejoin': 'round', overflow: 'visible' }
+                : { stroke: '', 'stroke-width': '', 'stroke-linejoin': '', overflow: '' })}
+            />
+          </Field>
+          {outlineOn && (
+            <Field label="Thickness" prop="stroke-width">
+              <NumberInput value={node.styles['stroke-width'] ?? '2'} onCommit={(v) => setOutline({ 'stroke-width': v })} min={0} max={64} step={0.5} suffix="" />
+            </Field>
+          )}
+        </Row>
+        {outlineOn && (
+          <Row>
+            <Field label="Colour" prop="stroke" wide>
+              <ColorInput value={outline} tokens={tokens} onCommit={(v) => setOutline({ stroke: v || 'none' })} />
+            </Field>
+          </Row>
+        )}
+        <p className="panel-hint">Outlines every path that has no outline of its own. Thickness is in the SVG's own units.</p>
+      </Section>
       <Section title="Shape colours">
         {colors.length === 0 ? (
           <p className="panel-empty dim">This shape paints with no fixed colours (it may follow the text colour).</p>
