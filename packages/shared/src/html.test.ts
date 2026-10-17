@@ -71,6 +71,18 @@ test('parseHtml keeps the space between an inline element and the text after it'
   assert.equal(flex.nodes.filter((n) => n.type === 'text' && !n.text?.trim()).length, 0);
 });
 
+test('export keeps running text together: no space before a styled full stop', () => {
+  const doc = createEmptyDocument('Run');
+  const artboard = doc.pages[0]!.artboards[0]!;
+  const parsed = parseHtml('<div><p>Build smarter<span style="color:orange">.</span> Then <b>ship</b>, fast.</p><p>Two</p></div>');
+  applyOp(doc, { t: 'insert', nodes: parsed.nodes, parent: artboard, index: 0 });
+  const html = emitStandalone(doc, artboard);
+  // A newline between "smarter" and the span rendered as "smarter ." before.
+  assert.match(html, />Build smarter<\/span><span[^>]*>\.<\/span><span[^>]*> Then <\/span><b[^>]*>ship<\/b><span[^>]*>, fast\.<\/span><\/p>/);
+  // Block children stay pretty-printed.
+  assert.match(html, /<\/p>\n\s+<p/);
+});
+
 test('style rules respect descendant, child and sibling combinators', () => {
   const html = `<style>
     .nav span { color: red; }

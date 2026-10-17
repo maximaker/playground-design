@@ -20,6 +20,8 @@ import {
 } from './css.ts';
 
 const VOID_TAGS = new Set(['img', 'br', 'hr', 'input', 'source', 'track', 'wbr', 'meta', 'link']);
+/** Text-level tags: a sibling of these is part of a run of text, not a block. */
+const INLINE_TAGS = new Set(['span', 'b', 'strong', 'i', 'em', 'a', 'u', 's', 'small', 'code', 'mark', 'sub', 'sup', 'abbr', 'kbd', 'q', 'cite', 'time', 'label', 'br']);
 
 const TEXTUAL_TAGS = new Set([
   'p', 'span', 'a', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'li',
@@ -108,10 +110,12 @@ export function emitHtml(doc: CanvasDocument, rootId: NodeId, opts: EmitOptions 
     if (vars) cssBlocks.push(vars);
   }
 
-  const emitNode = (expanded: ExpandedNode | null, depth: number): string => {
+  // `flat`: inside running text, where a newline between children would render
+  // as a space ("smarter ." instead of "smarter.").
+  const emitNode = (expanded: ExpandedNode | null, depth: number, flat = false): string => {
     if (!expanded) return '';
     const node = expanded.node;
-    const pad = pretty ? '  '.repeat(depth) : '';
+    const pad = pretty && !flat ? '  '.repeat(depth) : '';
     // Definition nodes share ids across instances, so class names are derived
     // from the expanded key to keep per-instance variants distinct.
     const cls = `c-${expanded.key.replace(/[^a-z0-9_-]/gi, '-')}`;
@@ -166,10 +170,12 @@ export function emitHtml(doc: CanvasDocument, rootId: NodeId, opts: EmitOptions 
     if (node.type === 'vector') return `${pad}<${tag}${attrStr}>${sanitizeMarkup(node.text ?? '')}</${tag}>`;
     if (node.type === 'text') return `${pad}<${tag}${attrStr}>${escapeText(node.text ?? '')}</${tag}>`;
 
-    const kids = expanded.children.map((c) => emitNode(c, depth + 1)).filter(Boolean);
+    // Mixed text and inline elements are one run: no whitespace between them.
+    const run = flat || expanded.children.some((c) => c?.node.type === 'text' && INLINE_TAGS.has(c.node.tag));
+    const kids = expanded.children.map((c) => emitNode(c, depth + 1, run)).filter(Boolean);
     if (kids.length === 0) return `${pad}<${tag}${attrStr}></${tag}>`;
-    const sep = pretty ? '\n' : '';
-    return `${pad}<${tag}${attrStr}>${sep}${kids.join(sep)}${sep}${pad}</${tag}>`;
+    const sep = pretty && !run ? '\n' : '';
+    return `${pad}<${tag}${attrStr}>${sep}${kids.join(sep)}${sep}${run ? '' : pad}</${tag}>`;
   };
 
   const root = doc.nodes[rootId];
