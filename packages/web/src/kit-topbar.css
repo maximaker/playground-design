@@ -49,6 +49,12 @@
   white-space: nowrap;
   color: inherit;
   text-decoration: none;
+  /* A real tap target (WCAG 2.5.8) without moving the wordmark. */
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  padding: 0 4px;
+  margin: 0 -4px;
 }
 
 .hm-switcher {
