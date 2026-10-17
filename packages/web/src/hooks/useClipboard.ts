@@ -73,64 +73,11 @@ export function useClipboard(): void {
       }
 
       if (html) {
-        // A normal Figma copy is Figma's own binary scene; decode it into
-        // HTML first. If the format ever changes under us, fall back to the
-        // hint to use Copy as SVG instead of failing the paste.
-        let source = html;
-        const notes: string[] = [];
-        let fromFigma = false;
-        if (!svgText && isFigmaClipboard(html)) {
-          try {
-            const figma = figmaToHtml(decodeFigmaClipboard(html).message);
-            if (figma.html) { source = figma.html; notes.push(...figma.warnings); fromFigma = true; }
-          } catch (err) {
-            console.warn('Figma paste could not be read', err);
-            notes.push("Couldn't read this Figma copy; try Copy as SVG (Ctrl Shift C).");
-          }
-        }
-        const parsed = parseHtml(source);
-        parsed.warnings.unshift(...notes);
-        if (!parsed.nodes.length) {
-          useCanvas.getState().toast(parsed.warnings[0] ?? 'Nothing to paste from that clipboard.', 'info');
-          return;
-        }
-
-        // Figma frames pasted with nothing selected become artboards of their
-        // own size, beside the others, as they would in Figma. Dropped into an
-        // existing artboard a 1920 slide was cropped out of sight.
-        const rootNodes = parsed.roots.map((id) => parsed.nodes.find((n) => n.id === id)!);
-        if (fromFigma && useCanvas.getState().selection.length === 0 && rootNodes.every((n) => n.type === 'frame')) {
-          let x = 0, y = 0;
-          for (const id of page.artboards) {
-            const a = doc.nodes[id];
-            if (!a) continue;
-            const right = Number(a.attrs['data-x'] ?? 0) + (parseFloat(a.styles.width ?? '') || 0);
-            if (right + 120 > x) { x = right + 120; y = Number(a.attrs['data-y'] ?? 0); }
-          }
-          for (const root of rootNodes) {
-            const { 'flex-shrink': _s, position: _p, left: _l, top: _t, ...own } = root.styles;
-            root.type = 'artboard';
-            root.styles = { ...DEFAULT_ARTBOARD_STYLES, ...own };
-            root.attrs = { ...root.attrs, 'data-x': String(Math.round(x)), 'data-y': String(Math.round(y)) };
-            x += (parseFloat(own.width ?? '') || 400) + 120;
-          }
-          useCanvas.getState().dispatch([{ t: 'insert', nodes: parsed.nodes, parent: null, index: page.artboards.length }]);
-          useCanvas.getState().select(parsed.roots);
-          const n = rootNodes.length;
-          useCanvas.getState().toast(`Pasted ${n} frame${n === 1 ? '' : 's'} from Figma${parsed.warnings.length ? ` — ${parsed.warnings[0]}` : ''}`, parsed.warnings.length ? 'info' : 'success');
-          return;
-        }
-        useCanvas.getState().dispatch([{
-          t: 'insert',
-          nodes: parsed.nodes,
-          parent: target,
-          index: doc.nodes[target]!.children.length,
-        }]);
-        useCanvas.getState().select(parsed.roots);
-        const message = parsed.warnings.length
-          ? `Pasted ${parsed.roots.length} layer${parsed.roots.length === 1 ? '' : 's'} — ${parsed.warnings[0]}`
-          : `Pasted ${parsed.nodes.length} layers`;
-        useCanvas.getState().toast(message, parsed.warnings.length ? 'info' : 'success');
+        // A normal Figma copy is Figma's own binary scene: decode it, copy its
+        // images into the document, then insert. That needs to wait on the
+        // network, so it runs on its own.
+        if (!svgText && isFigmaClipboard(html)) { void pasteFigma(html, target); return; }
+        insertHtml(parseHtml(html), target);
         return;
       }
 
@@ -237,4 +184,86 @@ export function placedSize(w: number, h: number): { width: number; height: numbe
   const density = Math.min(w, h) >= 32 ? 2 : 1;
   const scale = Math.min(1 / density, 600 / Math.max(w, h));
   return { width: Math.max(1, Math.round(w * scale)), height: Math.max(1, Math.round(h * scale)) };
+}
+
+type Parsed = ReturnType<typeof parseHtml>;
+
+/** Inserts parsed layers into a container and says what happened. */
+function insertHtml(parsed: Parsed, target: NodeId, notes: string[] = []): void {
+  const doc = getDoc();
+  const warnings = [...notes, ...parsed.warnings];
+  if (!doc || !parsed.nodes.length) {
+    useCanvas.getState().toast(warnings[0] ?? 'Nothing to paste from that clipboard.', 'info');
+    return;
+  }
+  useCanvas.getState().dispatch([{ t: 'insert', nodes: parsed.nodes, parent: target, index: doc.nodes[target]!.children.length }]);
+  useCanvas.getState().select(parsed.roots);
+  const message = warnings.length
+    ? `Pasted ${parsed.roots.length} layer${parsed.roots.length === 1 ? '' : 's'} — ${warnings[0]}`
+    : `Pasted ${parsed.nodes.length} layers`;
+  useCanvas.getState().toast(message, warnings.length ? 'info' : 'success');
+}
+
+/**
+ * A Figma paste: decode the scene, copy its images out of Figma (the clipboard
+ * links expire in a week, and the app's CSP would block them anyway), then
+ * insert. Frames pasted with nothing selected become artboards of their own
+ * size beside the others, as in Figma.
+ */
+async function pasteFigma(html: string, target: NodeId): Promise<void> {
+  const { docId, toast } = useCanvas.getState();
+  let figma;
+  try {
+    const { message, meta } = decodeFigmaClipboard(html);
+    figma = figmaToHtml(message, { images: (meta.imageHashes ?? {}) as Record<string, string> });
+  } catch (err) {
+    console.warn('Figma paste could not be read', err);
+    toast("Couldn't read this Figma copy; try Copy as SVG (Ctrl Shift C).", 'info');
+    return;
+  }
+  let source = figma.html;
+  const notes = [...figma.warnings];
+  if (figma.images.length && docId) {
+    toast(`Copying ${figma.images.length} image${figma.images.length === 1 ? '' : 's'} from Figma…`, 'info');
+    let failed = 0;
+    await Promise.all(figma.images.map(async (url) => {
+      let to = '';
+      try {
+        const res = await fetch(`/api/documents/${docId}/assets/import`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url, name: 'figma-image' }),
+        });
+        if (res.ok) to = (await res.json()).url as string;
+      } catch { /* counted below */ }
+      if (!to) failed++;
+      source = source.split(url).join(to || 'about:blank');
+    }));
+    if (failed) notes.unshift(`${failed} image${failed === 1 ? '' : 's'} could not be copied from Figma; paste ${failed === 1 ? 'it' : 'them'} with Copy as PNG.`);
+  }
+  const parsed = parseHtml(source);
+  const doc = getDoc();
+  const page = currentPage();
+  if (!doc || !page) return;
+  const roots = parsed.roots.map((id) => parsed.nodes.find((n) => n.id === id)!);
+  if (useCanvas.getState().selection.length === 0 && roots.length && roots.every((n) => n.type === 'frame')) {
+    let x = 0, y = 0;
+    for (const id of page.artboards) {
+      const a = doc.nodes[id];
+      if (!a) continue;
+      const right = Number(a.attrs['data-x'] ?? 0) + (parseFloat(a.styles.width ?? '') || 0);
+      if (right + 120 > x) { x = right + 120; y = Number(a.attrs['data-y'] ?? 0); }
+    }
+    for (const root of roots) {
+      const { 'flex-shrink': _s, position: _p, left: _l, top: _t, ...own } = root.styles;
+      root.type = 'artboard';
+      root.styles = { ...DEFAULT_ARTBOARD_STYLES, ...own };
+      root.attrs = { ...root.attrs, 'data-x': String(Math.round(x)), 'data-y': String(Math.round(y)) };
+      x += (parseFloat(own.width ?? '') || 400) + 120;
+    }
+    useCanvas.getState().dispatch([{ t: 'insert', nodes: parsed.nodes, parent: null, index: page.artboards.length }]);
+    useCanvas.getState().select(parsed.roots);
+    const warnings = [...notes, ...parsed.warnings];
+    toast(`Pasted ${roots.length} frame${roots.length === 1 ? '' : 's'} from Figma${warnings.length ? ` — ${warnings[0]}` : ''}`, warnings.length ? 'info' : 'success');
+    return;
+  }
+  insertHtml(parsed, target, notes);
 }

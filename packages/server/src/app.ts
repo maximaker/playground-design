@@ -30,6 +30,7 @@ import {
 } from './connections.ts';
 import { handleMcpRequest } from './mcp.ts';
 import { getAsset, storeAsset, AssetError, MAX_ASSET_BYTES } from './assets.ts';
+import { importImage, ImageImportError } from './image-import.ts';
 import {
   type Share, createShare, listShares, redactForViewer, resolveShare, revokeShare, viewerMayApply,
 } from './shares.ts';
@@ -1331,6 +1332,20 @@ api.post('/documents/:id/assets', async (c) => {
     throw err;
   }
   return c.json({ id, url: `${PUBLIC_URL}/assets/${id}`, name: file.name, size: bytes.length }, 201);
+});
+
+/** A Figma paste: copy one image from Figma's signed link into the document. */
+api.post('/documents/:id/assets/import', async (c) => {
+  const doc = await requireDocument(c.req.param('id'));
+  const body = await c.req.json().catch(() => ({})) as { url?: string; name?: string };
+  if (!body.url) return c.json({ error: 'expected a "url"' }, 400);
+  try {
+    const { id, size } = await importImage(doc.id, body.url, body.name);
+    return c.json({ id, url: `${PUBLIC_URL}/assets/${id}`, size }, 201);
+  } catch (err) {
+    if (err instanceof ImageImportError || err instanceof AssetError) return c.json({ error: err.message }, 422);
+    throw err;
+  }
 });
 
 // heymax connect does its own auth (session or CONNECT_TOKEN), so it is

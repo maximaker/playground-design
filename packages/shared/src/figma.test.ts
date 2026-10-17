@@ -110,3 +110,18 @@ test('a vector network becomes an SVG path', () => {
   const { d } = vectorNetworkToPath(new Uint8Array(buf), 2, 2);
   assert.equal(d, 'M0 0L20 10');
 });
+
+test('image fills use the clipboard links: fill, fit and crop', () => {
+  const hash = new Uint8Array([0xab, 0xcd]);
+  const img = (mode: string, transform?: object) => ({ type: 'IMAGE', visible: true, imageScaleMode: mode, image: { hash }, transform });
+  const node = (id: number, paint: object): FigNode => ({ guid: g(1, id), type: 'RECTANGLE', name: `R${id}`, parentIndex: { guid: g(0, 1), position: String(id) }, size: { x: 100, y: 100 }, fillPaints: [paint as never] });
+  const r = figmaToHtml({ nodeChanges: [page, node(1, img('FILL')), node(2, img('FIT')), node(3, img('STRETCH', { m00: 0.5, m01: 0, m02: 0.25, m10: 0, m11: 1, m12: 0 }))] }, { images: { abcd: 'https://s3-alpha-sig.figma.com/img/ab/cd' } });
+  assert.deepEqual(r.images, ['https://s3-alpha-sig.figma.com/img/ab/cd']);
+  assert.match(r.html, /url\('https:\/\/s3-alpha-sig\.figma\.com\/img\/ab\/cd'\) center \/ cover no-repeat/);
+  assert.match(r.html, /center \/ contain no-repeat/);
+  // Half the image shown, starting a quarter in: 200% wide, positioned at 50%.
+  assert.match(r.html, /50% 0% \/ 200% 100% no-repeat/);
+  assert.equal(r.warnings.length, 0);
+  // The single quotes keep the URL inside the style attribute when parsed.
+  assert.ok(parseHtml(r.html).nodes.every((n) => !n.styles.background || n.styles.background.includes('figma.com')));
+});

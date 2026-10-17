@@ -33,6 +33,8 @@ type Paint = {
   type: string; color?: Color; opacity?: number; visible?: boolean; blendMode?: string;
   stops?: { color: Color; position: number }[];
   transform?: { m00: number; m01: number; m02: number; m10: number; m11: number; m12: number };
+  image?: { hash?: Uint8Array | string; name?: string }; imageScaleMode?: string; scale?: number;
+  originalImageWidth?: number; originalImageHeight?: number;
 };
 type Effect = { type: string; color?: Color; offset?: { x: number; y: number }; radius?: number; spread?: number; visible?: boolean };
 type Num = { value: number; units: string };
@@ -196,7 +198,17 @@ const WEIGHTS: [RegExp, number][] = [
 const weightOf = (style = '') => WEIGHTS.find(([re]) => re.test(style))?.[1] ?? 400;
 
 /** A CSS background for a stack of Figma paints (bottom first, as Figma stores them). */
-function background(paints: Paint[], images: { n: number }): string {
+type ImageState = { n: number; urls: Record<string, string>; used: Set<string> };
+
+/** Figma image hashes are SHA-1 bytes; the clipboard's link table is keyed by their hex. */
+function imageUrl(p: Paint, urls: Record<string, string>): string | undefined {
+  const h = p.image?.hash;
+  if (!h) return undefined;
+  const hex = typeof h === 'string' ? h : [...h].map((b) => b.toString(16).padStart(2, '0')).join('');
+  return urls[hex];
+}
+
+function background(paints: Paint[], images: ImageState): string {
   const layers: string[] = [];
   for (const p of paints) {
     const o = p.opacity ?? 1;
@@ -210,8 +222,21 @@ function background(paints: Paint[], images: { n: number }): string {
         layers.push(`linear-gradient(${deg}deg, ${stops})`);
       } else layers.push(`radial-gradient(${stops})`);
     } else if (p.type === 'IMAGE') {
-      images.n++;
-      layers.push('linear-gradient(#E3E6EF, #E3E6EF)');
+      const url = imageUrl(p, images.urls);
+      if (!url) { images.n++; layers.push('linear-gradient(#E3E6EF, #E3E6EF)'); continue; }
+      images.used.add(url);
+      const t = p.transform;
+      const mode = p.imageScaleMode ?? 'FILL';
+      if (mode === 'FIT') layers.push(`url('${url}') center / contain no-repeat`);
+      else if (mode === 'TILE') {
+        const w = (p.originalImageWidth ?? 100) * (p.scale ?? 1);
+        layers.push(`url('${url}') 0 0 / ${Math.round(w)}px auto repeat`);
+      } else if (mode === 'STRETCH' && t && (t.m00 !== 1 || t.m11 !== 1 || t.m02 || t.m12)) {
+        // A crop: the transform maps the layer onto the part of the image it
+        // shows, so the image is (1 / scale) of the layer, offset by m02/m12.
+        const pct = (scale: number, off: number) => (scale >= 1 ? 0 : Math.round((off / (1 - scale)) * 10000) / 100);
+        layers.push(`url('${url}') ${pct(t.m00, t.m02)}% ${pct(t.m11, t.m12)}% / ${Math.round(10000 / t.m00) / 100}% ${Math.round(10000 / t.m11) / 100}% no-repeat`);
+      } else layers.push(`url('${url}') center / cover no-repeat`);
     }
   }
   if (!layers.length) return '';
@@ -285,10 +310,20 @@ export function vectorNetworkToPath(bytes: Uint8Array, sx = 1, sy = 1): { d: str
 
 /* --------------------------------------------------------------- convert */
 
-export interface FigmaPaste { html: string; warnings: string[]; layers: number }
+export interface FigmaPaste {
+  html: string; warnings: string[]; layers: number;
+  /** Image links the HTML uses: Figma's signed URLs, to copy into the document before they expire. */
+  images: string[];
+}
+export interface FigmaOptions {
+  /** The clipboard's image table (figmeta.imageHashes): hash hex to signed link. */
+  images?: Record<string, string>;
+  /** Convert only these top-level frames (guid strings like "1203:4881"). */
+  only?: string[];
+}
 
 /** Turns a decoded Figma clipboard into HTML the canvas can parse. */
-export function figmaToHtml(message: FigMessage): FigmaPaste {
+export function figmaToHtml(message: FigMessage, opts: FigmaOptions = {}): FigmaPaste {
   const nodes = message.nodeChanges ?? [];
   const blobs = message.blobs ?? [];
   const byId = new Map<string, FigNode>();
@@ -309,8 +344,8 @@ export function figmaToHtml(message: FigMessage): FigmaPaste {
 
   const internal = nodes.find((n) => n.type === 'CANVAS' && /internal/i.test(n.name ?? ''));
   const pageIds = new Set(nodes.filter((n) => n.type === 'CANVAS' && n !== internal).map((n) => gid(n.guid)));
-  const roots = nodes.filter((n) => pageIds.has(gid(n.parentIndex?.guid)));
-  const images = { n: 0 };
+  const roots = nodes.filter((n) => pageIds.has(gid(n.parentIndex?.guid)) && (!opts.only || opts.only.includes(gid(n.guid))));
+  const images: ImageState = { n: 0, urls: opts.images ?? {}, used: new Set() };
   let layers = 0;
   const warnings: string[] = [];
 
@@ -498,7 +533,7 @@ export function figmaToHtml(message: FigMessage): FigmaPaste {
   };
 
   const html = roots.map((r) => render(r, false, true, new Map(), '')).join('');
-  if (images.n) warnings.push(`${images.n} image fill${images.n === 1 ? '' : 's'} can't travel through Figma's clipboard; they are grey placeholders. Paste images with Copy as PNG.`);
+  if (images.n) warnings.push(`${images.n} image fill${images.n === 1 ? '' : 's'} had no link in Figma's clipboard; they are grey placeholders. Paste those with Copy as PNG.`);
   if (!roots.length) warnings.push('Nothing to paste from that Figma selection.');
-  return { html, warnings, layers };
+  return { html, warnings, layers, images: [...images.used] };
 }

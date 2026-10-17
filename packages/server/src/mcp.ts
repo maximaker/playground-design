@@ -48,7 +48,8 @@ import {
   callTab, notifyTabs, selectionOf, hasLiveTab, NoTabError, setAgentPresence, clearAgentPresence, hasTabOnPage,
 } from './realtime.ts';
 import { renderNode, measureSubtree, rasterizeSvg, computeStyles, composeContactSheet } from './render.ts';
-import { storeAsset } from './assets.ts';
+import { storeAsset, AssetError } from './assets.ts';
+import { importImage, ImageImportError } from './image-import.ts';
 import { gatherHealthFacts, recordStyleRules } from './health.ts';
 import { GUIDES, guideList } from './guides.ts';
 import { importUrl, ImportError } from './import.ts';
@@ -1456,6 +1457,35 @@ function registerReadTools(server: McpServer, ctx: McpContext): void {
         mimeType: res.headers.get('content-type') ?? 'image/jpeg',
       }],
     };
+  }));
+
+  server.registerTool('import_image', {
+    title: 'Add an image to the document',
+    description:
+      'Stores an image in this document and returns its URL, to use as an <img src> or a background-image in write_html. ' +
+      'Pass `url` for an image from Figma (the signed links in a Figma clipboard; other hosts are refused), or `data` (base64) with `mime` ' +
+      'for any image you have. Images written with an outside URL break when that URL changes; stored ones do not.',
+    inputSchema: {
+      url: z.string().url().optional(),
+      data: z.string().optional().describe('Base64 image bytes (no data: prefix).'),
+      mime: z.string().optional().describe('With data: image/png, image/jpeg, image/webp, image/gif or image/svg+xml.'),
+      name: z.string().max(80).optional(),
+    },
+  }, async ({ url, data, mime, name }) => guard(async () => {
+    const doc = requireDoc(ctx);
+    if (!url && !data) return fail('Pass either url or data.');
+    try {
+      let id: string;
+      if (url) id = (await importImage(doc.id, url, name)).id;
+      else {
+        if (!mime) return fail('Pass mime with data.');
+        id = await storeAsset(doc.id, mime, name ?? 'image', Buffer.from(data!, 'base64'));
+      }
+      return json({ id, url: `${ctx.baseUrl.replace(/\/$/, '')}/assets/${id}` });
+    } catch (err) {
+      if (err instanceof ImageImportError || err instanceof AssetError) return fail(err.message);
+      throw err;
+    }
   }));
 
   server.registerTool('get_font_family_info', {
