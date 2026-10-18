@@ -543,3 +543,10 @@ test('MCP: a form through add_live_question, list_live_answers and set_live_ques
   assert.equal(reset.answerCount, 0);
   assert.equal(reset.fields.length, 1);
 });
+
+test('deleteLiveQuestion removes the question and its answers', async () => {
+  const { createLiveQuestion, deleteLiveQuestion, getLiveQuestion } = await import('./live.ts');
+  const q = await createLiveQuestion(docId, 'Gone soon?');
+  assert.deepEqual(await deleteLiveQuestion(q.code), { deleted: q.code });
+  assert.equal(await getLiveQuestion(q.code), null);
+});

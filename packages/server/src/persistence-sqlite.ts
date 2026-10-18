@@ -268,6 +268,10 @@ export class SqlitePersistence implements Persistence {
     return row ? JSON.parse(row.data) as LiveQuestion : null;
   }
 
+  async deleteLiveQuestion(code: string): Promise<void> {
+    this.db.prepare('DELETE FROM live_questions WHERE code = ?').run(code);
+  }
+
   async loadLiveQuestions(docId: string): Promise<LiveQuestion[]> {
     const rows = this.db.prepare('SELECT data FROM live_questions WHERE doc_id = ? ORDER BY created_at').all(docId) as { data: string }[];
     return rows.map((r) => JSON.parse(r.data) as LiveQuestion);

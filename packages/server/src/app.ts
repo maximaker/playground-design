@@ -65,7 +65,7 @@ import { APP_CSP, clientIp, rateLimit, securityHeaders } from './security.ts';
 import { bodyLimit } from 'hono/body-limit';
 import {
   LiveError, answerPageHtml, boardHtml, castLiveVote, clearLiveAnswers, createLiveQuestion, deviceFor, deviceView,
-  getLiveQuestion, hideLiveAnswer, likeLiveAnswer, resetLiveForm, submitLiveForm, moderatorView, liveQuestionsInOrder, answersCsv, controlPageHtml, submitLiveAnswer, updateLiveQuestion, waitForBoardState,
+  getLiveQuestion, hideLiveAnswer, likeLiveAnswer, resetLiveForm, deleteLiveQuestion, submitLiveForm, moderatorView, liveQuestionsInOrder, answersCsv, controlPageHtml, submitLiveAnswer, updateLiveQuestion, waitForBoardState,
 } from './live.ts';
 
 const PORT = Number(process.env.PORT ?? 4000);
@@ -1438,6 +1438,13 @@ api.post('/live/:code/answers/:answerId/hide', async (c) => {
 api.post('/live/:code/reset', async (c) => {
   try {
     return c.json(await resetLiveForm(c.req.param('code')));
+  } catch (err) { return liveFailure(c, err); }
+});
+
+/** Deletes a question and its answers; not undoable. */
+api.post('/live/:code/delete', async (c) => {
+  try {
+    return c.json(await deleteLiveQuestion(c.req.param('code')));
   } catch (err) { return liveFailure(c, err); }
 });
 

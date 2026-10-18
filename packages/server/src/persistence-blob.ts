@@ -359,6 +359,11 @@ export class BlobPersistence implements Persistence {
     await this.putJson(`live/${q.code}.json`, q);
   }
   async loadLiveQuestion(code: string) { return this.getJson<LiveQuestion>(`live/${code}.json`); }
+  async deleteLiveQuestion(code: string) {
+    const { del } = await this.blob();
+    this.invalidate('live');
+    try { await del(`live/${code}.json`, { token: this.token }); } catch { /* already gone */ }
+  }
   async loadLiveQuestions(docId: string): Promise<LiveQuestion[]> {
     const all = await this.cachedList('live', async () => {
       const { list } = await this.blob();

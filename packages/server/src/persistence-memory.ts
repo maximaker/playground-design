@@ -109,6 +109,7 @@ export class MemoryPersistence implements Persistence {
 
   async saveLiveQuestion(q: LiveQuestion) { this.live.set(q.code, structuredClone(q)); }
   async loadLiveQuestion(code: string) { const q = this.live.get(code); return q ? structuredClone(q) : null; }
+  async deleteLiveQuestion(code: string) { this.live.delete(code); }
   async loadLiveQuestions(docId: string) {
     return [...this.live.values()].filter((q) => q.docId === docId)
       .sort((a, b) => a.createdAt - b.createdAt).map((q) => structuredClone(q));

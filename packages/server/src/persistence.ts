@@ -246,6 +246,7 @@ export interface Persistence {
   saveLiveQuestion(q: LiveQuestion): Promise<void>;
   loadLiveQuestion(code: string): Promise<LiveQuestion | null>;
   loadLiveQuestions(docId: string): Promise<LiveQuestion[]>;
+  deleteLiveQuestion(code: string): Promise<void>;
 
   saveHistory(docId: string, entries: unknown[]): Promise<void>;
   loadHistory(docId: string): Promise<unknown[]>;

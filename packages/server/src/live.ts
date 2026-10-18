@@ -236,6 +236,20 @@ export async function clearLiveAnswers(code: string): Promise<{ hidden: number }
 }
 
 /**
+ * Removes a question and everything answered to it, for good: the leftovers of
+ * a slide that was deleted or replaced. Its answer page and board stop working.
+ */
+export async function deleteLiveQuestion(code: string): Promise<{ deleted: string }> {
+  const h = await mustHold(code);
+  await (await persistence()).deleteLiveQuestion(h.q.code);
+  cache.delete(h.q.code);
+  const list = waiters.get(h.q.code);
+  waiters.delete(h.q.code);
+  for (const wake of list ?? []) wake();
+  return { deleted: h.q.code };
+}
+
+/**
  * Deletes every response to a form, so it can be asked again or its fields
  * changed. Unlike clearing, this is not undoable.
  */
@@ -1506,6 +1520,15 @@ function controls(q, after) {
     actions.append(reset);
   }
   actions.append(csv);
+  if (!q.placement) {
+    const del = el('button', 'danger', 'Delete question');
+    del.onclick = async (e) => {
+      e.stopPropagation();
+      if (!confirm('Delete “' + q.question + '” and all its answers? It is on no slide. This cannot be undone.')) return;
+      try { await api('/live/' + q.code + '/delete', 'POST'); after(); } catch (err) { alert(err.message); }
+    };
+    actions.append(del);
+  }
   box.append(actions);
   return box;
 }

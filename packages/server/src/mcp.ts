@@ -44,7 +44,7 @@ import {
 } from './store.ts';
 import { persistence } from './persistence.ts';
 import {
-  LiveError, clearLiveAnswers, createLiveQuestion, resetLiveForm, getLiveQuestion, hideLiveAnswer, liveQuestionsFor, liveQuestionsInOrder, moderatorView,
+  LiveError, clearLiveAnswers, createLiveQuestion, resetLiveForm, deleteLiveQuestion, getLiveQuestion, hideLiveAnswer, liveQuestionsFor, liveQuestionsInOrder, moderatorView,
   updateLiveQuestion,
 } from './live.ts';
 import { pageArtboard, slugify } from './publish.ts';
@@ -2348,6 +2348,15 @@ function registerWriteTools(server: McpServer, ctx: McpContext): void {
     const q = await ownLiveQuestion(code);
     const answer = await hideLiveAnswer(q.code, answerId, hidden);
     return json({ id: answer.id, hidden: answer.hidden });
+  }));
+
+  server.registerTool('delete_live_question', {
+    title: 'Delete a live question',
+    description: 'Deletes a live question and every answer, vote or response to it, for good. Use it for questions whose slide was deleted or replaced (list_live_questions shows them as not on a slide).',
+    inputSchema: { code: z.string() },
+  }, async ({ code }) => liveGuard(async () => {
+    const q = await ownLiveQuestion(code);
+    return json(await deleteLiveQuestion(q.code));
   }));
 
   server.registerTool('set_live_question', {
