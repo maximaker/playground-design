@@ -658,6 +658,8 @@ const GENERIC_FONTS = new Set(['serif', 'sans-serif', 'monospace', 'system-ui', 
 export interface BoardLook {
   /** "0" or "false" hides the QR block whatever the question says. */
   qr?: string;
+  /** "0" hides the question heading, for a slide that carries the question as its own title. */
+  title?: string;
   font?: string;
   ink?: string;
   accent?: string;
@@ -675,6 +677,7 @@ function safeLook(look: BoardLook): Required<BoardLook> {
     accent: color(look.accent, '#2f6bff'),
     card: color(look.card, ''),
     qr: look.qr === '0' || look.qr === 'false' ? '0' : '1',
+    title: look.title === '0' || look.title === 'false' ? '0' : '1',
   };
 }
 
@@ -764,10 +767,10 @@ ${fontHead(l.font)}
   @keyframes in { from { opacity: 0; transform: translateY(8px) scale(.98); } }
 </style></head>
 <body>
-<div class="board" id="board">
+<div class="board" id="board">${l.title === '0' ? '<style>#q{display:none}</style>' : ''}
   <div class="head">
     <div><h1 class="q" id="q">${esc(q.question)}</h1><div class="meta" id="meta"></div></div>
-    <div class="scan" id="scan">${qrSvg(url)}<span>${esc(shortAnswerUrl(publicUrl, q.code))}</span></div>
+    <div class="scan" id="scan"${l.qr === '0' || q.qr === false ? ' style="display:none"' : ''}>${qrSvg(url)}<span>${esc(shortAnswerUrl(publicUrl, q.code))}</span></div>
   </div>
   <div class="grid" id="grid"></div>
   <div class="poll" id="poll" hidden></div>

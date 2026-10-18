@@ -1567,7 +1567,7 @@ app.get('/q/:code/board', async (c) => {
   if (!q) return c.html(answerPageHtml(null, c.req.param('code')), 404);
   const state = await waitForBoardState(q.code, -1, 0);
   return c.html(boardHtml(q, state!.v, PUBLIC_URL, {
-    qr: c.req.query('qr'), font: c.req.query('font'), ink: c.req.query('ink'), accent: c.req.query('accent'), card: c.req.query('card'),
+    qr: c.req.query('qr'), title: c.req.query('title'), font: c.req.query('font'), ink: c.req.query('ink'), accent: c.req.query('accent'), card: c.req.query('card'),
   }), 200, { 'cache-control': 'no-store', 'x-robots-tag': 'noindex', 'content-security-policy': BOARD_CSP });
 });
 
