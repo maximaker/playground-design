@@ -24,23 +24,35 @@ let base = '';
 let cookie = '';
 let docId = '';
 let client: Client;
-let n = 0;
 
 const jsonHeaders = (extra: Record<string, string> = {}) => ({ 'content-type': 'application/json', ...extra });
 
-async function createQuestion(question = 'What is your idea in one sentence?'): Promise<string> {
+async function createQuestion(question = 'What is your idea in one sentence?', settings: Record<string, unknown> = {}): Promise<string> {
   const r = await fetch(`${base}/api/documents/${docId}/live`, {
-    method: 'POST', headers: jsonHeaders({ cookie }), body: JSON.stringify({ question }),
+    method: 'POST', headers: jsonHeaders({ cookie }), body: JSON.stringify({ question, ...settings }),
   });
   assert.equal(r.status, 201, await r.clone().text());
   return ((await r.json()) as { code: string }).code;
 }
 
-/** A fresh client id per call unless one is given, so tests do not trip each other's limits. */
-function answer(code: string, body: Record<string, unknown>) {
+/** With no device, every call is a new phone, so tests do not trip each other's limits. */
+function answer(code: string, body: Record<string, unknown>, device?: string) {
   return fetch(`${base}/q/${code}/answers`, {
-    method: 'POST', headers: jsonHeaders(), body: JSON.stringify({ client: `test-client-${++n}`, ...body }),
+    method: 'POST', headers: jsonHeaders(device ? { 'x-live-device': device } : {}), body: JSON.stringify(body),
   });
+}
+
+function vote(code: string, option: number, device?: string) {
+  return fetch(`${base}/q/${code}/vote`, {
+    method: 'POST', headers: jsonHeaders(device ? { 'x-live-device': device } : {}), body: JSON.stringify({ option }),
+  });
+}
+
+/** A phone: the signed token the server hands out, as the page would keep it. */
+async function phone(code: string): Promise<string> {
+  const r = await fetch(`${base}/q/${code}/me`);
+  assert.match(r.headers.get('set-cookie') ?? '', /pg_live=.*HttpOnly/);
+  return ((await r.json()) as { device: string }).device;
 }
 
 async function state(code: string) {
@@ -97,11 +109,10 @@ test('an answer is cleaned, stored and shown newest first', async () => {
   assert.equal((await fetch(`${base}/q/zzzzzzzz`)).status, 404);
 });
 
-test('one client is held to one answer every few seconds', async () => {
-  const code = await createQuestion();
-  const send = () => fetch(`${base}/q/${code}/answers`, {
-    method: 'POST', headers: jsonHeaders(), body: JSON.stringify({ client: 'same-phone-123', text: 'again' }),
-  });
+test('one phone is held to one answer every few seconds', async () => {
+  const code = await createQuestion('Many ideas?', { onePerPerson: false });
+  const device = await phone(code);
+  const send = () => answer(code, { text: 'again' }, device);
   assert.equal((await send()).status, 201);
   const second = await send();
   assert.equal(second.status, 429);
@@ -201,4 +212,120 @@ test('MCP: add_live_question, list_live_answers, hide_live_answer, set_live_ques
 
   const missing = await client.callTool({ name: 'hide_live_answer', arguments: { code: 'zzzzzzzz', answerId: 'x' } });
   assert.equal((missing as { isError?: boolean }).isError, true);
+});
+
+test('once per person: a second answer from the same phone is refused, by cookie or by kept token', async () => {
+  const code = await createQuestion();
+  const first = await answer(code, { text: 'mine' });
+  assert.equal(first.status, 201);
+  const jar = (first.headers.get('set-cookie') ?? '').split(';')[0]!;
+  const token = ((await first.json()) as { device: string }).device;
+
+  const byCookie = await fetch(`${base}/q/${code}/answers`, { method: 'POST', headers: jsonHeaders({ cookie: jar }), body: JSON.stringify({ text: 'again' }) });
+  assert.equal(byCookie.status, 409);
+  assert.match(((await byCookie.json()) as { error: string }).error, /already answered/);
+  assert.equal((await answer(code, { text: 'again' }, token)).status, 409);
+
+  const me = await (await fetch(`${base}/q/${code}/me`, { headers: { 'x-live-device': token } })).json() as { answered: boolean };
+  assert.equal(me.answered, true);
+
+  // A made-up token is not that phone: it is ignored and a new one minted.
+  const [id] = token.split('.');
+  const forged = await fetch(`${base}/q/${code}/me`, { headers: { 'x-live-device': `${id}.AAAAAAAAAAAAAAAAAAAAAA` } });
+  const forgedView = await forged.json() as { answered: boolean; device: string };
+  assert.equal(forgedView.answered, false);
+  assert.notEqual(forgedView.device.split('.')[0], id);
+
+  // Questions made before the setting existed keep taking several.
+  const { updateLiveQuestion } = await import('./live.ts');
+  await updateLiveQuestion(code, { onePerPerson: false });
+  resetLiveLimits();
+  assert.equal((await answer(code, { text: 'second idea' }, token)).status, 201);
+});
+
+test('poll: one vote per phone that can be changed, percentages, close, reset, options', async () => {
+  const code = await createQuestion('Vitamin or painkiller?', { kind: 'poll', options: ['Vitamin', 'Painkiller'] });
+  const a = await phone(code);
+  const b = await phone(code);
+  assert.equal((await vote(code, 0, a)).status, 201);
+  assert.equal((await vote(code, 1, b)).status, 201);
+  resetLiveLimits(); // the per-phone gap is not what this test is about
+  const changed = await vote(code, 1, a);
+  assert.equal(changed.status, 201);
+  assert.equal(((await changed.json()) as { changed: boolean }).changed, true);
+  assert.equal((await vote(code, 5, a)).status, 400);
+  assert.equal((await answer(code, { text: 'words' })).status, 400);
+
+  const s = await (await fetch(`${base}/q/${code}/state`)).json() as { kind: string; total: number; options: { label: string; count: number; percent: number }[] };
+  assert.equal(s.kind, 'poll');
+  assert.equal(s.total, 2);
+  assert.deepEqual(s.options, [{ label: 'Vitamin', count: 0, percent: 0 }, { label: 'Painkiller', count: 2, percent: 100 }]);
+  const me = await (await fetch(`${base}/q/${code}/me`, { headers: { 'x-live-device': a } })).json() as { answered: boolean; vote: number };
+  assert.deepEqual([me.answered, me.vote], [true, 1]);
+
+  const patch = (body: unknown) => fetch(`${base}/api/live/${code}`, { method: 'PATCH', headers: jsonHeaders({ cookie }), body: JSON.stringify(body) });
+  assert.equal((await patch({ options: ['A', 'B', 'C'] })).status, 409, 'no relabelling under votes');
+
+  await patch({ open: false });
+  assert.equal((await vote(code, 0)).status, 409);
+  const reset = await fetch(`${base}/api/live/${code}/clear`, { method: 'POST', headers: { cookie } });
+  assert.deepEqual(await reset.json(), { votesReset: 2 });
+  assert.equal((await patch({ options: ['A', 'B', 'C'], open: true })).status, 200);
+  assert.equal((await vote(code, 2)).status, 201);
+
+  const page = await (await fetch(`${base}/q/${code}`)).text();
+  assert.match(page, /class="choice" data-i="2">C</);
+  assert.equal((await fetch(`${base}/api/documents/${docId}/live`, {
+    method: 'POST', headers: jsonHeaders({ cookie }), body: JSON.stringify({ question: 'x', kind: 'poll', options: ['only one'] }),
+  })).status, 400);
+});
+
+test('votable answers: one like per phone per answer, not your own, ranked by likes', async () => {
+  const code = await createQuestion('Best problem statement?', { votable: true });
+  const author = await phone(code);
+  await answer(code, { text: 'older' });
+  await answer(code, { text: 'liked one' }, author);
+  await answer(code, { text: 'newest' });
+  const liked = (await state(code)).answers.find((a) => a.text === 'liked one')!;
+  const like = (device: string, on = true) => fetch(`${base}/q/${code}/answers/${liked.id}/like`, {
+    method: 'POST', headers: jsonHeaders({ 'x-live-device': device }), body: JSON.stringify({ liked: on }),
+  });
+
+  assert.equal((await like(author)).status, 409, 'not your own');
+  const fan = await phone(code);
+  assert.deepEqual(((await (await like(fan)).json()) as { likes: number }).likes, 1);
+  assert.deepEqual(((await (await like(fan)).json()) as { likes: number }).likes, 1, 'twice is still one');
+
+  const s = await (await fetch(`${base}/q/${code}/state`)).json() as { votable: boolean; answers: { text: string; likes: number }[] };
+  assert.equal(s.votable, true);
+  assert.deepEqual(s.answers.map((a) => [a.text, a.likes]), [['liked one', 1], ['newest', 0], ['older', 0]]);
+  const me = await (await fetch(`${base}/q/${code}/me`, { headers: { 'x-live-device': fan } })).json() as { answers: { liked: boolean }[] };
+  assert.equal(me.answers[0]!.liked, true);
+  assert.equal(((await (await like(fan, false)).json()) as { likes: number }).likes, 0);
+  assert.ok(!JSON.stringify(s).includes(fan.split('.')[0]!), 'devices never reach the board');
+});
+
+test('MCP: a poll through add_live_question, counted by list_live_answers', async () => {
+  const doc = getDocument(docId)!;
+  const artboardId = doc.pages[0]!.artboards[0]!;
+  const text = (res: unknown) => (res as { content: { text: string }[] }).content[0]!.text;
+  const added = JSON.parse(text(await client.callTool({
+    name: 'add_live_question', arguments: { question: 'Ship it?', artboardId, kind: 'poll', options: ['Yes', 'No', 'Later'] },
+  }))) as { code: string; kind: string };
+  assert.equal(added.kind, 'poll');
+  await vote(added.code, 0);
+  await vote(added.code, 0);
+  await vote(added.code, 2);
+  const listed = JSON.parse(text(await client.callTool({ name: 'list_live_answers', arguments: { code: added.code } }))) as
+    { kind: string; totalVotes: number; options: { label: string; votes: number; percent: number }[] }[];
+  assert.equal(listed[0]!.totalVotes, 3);
+  assert.deepEqual(listed[0]!.options.map((o) => [o.label, o.votes, o.percent]), [['Yes', 2, 67], ['No', 0, 0], ['Later', 1, 33]]);
+
+  const refused = await client.callTool({ name: 'set_live_question', arguments: { code: added.code, options: ['Y', 'N'] } });
+  assert.equal((refused as { isError?: boolean }).isError, true);
+  const relabelled = JSON.parse(text(await client.callTool({
+    name: 'set_live_question', arguments: { code: added.code, clear: true, options: ['Y', 'N'] },
+  }))) as { options: { label: string }[]; cleared: { votesReset: number } };
+  assert.deepEqual(relabelled.options.map((o) => o.label), ['Y', 'N']);
+  assert.equal(relabelled.cleared.votesReset, 3);
 });

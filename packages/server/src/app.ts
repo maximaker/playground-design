@@ -64,8 +64,8 @@ import { dirname } from 'node:path';
 import { APP_CSP, clientIp, rateLimit, securityHeaders } from './security.ts';
 import { bodyLimit } from 'hono/body-limit';
 import {
-  LiveError, answerPageHtml, boardHtml, clearLiveAnswers, createLiveQuestion, getLiveQuestion, hideLiveAnswer,
-  submitLiveAnswer, updateLiveQuestion, waitForBoardState,
+  LiveError, answerPageHtml, boardHtml, castLiveVote, clearLiveAnswers, createLiveQuestion, deviceFor, deviceView,
+  getLiveQuestion, hideLiveAnswer, likeLiveAnswer, moderatorView, submitLiveAnswer, updateLiveQuestion, waitForBoardState,
 } from './live.ts';
 
 const PORT = Number(process.env.PORT ?? 4000);
@@ -1367,39 +1367,50 @@ function liveFailure(c: import('hono').Context, err: unknown) {
 }
 
 api.post('/documents/:id/live', async (c) => {
-  const body = await c.req.json().catch(() => ({})) as { question?: string };
+  const body = await c.req.json().catch(() => ({})) as {
+    question?: string; kind?: 'text' | 'poll'; options?: unknown; onePerPerson?: boolean; votable?: boolean;
+  };
   try {
-    const q = await createLiveQuestion(c.req.param('id'), body.question ?? '');
-    return c.json({ code: q.code, question: q.question, url: `${PUBLIC_URL}/q/${q.code}`, board: `${PUBLIC_URL}/q/${q.code}/board` }, 201);
+    const q = await createLiveQuestion(c.req.param('id'), body.question ?? '', {
+      kind: body.kind, options: body.options,
+      onePerPerson: typeof body.onePerPerson === 'boolean' ? body.onePerPerson : undefined,
+      votable: body.votable === true,
+    });
+    return c.json({
+      code: q.code, question: q.question, kind: q.kind, url: `${PUBLIC_URL}/q/${q.code}`, board: `${PUBLIC_URL}/q/${q.code}/board`,
+    }, 201);
   } catch (err) { return liveFailure(c, err); }
 });
 
 api.get('/live/:code', async (c) => {
   const q = await getLiveQuestion(c.req.param('code'));
   if (!q) return c.json({ error: 'No such question.' }, 404);
-  return c.json({ ...q, canModerate: atLeast(c.get('role'), 'editor') });
+  return c.json({ ...moderatorView(q), canModerate: atLeast(c.get('role'), 'editor') });
 });
 
 api.patch('/live/:code', async (c) => {
-  const body = await c.req.json().catch(() => ({})) as { question?: string; open?: boolean };
+  const body = await c.req.json().catch(() => ({})) as Record<string, unknown>;
+  const flag = (v: unknown) => (typeof v === 'boolean' ? v : undefined);
   try {
-    return c.json(await updateLiveQuestion(c.req.param('code'), {
+    return c.json(moderatorView(await updateLiveQuestion(c.req.param('code'), {
       question: typeof body.question === 'string' ? body.question : undefined,
-      open: typeof body.open === 'boolean' ? body.open : undefined,
-    }));
+      open: flag(body.open), onePerPerson: flag(body.onePerPerson), votable: flag(body.votable),
+      options: body.options,
+    })));
   } catch (err) { return liveFailure(c, err); }
 });
 
 api.post('/live/:code/answers/:answerId/hide', async (c) => {
   const body = await c.req.json().catch(() => ({})) as { hidden?: boolean };
   try {
-    return c.json(await hideLiveAnswer(c.req.param('code'), c.req.param('answerId'), body.hidden !== false));
+    const answer = await hideLiveAnswer(c.req.param('code'), c.req.param('answerId'), body.hidden !== false);
+    return c.json({ id: answer.id, hidden: answer.hidden });
   } catch (err) { return liveFailure(c, err); }
 });
 
 api.post('/live/:code/clear', async (c) => {
   try {
-    return c.json({ hidden: await clearLiveAnswers(c.req.param('code')) });
+    return c.json(await clearLiveAnswers(c.req.param('code')));
   } catch (err) { return liveFailure(c, err); }
 });
 
@@ -1449,11 +1460,48 @@ app.get('/q/:code', async (c) => {
   return c.html(answerPageHtml(q, code), q ? 200 : 404, { 'cache-control': 'no-store', 'x-robots-tag': 'noindex' });
 });
 
+/**
+ * The phone behind a public request, with its cookie (re)set when needed, and
+ * its token echoed so the page can keep a second copy in localStorage.
+ */
+function liveDevice(c: import('hono').Context, body?: Record<string, unknown>) {
+  const kept = c.req.header('x-live-device') ?? (typeof body?.device === 'string' ? body.device : undefined);
+  const device = deviceFor(c.req.header('cookie'), kept);
+  if (device.cookie) c.header('set-cookie', device.cookie);
+  return device;
+}
+
+app.get('/q/:code/me', async (c) => {
+  const device = liveDevice(c);
+  try {
+    return c.json({ ...(await deviceView(c.req.param('code').toLowerCase(), device.id)), device: device.token }, 200, { 'cache-control': 'no-store' });
+  } catch (err) { return liveFailure(c, err); }
+});
+
 app.post('/q/:code/answers', async (c) => {
   const body = await c.req.json().catch(() => ({})) as Record<string, unknown>;
+  const device = liveDevice(c, body);
   try {
-    const answer = await submitLiveAnswer(c.req.param('code').toLowerCase(), body, clientIp(c) ?? 'unknown');
-    return c.json({ ok: true, id: answer.id }, 201);
+    const answer = await submitLiveAnswer(c.req.param('code').toLowerCase(), body, device.id, clientIp(c) ?? 'unknown');
+    return c.json({ ok: true, id: answer.id, device: device.token }, 201);
+  } catch (err) { return liveFailure(c, err); }
+});
+
+app.post('/q/:code/vote', async (c) => {
+  const body = await c.req.json().catch(() => ({})) as Record<string, unknown>;
+  const device = liveDevice(c, body);
+  try {
+    const vote = await castLiveVote(c.req.param('code').toLowerCase(), body.option, device.id, clientIp(c) ?? 'unknown');
+    return c.json({ ok: true, ...vote, device: device.token }, 201);
+  } catch (err) { return liveFailure(c, err); }
+});
+
+app.post('/q/:code/answers/:answerId/like', async (c) => {
+  const body = await c.req.json().catch(() => ({})) as Record<string, unknown>;
+  const device = liveDevice(c, body);
+  try {
+    const likes = await likeLiveAnswer(c.req.param('code').toLowerCase(), c.req.param('answerId'), body.liked !== false, device.id, clientIp(c) ?? 'unknown');
+    return c.json({ ok: true, likes, device: device.token });
   } catch (err) { return liveFailure(c, err); }
 });
 

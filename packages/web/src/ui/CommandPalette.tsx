@@ -179,8 +179,8 @@ function buildEntries({
   action('import', 'Import a webpage', 'download', actions.openImport);
   action('export', 'Export', 'upload', actions.openExport, '⌘⇧E');
   action('present', 'Present this page', 'play', actions.present, 'P');
-  action('live-question', 'Add a live question', 'comment', () => { void addLiveQuestion(selection, dispatch, select); },
-    undefined, 'The audience answers on their phones');
+  action('live-question', 'Add a live question or poll', 'comment', () => { void addLiveQuestion(selection, dispatch, select); },
+    undefined, 'The audience answers or votes on their phones');
   action('share', 'Share a link', 'share', actions.openShare);
   action('shortcuts', 'Keyboard shortcuts', 'keyboard', actions.openShortcuts, '?');
   action('appearance', 'Settings', 'settings', actions.openAppearance, undefined, 'Agents, theme and interface scale');
@@ -313,8 +313,13 @@ async function addLiveQuestion(
   if (!artboard) { window.alert('Add a slide first: a live question goes on an artboard.'); return; }
   const question = window.prompt('Ask the audience', 'What’s your idea in one sentence?')?.trim();
   if (!question) return;
+  // Empty means open answers; two to six comma-separated choices make it a poll.
+  const choices = window.prompt('For a poll, the options separated by commas (e.g. Vitamin, Painkiller). Leave empty for written answers.', '');
+  if (choices === null) return;
+  const options = choices.split(',').map((o) => o.trim()).filter(Boolean);
   const res = await fetch(`/api/documents/${doc.id}/live`, {
-    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ question }),
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(options.length ? { question, kind: 'poll', options } : { question }),
   }).catch(() => null);
   const body = res ? await res.json().catch(() => ({})) as { code?: string; question?: string; error?: string } : {};
   if (!res?.ok || !body.code) { window.alert(body.error ?? 'Could not create the question.'); return; }

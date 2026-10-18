@@ -809,14 +809,39 @@ answer on their phones without an account. The answers appear on the slide as ca
 within about a second, both on the canvas and in presentation mode. When there are more answers
 than fit at a readable size, the slide shows the newest ones and says how many more there are.
 
-- **Editor:** ⌘K → *Add a live question* puts one on the selected slide, or on the page's first slide.
-- **Agents:** `add_live_question` (question, artboardId, optional position, size and look),
-  `list_live_answers` (all answers, hidden ones included and marked, for use after the session),
-  `hide_live_answer`, and `set_live_question` (open/close, reword, clear).
+There are three kinds of question:
+
+- **Written answers** (the default): a text box on the phone, and cards on the slide.
+- **Poll** (`kind: "poll"` with 2–6 options, such as *Vitamin* / *Painkiller*): one big button per
+  option on the phone. The slide shows a bar per option with its count and percentage, plus the
+  total number of votes, and the bars move as votes arrive.
+- **Votable** (`votable: true` on a written question): after answering, a phone lists the other
+  answers with a ♥ button. Each phone can like an answer once, and not its own. The slide ranks
+  cards by likes and shows each card's count.
+
+**Once per person** (`onePerPerson`, on by default for new questions) allows one answer per phone.
+In a poll, a phone gets one vote and can change it ("Change my vote"); the vote is replaced, not
+added. Questions created before this setting existed keep accepting several answers until it is
+switched on. With no accounts, "a phone" means a random device id that the server signs with an
+HMAC. The phone keeps it in an httpOnly cookie and in localStorage, so clearing one of the two does
+not reset it, and a made-up id is rejected. **This stops casual double answers. It does not stop
+someone determined:** another browser, a private window, or clearing all site data counts as a new
+phone, and nothing short of accounts changes that. The signing key is `LIVE_SECRET` if set.
+Otherwise one is generated and kept next to the database as `live-secret`, so phones are still
+recognised after a redeploy.
+
+- **Editor:** ⌘K → *Add a live question or poll* asks for the question, then for options separated
+  by commas. Leave the options empty for written answers.
+- **Agents:** `add_live_question` (question, artboardId, `kind`, `options`, `onePerPerson`,
+  `votable`, plus optional position, size and look). `list_live_answers` returns all answers
+  (hidden ones included and marked), each poll option's votes and percentage, and the likes on
+  each answer. `hide_live_answer` hides an answer. `set_live_question` opens or closes, rewords,
+  clears or resets votes, and changes a poll's options only while it has no votes.
 - **Moderation:** while presenting, or once the question is selected on the canvas, hover over a
-  card and click × to hide it. Hovering over the board shows *Close question* and *Clear all*. The
-  controls only appear for someone signed in who can edit the document, so a published page or a
-  screenshot never shows them. Hidden answers stay stored.
+  card and click × to hide it. Hovering over the board shows *Close question* and *Clear all*, or
+  for a poll *Close poll* and *Reset votes*. The controls only appear for someone signed in who
+  can edit the document, so a published page or a screenshot never shows them. Hidden answers
+  stay stored; reset votes are gone.
 
 On the slide, the question is an ordinary embed of `/q/<code>/board`. The canvas, presentation
 mode, screenshots and published pages therefore all show it the same way. The board takes the

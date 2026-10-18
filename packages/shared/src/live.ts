@@ -21,7 +21,21 @@ export interface LiveAnswer {
   text: string;
   createdAt: number;
   hidden: boolean;
+  /** The phone that sent it, for once-per-person. Never leaves the server. */
+  device?: string;
+  /** Phones that liked it, on a votable question. Only the count leaves the server. */
+  likes?: string[];
 }
+
+/** One phone's choice in a poll. */
+export interface LiveVote {
+  device: string;
+  /** Index into `options`. */
+  option: number;
+  at: number;
+}
+
+export type LiveKind = 'text' | 'poll';
 
 export interface LiveQuestion {
   /** The public code: `/q/<code>` answers it. */
@@ -33,11 +47,60 @@ export interface LiveQuestion {
   createdAt: number;
   /** Oldest first, as received. */
   answers: LiveAnswer[];
+  /** Absent on questions made before polls existed: those are text. */
+  kind?: LiveKind;
+  /** A poll's choices, 2–6. */
+  options?: string[];
+  votes?: LiveVote[];
+  /**
+   * One answer (or one vote, which can be changed) per phone. Absent on
+   * questions made before this existed, which keep taking several.
+   */
+  onePerPerson?: boolean;
+  /** A text question whose answers the room can like; the board ranks by likes. */
+  votable?: boolean;
 }
 
 export const LIVE_TEXT_MAX = 280;
 export const LIVE_NAME_MAX = 40;
 export const LIVE_QUESTION_MAX = 200;
+export const LIVE_OPTION_MAX = 60;
+export const LIVE_OPTIONS_MIN = 2;
+export const LIVE_OPTIONS_MAX = 6;
+
+/**
+ * A poll's options, cleaned, or a reason they cannot be used. Duplicates are
+ * an error rather than merged: two bars with one label would split the vote.
+ */
+export function cleanPollOptions(raw: unknown): string[] | string {
+  if (!Array.isArray(raw)) return 'A poll needs a list of options.';
+  const options = raw.map((o) => cleanLiveText(o, LIVE_OPTION_MAX)).filter(Boolean);
+  if (options.length < LIVE_OPTIONS_MIN || options.length > LIVE_OPTIONS_MAX) {
+    return `A poll needs ${LIVE_OPTIONS_MIN} to ${LIVE_OPTIONS_MAX} options; got ${options.length}.`;
+  }
+  const seen = new Set(options.map((o) => o.toLowerCase()));
+  if (seen.size !== options.length) return 'Two options say the same thing.';
+  return options;
+}
+
+/** Votes per option, in option order. */
+export function pollCounts(q: Pick<LiveQuestion, 'options' | 'votes'>): number[] {
+  const counts = (q.options ?? []).map(() => 0);
+  for (const v of q.votes ?? []) if (v.option >= 0 && v.option < counts.length) counts[v.option]!++;
+  return counts;
+}
+
+/** Whole percentages that add up to 100 (largest remainder), so the bars never claim 101%. */
+export function pollPercentages(counts: number[]): number[] {
+  const total = counts.reduce((a, b) => a + b, 0);
+  if (!total) return counts.map(() => 0);
+  const exact = counts.map((c) => (c * 100) / total);
+  const out = exact.map(Math.floor);
+  let left = 100 - out.reduce((a, b) => a + b, 0);
+  const order = exact.map((e, i) => [e - Math.floor(e), i] as const).sort((a, b) => b[0] - a[0]);
+  for (const [, i] of order) { if (left-- <= 0) break; out[i]!++; }
+  return out;
+}
 
 /**
  * Plain text, one paragraph's worth. Tags are dropped rather than escaped:
@@ -58,8 +121,10 @@ export function cleanLiveText(raw: unknown, max: number): string {
 }
 
 /** Visible answers, newest first: what the slide shows. */
-export function visibleAnswers(q: Pick<LiveQuestion, 'answers'>): LiveAnswer[] {
-  return q.answers.filter((a) => !a.hidden).sort((a, b) => b.createdAt - a.createdAt);
+export function visibleAnswers(q: Pick<LiveQuestion, 'answers' | 'votable'>): LiveAnswer[] {
+  const likes = (a: LiveAnswer) => (q.votable ? a.likes?.length ?? 0 : 0);
+  // On a votable question the best rise; ties, and every other question, newest first.
+  return q.answers.filter((a) => !a.hidden).sort((a, b) => likes(b) - likes(a) || b.createdAt - a.createdAt);
 }
 
 /**

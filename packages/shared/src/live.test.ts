@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  LIVE_ATTR, cleanLiveText, liveBoardFit, liveBoardUrl, liveLookFrom, makeLiveQuestionNode, visibleAnswers,
+  LIVE_ATTR, cleanLiveText, cleanPollOptions, pollCounts, pollPercentages, liveBoardFit, liveBoardUrl, liveLookFrom, makeLiveQuestionNode, visibleAnswers,
 } from './live.ts';
 import { makeNode } from './model.ts';
 
@@ -49,4 +49,30 @@ test('a live question node is an embed of the board, styled from the slide', () 
   assert.equal(parseFloat(node.styles.left!) * 2 + parseFloat(node.styles.width!), 1920);
   assert.equal(node.styles['pointer-events'], 'none');
   assert.equal(liveBoardUrl('https://pg.example', 'abcd2345'), 'https://pg.example/q/abcd2345/board');
+});
+
+test('poll options are cleaned and checked', () => {
+  assert.deepEqual(cleanPollOptions([' Vitamin ', '<b>Painkiller</b>', '']), ['Vitamin', 'Painkiller']);
+  assert.match(cleanPollOptions(['one']) as string, /2 to 6/);
+  assert.match(cleanPollOptions(['a', 'b', 'c', 'd', 'e', 'f', 'g']) as string, /2 to 6/);
+  assert.match(cleanPollOptions(['Yes', 'yes']) as string, /same/);
+  assert.equal(typeof cleanPollOptions('a,b'), 'string');
+});
+
+test('poll percentages are whole and add up to 100', () => {
+  const counts = pollCounts({ options: ['a', 'b', 'c'], votes: [0, 1, 2].map((option) => ({ device: 'd', option, at: 0 })) });
+  assert.deepEqual(counts, [1, 1, 1]);
+  assert.equal(pollPercentages(counts).reduce((a, b) => a + b, 0), 100);
+  assert.deepEqual(pollPercentages([2, 0, 1]), [67, 0, 33]);
+  assert.deepEqual(pollPercentages([0, 0]), [0, 0]);
+});
+
+test('a votable question ranks answers by likes, then newest', () => {
+  const answers = [
+    { id: 'a', name: '', text: '', createdAt: 1, hidden: false, likes: ['x', 'y'] },
+    { id: 'b', name: '', text: '', createdAt: 2, hidden: false, likes: [] },
+    { id: 'c', name: '', text: '', createdAt: 3, hidden: false },
+  ];
+  assert.deepEqual(visibleAnswers({ answers, votable: true }).map((a) => a.id), ['a', 'c', 'b']);
+  assert.deepEqual(visibleAnswers({ answers }).map((a) => a.id), ['c', 'b', 'a']);
 });

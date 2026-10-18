@@ -3,7 +3,7 @@
  *
  * Three surfaces, all addressed by the question's code:
  *
- * - `/q/<code>` is the answer page. Public, no account, built for a phone on
+ * - `/q/<code>` is the answer page: a text box, or for a poll a button per option. Public, no account, built for a phone on
  *   venue Wi-Fi: one small HTML page, no bundle, no fonts to fetch.
  * - `/q/<code>/board` is what sits on the slide, inside an ordinary embed. It
  *   draws the question, a QR code and the answers, and keeps them current.
@@ -19,11 +19,14 @@
  * survives proxies that drop upgrades.
  */
 
-import { randomBytes } from 'node:crypto';
+import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import QRCode from 'qrcode';
 import {
-  type LiveAnswer, type LiveQuestion,
-  LIVE_NAME_MAX, LIVE_QUESTION_MAX, LIVE_TEXT_MAX, cleanLiveText, liveBoardFit, visibleAnswers,
+  type LiveAnswer, type LiveKind, type LiveQuestion,
+  LIVE_NAME_MAX, LIVE_QUESTION_MAX, LIVE_TEXT_MAX, cleanLiveText, cleanPollOptions, liveBoardFit, pollCounts, pollPercentages,
+  visibleAnswers,
 } from '@playground/shared';
 import { persistence } from './persistence.ts';
 
@@ -85,12 +88,32 @@ export async function liveQuestionsFor(docId: string): Promise<LiveQuestion[]> {
   return stored.map((q) => cache.get(q.code)?.q ?? q);
 }
 
-export async function createLiveQuestion(docId: string, question: string): Promise<LiveQuestion> {
+export interface LiveSettings {
+  kind?: LiveKind;
+  options?: unknown;
+  onePerPerson?: boolean;
+  votable?: boolean;
+}
+
+export async function createLiveQuestion(docId: string, question: string, settings: LiveSettings = {}): Promise<LiveQuestion> {
   const text = cleanLiveText(question, LIVE_QUESTION_MAX);
   if (!text) throw new LiveError('A live question needs some text.');
+  const kind: LiveKind = settings.kind === 'poll' ? 'poll' : 'text';
   let code = newCode();
   while (await held(code)) code = newCode();
-  const q: LiveQuestion = { code, docId, question: text, open: true, createdAt: Date.now(), answers: [] };
+  const q: LiveQuestion = {
+    code, docId, question: text, open: true, createdAt: Date.now(), answers: [], kind,
+    // New questions are once per person unless asked otherwise.
+    onePerPerson: settings.onePerPerson ?? true,
+  };
+  if (kind === 'poll') {
+    const options = cleanPollOptions(settings.options);
+    if (typeof options === 'string') throw new LiveError(options);
+    q.options = options;
+    q.votes = [];
+  } else if (settings.votable) {
+    q.votable = true;
+  }
   const h = { q, version: 0 };
   cache.set(code, h);
   await changed(h);
@@ -103,16 +126,33 @@ async function mustHold(code: string): Promise<Held> {
   return h;
 }
 
-export async function updateLiveQuestion(code: string, patch: { question?: string; open?: boolean }): Promise<LiveQuestion> {
+export async function updateLiveQuestion(
+  code: string,
+  patch: { question?: string; open?: boolean; options?: unknown; onePerPerson?: boolean; votable?: boolean },
+): Promise<LiveQuestion> {
   const h = await mustHold(code);
+  const q = h.q;
   if (patch.question !== undefined) {
     const text = cleanLiveText(patch.question, LIVE_QUESTION_MAX);
     if (!text) throw new LiveError('A live question needs some text.');
-    h.q.question = text;
+    q.question = text;
   }
-  if (patch.open !== undefined) h.q.open = patch.open;
+  if (patch.options !== undefined) {
+    if (q.kind !== 'poll') throw new LiveError('Only a poll has options.');
+    // Relabelling options under existing votes would move people's votes to answers they did not pick.
+    if (q.votes?.length) throw new LiveError('This poll has votes. Reset them before changing the options.', 409);
+    const options = cleanPollOptions(patch.options);
+    if (typeof options === 'string') throw new LiveError(options);
+    q.options = options;
+  }
+  if (patch.votable !== undefined) {
+    if (q.kind === 'poll' && patch.votable) throw new LiveError('A poll is already a vote; votable is for text questions.');
+    q.votable = patch.votable;
+  }
+  if (patch.onePerPerson !== undefined) q.onePerPerson = patch.onePerPerson;
+  if (patch.open !== undefined) q.open = patch.open;
   await changed(h);
-  return h.q;
+  return q;
 }
 
 export async function hideLiveAnswer(code: string, answerId: string, hidden = true): Promise<LiveAnswer> {
@@ -124,13 +164,98 @@ export async function hideLiveAnswer(code: string, answerId: string, hidden = tr
   return answer;
 }
 
-/** Hides every answer. They stay stored: clearing the slide is not deleting what people said. */
-export async function clearLiveAnswers(code: string): Promise<number> {
+/**
+ * Clears the slide. Text answers are hidden, not deleted: clearing the slide
+ * is not erasing what people said. A poll's votes are reset, because a hidden
+ * vote has no meaning — the point of resetting a poll is to ask again.
+ */
+export async function clearLiveAnswers(code: string): Promise<{ hidden: number } | { votesReset: number }> {
   const h = await mustHold(code);
+  if (h.q.kind === 'poll') {
+    const votesReset = h.q.votes?.length ?? 0;
+    h.q.votes = [];
+    await changed(h);
+    return { votesReset };
+  }
   let n = 0;
   for (const a of h.q.answers) if (!a.hidden) { a.hidden = true; n++; }
   await changed(h);
-  return n;
+  return { hidden: n };
+}
+
+// ---------------------------------------------------------------------------
+// Devices
+// ---------------------------------------------------------------------------
+
+/*
+ * "One answer per person" without accounts means one per phone. The phone
+ * gets a random id, signed so it cannot simply be made up, and keeps it twice
+ * — in an httpOnly cookie and in localStorage — so clearing one does not
+ * reset it. It stops casual double answers; another browser, or a private
+ * window, is a new phone, and nothing short of accounts changes that.
+ */
+
+const DEVICE_COOKIE = 'pg_live';
+
+let secret: Buffer | null = null;
+
+/**
+ * The signing key. LIVE_SECRET when set; otherwise one generated once and kept
+ * beside the database, so devices survive a redeploy; otherwise per process.
+ */
+function deviceSecret(): Buffer {
+  if (secret) return secret;
+  if (process.env.LIVE_SECRET) return (secret = Buffer.from(process.env.LIVE_SECRET));
+  const db = process.env.PLAYGROUND_DB;
+  if (db) {
+    const file = join(dirname(db), 'live-secret');
+    try {
+      if (existsSync(file)) return (secret = readFileSync(file));
+      const fresh = randomBytes(32);
+      writeFileSync(file, fresh, { mode: 0o600 });
+      return (secret = fresh);
+    } catch { /* read-only or missing directory: fall through */ }
+  }
+  return (secret = randomBytes(32));
+}
+
+function sign(id: string): string {
+  return createHmac('sha256', deviceSecret()).update(id).digest('base64url').slice(0, 22);
+}
+
+/** The device id inside a token, or null when the token is not one of ours. */
+export function verifyDevice(token: string | undefined | null): string | null {
+  if (!token || token.length > 80) return null;
+  const [id, mac] = token.split('.');
+  if (!id || !mac || !/^[\w-]{16,32}$/.test(id)) return null;
+  const want = Buffer.from(sign(id));
+  const got = Buffer.from(mac);
+  return want.length === got.length && timingSafeEqual(want, got) ? id : null;
+}
+
+export function newDeviceToken(): string {
+  const id = randomBytes(16).toString('base64url');
+  return `${id}.${sign(id)}`;
+}
+
+/**
+ * The phone behind a request: the cookie first, then the copy the page kept
+ * in localStorage. Mints one when neither is valid. `token` is what the page
+ * should keep; `cookie` is set when the browser needs it (again).
+ */
+export function deviceFor(cookieHeader: string | undefined, kept: string | undefined): { id: string; token: string; cookie: string | null } {
+  const fromCookie = cookieHeader?.split(/;\s*/).find((p) => p.startsWith(`${DEVICE_COOKIE}=`))?.slice(DEVICE_COOKIE.length + 1);
+  for (const [token, fromJar] of [[fromCookie, true], [kept, false]] as const) {
+    const id = verifyDevice(token);
+    if (id) return { id, token: token!, cookie: fromJar ? null : deviceCookie(token!) };
+  }
+  const token = newDeviceToken();
+  return { id: token.split('.')[0]!, token, cookie: deviceCookie(token) };
+}
+
+function deviceCookie(token: string): string {
+  const secure = process.env.NODE_ENV === 'production' ? '; Secure' : '';
+  return `${DEVICE_COOKIE}=${token}; Path=/q; Max-Age=31536000; HttpOnly; SameSite=Lax${secure}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -138,10 +263,10 @@ export async function clearLiveAnswers(code: string): Promise<number> {
 // ---------------------------------------------------------------------------
 
 /*
- * Two limits, because a room of students is one IP address. Per client — a
- * random id the answer page keeps in localStorage — is the one that bites:
- * a few seconds between answers and a ceiling per ten minutes. Per IP is only
- * a flood guard, set high enough for a whole venue behind one NAT.
+ * Two limits, because a room of students is one IP address. Per phone is the
+ * one that bites: a few seconds between answers and a ceiling per ten
+ * minutes. Per IP is only a flood guard, set high enough for a whole venue
+ * behind one NAT.
  */
 const CLIENT_GAP_MS = 3_000;
 const CLIENT_WINDOW_MS = 10 * 60_000;
@@ -162,65 +287,182 @@ function recent(map: Map<string, number[]>, key: string, windowMs: number, now: 
 /** Forgets the limiter's memory. For tests. */
 export function resetLiveLimits(): void { clientHits.clear(); ipHits.clear(); }
 
+function sweep(now: number): void {
+  if (now - lastSweep <= CLIENT_WINDOW_MS) return;
+  for (const [k, v] of clientHits) if (!v.some((t) => now - t < CLIENT_WINDOW_MS)) clientHits.delete(k);
+  for (const [k, v] of ipHits) if (!v.some((t) => now - t < IP_WINDOW_MS)) ipHits.delete(k);
+  lastSweep = now;
+}
+
+/** Counts one write from this IP, or refuses it. */
+function limitIp(ip: string, now: number): void {
+  sweep(now);
+  const byIp = recent(ipHits, ip, IP_WINDOW_MS, now);
+  if (byIp.length >= IP_LIMIT) throw new LiveError('Too many answers from this network. Try again in a minute.', 429);
+  byIp.push(now);
+}
+
+/** Counts one answer or vote from this phone, or refuses it. */
+function limitDevice(code: string, device: string, gapMs: number, now: number): void {
+  const byDevice = recent(clientHits, `${code}|${device}`, CLIENT_WINDOW_MS, now);
+  if (byDevice.length && now - byDevice[byDevice.length - 1]! < gapMs) {
+    throw new LiveError('One moment — you just sent one.', 429);
+  }
+  if (byDevice.length >= CLIENT_LIMIT) throw new LiveError('That is a lot of answers. Give someone else a turn.', 429);
+  byDevice.push(now);
+}
+
 export async function submitLiveAnswer(
   code: string,
-  input: { text?: unknown; name?: unknown; client?: unknown },
+  input: { text?: unknown; name?: unknown },
+  device: string,
   ip: string,
 ): Promise<LiveAnswer> {
   const h = await mustHold(code);
+  if (h.q.kind === 'poll') throw new LiveError('This is a poll: pick an option.');
   if (!h.q.open) throw new LiveError('This question is closed.', 409);
   const text = cleanLiveText(input.text, LIVE_TEXT_MAX);
   if (!text) throw new LiveError('Write an answer first.');
   const name = cleanLiveText(input.name, LIVE_NAME_MAX);
-  const client = typeof input.client === 'string' && /^[\w-]{8,64}$/.test(input.client) ? input.client : `ip:${ip}`;
-
-  const now = Date.now();
-  if (now - lastSweep > CLIENT_WINDOW_MS) {
-    for (const [k, v] of clientHits) if (!v.some((t) => now - t < CLIENT_WINDOW_MS)) clientHits.delete(k);
-    for (const [k, v] of ipHits) if (!v.some((t) => now - t < IP_WINDOW_MS)) ipHits.delete(k);
-    lastSweep = now;
+  // A hidden answer still counts: hiding it is the presenter's call, not a second chance.
+  if (h.q.onePerPerson && h.q.answers.some((a) => a.device === device)) {
+    throw new LiveError('You’ve already answered this one.', 409);
   }
-  const byIp = recent(ipHits, ip, IP_WINDOW_MS, now);
-  const byClient = recent(clientHits, `${code}|${client}`, CLIENT_WINDOW_MS, now);
-  if (byIp.length >= IP_LIMIT) throw new LiveError('Too many answers from this network. Try again in a minute.', 429);
-  if (byClient.length && now - byClient[byClient.length - 1]! < CLIENT_GAP_MS) {
-    throw new LiveError('One moment — you just sent one.', 429);
-  }
-  if (byClient.length >= CLIENT_LIMIT) throw new LiveError('That is a lot of answers. Give someone else a turn.', 429);
   if (h.q.answers.length >= MAX_ANSWERS) throw new LiveError('This question has all the answers it can take.', 409);
+  const now = Date.now();
+  limitIp(ip, now);
+  limitDevice(code, device, CLIENT_GAP_MS, now);
 
-  byIp.push(now);
-  byClient.push(now);
-  const answer: LiveAnswer = { id: randomBytes(6).toString('base64url'), name, text, createdAt: now, hidden: false };
+  const answer: LiveAnswer = { id: randomBytes(6).toString('base64url'), name, text, createdAt: now, hidden: false, device };
   h.q.answers.push(answer);
   await changed(h);
   return answer;
+}
+
+/**
+ * A vote in a poll. Once per person, a second vote replaces the first — changing
+ * your mind is fine, voting twice is not. Otherwise every vote counts.
+ */
+export async function castLiveVote(code: string, option: unknown, device: string, ip: string): Promise<{ option: number; changed: boolean }> {
+  const h = await mustHold(code);
+  const q = h.q;
+  if (q.kind !== 'poll') throw new LiveError('This question takes written answers, not votes.');
+  if (!q.open) throw new LiveError('This poll is closed.', 409);
+  const index = typeof option === 'number' ? option : Number.NaN;
+  if (!Number.isInteger(index) || index < 0 || index >= (q.options?.length ?? 0)) throw new LiveError('Pick one of the options.');
+  const votes = (q.votes ??= []);
+  const now = Date.now();
+  limitIp(ip, now);
+  const mine = q.onePerPerson ? votes.find((v) => v.device === device) : undefined;
+  if (mine?.option === index) return { option: index, changed: false };
+  // Changing a vote is quicker to allow than a fresh answer: a mis-tap is fixed at once.
+  limitDevice(code, device, mine ? 500 : 1_000, now);
+  if (votes.length >= MAX_ANSWERS * 5 && !mine) throw new LiveError('This poll has all the votes it can take.', 409);
+  if (mine) { mine.option = index; mine.at = now; } else votes.push({ device, option: index, at: now });
+  await changed(h);
+  return { option: index, changed: !!mine };
+}
+
+/** Likes or unlikes an answer on a votable question: one like per answer per phone. */
+export async function likeLiveAnswer(code: string, answerId: string, liked: boolean, device: string, ip: string): Promise<number> {
+  const h = await mustHold(code);
+  if (!h.q.votable) throw new LiveError('This question does not take votes on answers.');
+  if (!h.q.open) throw new LiveError('This question is closed.', 409);
+  const answer = h.q.answers.find((a) => a.id === answerId && !a.hidden);
+  if (!answer) throw new LiveError('No such answer.', 404);
+  if (answer.device === device && liked) throw new LiveError('That one is yours — vote for someone else’s.', 409);
+  limitIp(ip, Date.now());
+  const likes = (answer.likes ??= []);
+  const has = likes.includes(device);
+  if (liked !== has) {
+    if (liked) likes.push(device); else likes.splice(likes.indexOf(device), 1);
+    await changed(h);
+  }
+  return likes.length;
+}
+
+/** What the answer page needs to know about this phone. */
+export async function deviceView(code: string, device: string) {
+  const h = await mustHold(code);
+  const q = h.q;
+  const mine = q.answers.filter((a) => a.device === device);
+  return {
+    open: q.open,
+    kind: q.kind ?? 'text',
+    onePerPerson: !!q.onePerPerson,
+    answered: q.kind === 'poll' ? !!q.votes?.some((v) => v.device === device) : mine.length > 0,
+    vote: q.kind === 'poll' && q.onePerPerson ? (q.votes?.find((v) => v.device === device)?.option ?? null) : null,
+    answers: q.votable
+      ? visibleAnswers(q).slice(0, 200).map((a) => ({
+        id: a.id, name: a.name, text: a.text, likes: a.likes?.length ?? 0,
+        liked: !!a.likes?.includes(device), mine: a.device === device,
+      }))
+      : undefined,
+  };
 }
 
 // ---------------------------------------------------------------------------
 // Board state
 // ---------------------------------------------------------------------------
 
-/** What the board draws. Never carries the document id. */
+/** What the board draws. Never carries the document id or a device. */
 export interface BoardState {
   v: number;
+  kind: LiveKind;
   question: string;
   open: boolean;
+  votable: boolean;
+  /** Visible answers, or votes cast in a poll. */
   total: number;
-  answers: { id: string; name: string; text: string }[];
+  answers: { id: string; name: string; text: string; likes: number }[];
+  options: { label: string; count: number; percent: number }[];
 }
 
 /** More than this is never shown at once; the board says how many there are. */
 const BOARD_MAX = 120;
 
 function boardState(h: Held): BoardState {
-  const visible = visibleAnswers(h.q);
+  const q = h.q;
+  if (q.kind === 'poll') {
+    const counts = pollCounts(q);
+    const percents = pollPercentages(counts);
+    return {
+      v: h.version, kind: 'poll', question: q.question, open: q.open, votable: false,
+      total: counts.reduce((a, b) => a + b, 0),
+      answers: [],
+      options: (q.options ?? []).map((label, i) => ({ label, count: counts[i]!, percent: percents[i]! })),
+    };
+  }
+  const visible = visibleAnswers(q);
   return {
-    v: h.version,
-    question: h.q.question,
-    open: h.q.open,
+    v: h.version, kind: 'text', question: q.question, open: q.open, votable: !!q.votable,
     total: visible.length,
-    answers: visible.slice(0, BOARD_MAX).map(({ id, name, text }) => ({ id, name, text })),
+    answers: visible.slice(0, BOARD_MAX).map(({ id, name, text, likes }) => ({ id, name, text, likes: likes?.length ?? 0 })),
+    options: [],
+  };
+}
+
+/** A question as a moderator or an agent sees it: counts, never device ids. */
+export function moderatorView(q: LiveQuestion) {
+  const counts = q.kind === 'poll' ? pollCounts(q) : [];
+  return {
+    code: q.code,
+    question: q.question,
+    kind: q.kind ?? 'text',
+    open: q.open,
+    onePerPerson: !!q.onePerPerson,
+    votable: !!q.votable,
+    createdAt: q.createdAt,
+    ...(q.kind === 'poll'
+      ? {
+        options: (q.options ?? []).map((label, i) => ({ label, votes: counts[i]!, percent: pollPercentages(counts)[i]! })),
+        totalVotes: q.votes?.length ?? 0,
+      }
+      : {}),
+    answers: q.answers.map((a) => ({
+      id: a.id, name: a.name, text: a.text, createdAt: a.createdAt, hidden: a.hidden,
+      ...(q.votable ? { likes: a.likes?.length ?? 0 } : {}),
+    })),
   };
 }
 
@@ -320,6 +562,7 @@ ${fontHead(l.font)}
 <style>
   :root { --ink: ${l.ink}; --accent: ${l.accent}; --card: ${l.card || 'color-mix(in srgb, var(--ink) 6%, transparent)'}; }
   * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
   html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; }
   body { font-family: ${fontStack(l.font)}; color: var(--ink); -webkit-font-smoothing: antialiased; }
   .board { position: absolute; inset: 0; display: flex; flex-direction: column; gap: 3.2vmin; padding: 0; }
@@ -337,11 +580,20 @@ ${fontHead(l.font)}
   .card .who { font-size: .6em; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: var(--accent); margin-bottom: .35em;
                white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .card .text { line-height: 1.3; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+  .card .likes { margin-top: .45em; font-size: .62em; font-weight: 700; color: var(--accent); font-variant-numeric: tabular-nums; }
   .card .x { display: none; position: absolute; top: .3em; right: .3em; border: 0; border-radius: 99px; width: 1.4em; height: 1.4em;
              font: inherit; font-size: .7em; line-height: 1; cursor: pointer; background: var(--ink); color: #fff; }
   .mod .card:hover .x { display: block; }
   .empty { grid-column: 1 / -1; font-size: clamp(12px, 2.6vmin, 48px); opacity: .45; padding-top: 2vmin; }
   .more { grid-column: 1 / -1; font-size: .7em; opacity: .55; font-weight: 600; }
+  .poll { flex: 1; min-height: 0; display: flex; flex-direction: column; justify-content: center; gap: 1.1em; }
+  .opt { display: grid; grid-template-columns: 1fr auto; align-items: baseline; row-gap: .35em; column-gap: 1em; }
+  .opt .label { font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .opt .num { font-weight: 700; font-variant-numeric: tabular-nums; }
+  .opt .num small { font-size: .62em; font-weight: 600; opacity: .55; margin-left: .5em; }
+  .opt .track { grid-column: 1 / -1; height: .9em; border-radius: 99px; background: var(--card); overflow: hidden; }
+  .opt .bar { height: 100%; width: 0; border-radius: 99px; background: var(--accent); transition: width .7s cubic-bezier(.2,.8,.2,1); }
+  .opt.lead .bar { box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 40%, transparent); }
   .tools { display: none; position: absolute; right: 0; bottom: 0; gap: 6px; font: 600 12px ui-sans-serif, system-ui, sans-serif; }
   .mod:hover .tools { display: flex; }
   .tools button { border: 0; border-radius: 99px; padding: 7px 12px; cursor: pointer; font: inherit; background: #111114; color: #fff; box-shadow: 0 2px 8px rgba(0,0,0,.2); }
@@ -354,7 +606,8 @@ ${fontHead(l.font)}
     <div class="scan">${qrSvg(url)}<span>${esc(shortAnswerUrl(publicUrl, q.code))}</span></div>
   </div>
   <div class="grid" id="grid"></div>
-  <div class="tools"><button id="toggle"></button><button id="clear">Clear all</button></div>
+  <div class="poll" id="poll" hidden></div>
+  <div class="tools"><button id="toggle"></button><button id="clear"></button></div>
 </div>
 <script>
 ${liveBoardFit.toString()}
@@ -362,19 +615,60 @@ const code = ${scriptJson(q.code)};
 let state = ${scriptJson(boardState(h))};
 const board = document.getElementById('board');
 const grid = document.getElementById('grid');
+const pollBox = document.getElementById('poll');
 let canModerate = false;
 
 function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
 
 function render() {
+  const isPoll = state.kind === 'poll';
   document.getElementById('q').textContent = state.question;
   board.classList.toggle('closed', !state.open);
   const meta = document.getElementById('meta');
   meta.textContent = '';
-  const n = el('b', null, String(state.total));
-  meta.append(n, state.total === 1 ? ' answer' : ' answers', state.open ? '' : ' · closed');
-  document.getElementById('toggle').textContent = state.open ? 'Close question' : 'Reopen';
+  const noun = isPoll ? (state.total === 1 ? ' vote' : ' votes') : (state.total === 1 ? ' answer' : ' answers');
+  meta.append(el('b', null, String(state.total)), noun, state.open ? '' : ' · closed');
+  document.getElementById('toggle').textContent = state.open ? (isPoll ? 'Close poll' : 'Close question') : 'Reopen';
+  document.getElementById('clear').textContent = isPoll ? 'Reset votes' : 'Clear all';
+  grid.hidden = isPoll;
+  pollBox.hidden = !isPoll;
+  if (isPoll) renderPoll(); else renderCards();
+}
 
+/*
+ * Rows are kept between renders and only their numbers change, so a new vote
+ * slides the bar from where it was instead of redrawing it from zero.
+ */
+function renderPoll() {
+  const n = Math.max(2, state.options.length);
+  const box = pollBox.getBoundingClientRect();
+  const h = box.height || innerHeight * 0.6;
+  pollBox.style.fontSize = Math.round(Math.max(14, Math.min(h / (n * 3.8), (box.width || innerWidth) / 22))) + 'px';
+  const top = Math.max(...state.options.map((o) => o.count));
+  if (pollBox.children.length !== state.options.length) {
+    pollBox.textContent = '';
+    for (const o of state.options) {
+      const row = el('div', 'opt');
+      row.append(el('div', 'label'), el('div', 'num'));
+      const track = el('div', 'track');
+      track.append(el('div', 'bar'));
+      row.append(track);
+      pollBox.append(row);
+    }
+  }
+  state.options.forEach((o, i) => {
+    const row = pollBox.children[i];
+    row.classList.toggle('lead', o.count > 0 && o.count === top);
+    row.querySelector('.label').textContent = o.label;
+    const num = row.querySelector('.num');
+    num.textContent = String(o.count);
+    num.append(el('small', null, o.percent + '%'));
+    // Set after layout so the width transition runs on first paint too.
+    requestAnimationFrame(() => { row.querySelector('.bar').style.width = o.percent + '%'; });
+  });
+}
+
+function renderCards() {
   const box = grid.getBoundingClientRect();
   const fit = liveBoardFit(state.answers.length, box.width || innerWidth, box.height || innerHeight * 0.7);
   grid.style.fontSize = fit.fontPx + 'px';
@@ -393,6 +687,7 @@ function render() {
     if (seen.has(a.id)) card.style.animation = 'none';
     if (a.name) card.append(el('div', 'who', a.name));
     card.append(el('div', 'text', a.text));
+    if (state.votable) card.append(el('div', 'likes', '♥ ' + a.likes));
     const x = el('button', 'x', '×');
     x.title = 'Hide this answer';
     x.onclick = (e) => { e.stopPropagation(); moderate('/answers/' + encodeURIComponent(a.id) + '/hide', { hidden: true }); };
@@ -422,9 +717,11 @@ async function moderate(path, body, method) {
   if (r && r.ok) poll(0);
 }
 document.getElementById('toggle').onclick = () => moderate('', { open: !state.open }, 'PATCH');
-document.getElementById('clear').onclick = () => { if (confirm('Hide every answer? They stay stored.')) moderate('/clear'); };
+document.getElementById('clear').onclick = () => {
+  const ask = state.kind === 'poll' ? 'Reset every vote to zero?' : 'Hide every answer? They stay stored.';
+  if (confirm(ask)) moderate('/clear');
+};
 
-let polling = false;
 async function poll(wait) {
   try {
     const r = await fetch('/q/' + code + '/state?v=' + (wait ? state.v : -1) + '&wait=' + wait, { cache: 'no-store' });
@@ -448,22 +745,30 @@ setTimeout(() => poll(25000), 1200);
 }
 
 export function answerPageHtml(q: LiveQuestion | null, code: string): string {
+  const poll = q?.kind === 'poll';
   const body = q
     ? `<main>
-  <p class="eyebrow">Live question</p>
+  <p class="eyebrow">${poll ? 'Live poll' : 'Live question'}</p>
   <h1>${esc(q.question)}</h1>
-  <form id="form" ${q.open ? '' : 'hidden'}>
+  <form id="form" hidden>
     <label>Your answer<textarea id="text" name="text" maxlength="${LIVE_TEXT_MAX}" rows="5" required placeholder="Type here…"></textarea></label>
     <div class="count"><span id="count">0</span> / ${LIVE_TEXT_MAX}</div>
     <label>Team or name <span class="opt">optional</span><input id="name" name="name" maxlength="${LIVE_NAME_MAX}" autocomplete="nickname"></label>
     <button type="submit" id="send">Send answer</button>
-    <p class="error" id="error" role="alert"></p>
   </form>
-  <section id="thanks" hidden>
-    <p class="big">Thanks — it’s on the screen.</p>
-    <button type="button" id="again" class="secondary">Answer again</button>
+  <section id="choices" class="choices" hidden>
+    ${(q.options ?? []).map((o, i) => `<button type="button" class="choice" data-i="${i}">${esc(o)}</button>`).join('\n    ')}
   </section>
-  <p class="closed" ${q.open ? 'hidden' : ''}>This question is closed.</p>
+  <p class="error" id="error" role="alert"></p>
+  <section id="thanks" class="plate" hidden>
+    <p class="big" id="thanks-text"></p>
+    <button type="button" id="again" class="secondary" hidden></button>
+  </section>
+  <section id="vote" hidden>
+    <h2>Vote for the best answers</h2>
+    <ul id="answers"></ul>
+  </section>
+  <p class="closed" id="closed" hidden>This question is closed.</p>
 </main>`
     : `<main><h1>This question is not here.</h1><p>Check the code on the slide — it looks like <b>/q/abcd2345</b>.</p></main>`;
 
@@ -474,15 +779,17 @@ export function answerPageHtml(q: LiveQuestion | null, code: string): string {
 <meta name="theme-color" content="#ededef">
 <title>${q ? esc(q.question) : 'Live question'}</title>
 <style>
-  :root { color-scheme: light dark; --bg: #ededef; --plate: #fff; --ink: #111114; --mute: #6b6b76; --line: #d6d6dc; --cta: #111114; --cta-ink: #fff; }
+  :root { color-scheme: light dark; --bg: #ededef; --plate: #fff; --ink: #111114; --mute: #6b6b76; --line: #d6d6dc; --cta: #111114; --cta-ink: #fff; --like: #e5484d; }
   @media (prefers-color-scheme: dark) { :root { --bg: #0e0e13; --plate: #1b1b23; --ink: #f2f2f5; --mute: #9a9aa6; --line: #38384a; --cta: #f2f2f5; --cta-ink: #111114; } }
   * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
   body { margin: 0; min-height: 100dvh; background: var(--bg); color: var(--ink);
          font: 16px/1.45 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; -webkit-font-smoothing: antialiased; }
   main { max-width: 34rem; margin: 0 auto; padding: max(28px, env(safe-area-inset-top)) 16px 40px; }
   .eyebrow { margin: 0 0 8px; font-size: 12px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--mute); }
   h1 { margin: 0 0 24px; font-size: 26px; line-height: 1.2; letter-spacing: -0.01em; text-wrap: balance; }
-  form, #thanks { background: var(--plate); border-radius: 22px; padding: 18px; box-shadow: 0 1px 2px rgba(17,17,20,.05), 0 8px 24px rgba(17,17,20,.07); }
+  h2 { margin: 28px 0 12px; font-size: 15px; font-weight: 700; color: var(--mute); }
+  form, .plate { background: var(--plate); border-radius: 22px; padding: 18px; box-shadow: 0 1px 2px rgba(17,17,20,.05), 0 8px 24px rgba(17,17,20,.07); }
   label { display: block; font-size: 14px; font-weight: 600; margin-bottom: 14px; }
   .opt { font-weight: 400; color: var(--mute); }
   textarea, input { display: block; width: 100%; margin-top: 6px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 14px;
@@ -492,35 +799,121 @@ export function answerPageHtml(q: LiveQuestion | null, code: string): string {
   button { width: 100%; min-height: 52px; border: 0; border-radius: 999px; background: var(--cta); color: var(--cta-ink); font-size: 17px; font-weight: 600; font-family: inherit; cursor: pointer; }
   button:disabled { opacity: .5; }
   button.secondary { background: transparent; color: var(--ink); box-shadow: inset 0 0 0 1px var(--line); }
-  .error { min-height: 1.2em; margin: 10px 0 0; color: #d93a1e; font-size: 14px; }
+  .choices { display: grid; gap: 12px; }
+  .choice { min-height: 72px; border-radius: 20px; background: var(--plate); color: var(--ink); font-size: 20px; text-align: left; padding: 0 22px;
+            box-shadow: 0 1px 2px rgba(17,17,20,.05), 0 8px 24px rgba(17,17,20,.07), inset 0 0 0 1px var(--line); }
+  .choice.mine { background: var(--cta); color: var(--cta-ink); }
+  .error { min-height: 1.2em; margin: 10px 0; color: #d93a1e; font-size: 14px; }
   .big { font-size: 20px; font-weight: 600; margin: 4px 0 18px; }
+  .big:last-child { margin-bottom: 4px; }
   .closed { color: var(--mute); }
+  ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+  li { display: flex; gap: 12px; align-items: center; background: var(--plate); border-radius: 16px; padding: 12px 12px 12px 16px; }
+  li .t { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+  li .n { display: block; font-size: 12px; font-weight: 700; color: var(--mute); text-transform: uppercase; letter-spacing: .06em; }
+  .heart { flex: none; width: auto; min-width: 64px; min-height: 44px; padding: 0 12px; background: transparent; color: var(--ink);
+           box-shadow: inset 0 0 0 1px var(--line); font-size: 15px; font-variant-numeric: tabular-nums; }
+  .heart.on { color: var(--like); box-shadow: inset 0 0 0 1px var(--like); }
 </style></head>
 <body>${body}
 ${q ? `<script>
 const code = ${scriptJson(code)};
-const form = document.getElementById('form'), text = document.getElementById('text'), name = document.getElementById('name');
-const err = document.getElementById('error'), send = document.getElementById('send'), thanks = document.getElementById('thanks');
-let client = '';
-try { client = localStorage.getItem('live-client') || ''; if (!client) { client = crypto.randomUUID(); localStorage.setItem('live-client', client); } name.value = localStorage.getItem('live-name') || ''; } catch {}
-if (!client) client = Math.random().toString(36).slice(2) + Date.now().toString(36);
-text.addEventListener('input', () => { document.getElementById('count').textContent = text.value.length; });
+const options = ${scriptJson(q.options ?? [])};
+const $ = (id) => document.getElementById(id);
+const form = $('form'), text = $('text'), name = $('name'), err = $('error'), thanks = $('thanks'), again = $('again');
+let device = '';
+let me = null;
+let changing = false;
+try { device = localStorage.getItem('live-device') || ''; name.value = localStorage.getItem('live-name') || ''; } catch {}
+
+/** Every request carries the device the page kept, in case the cookie was cleared. */
+async function call(path, body) {
+  const r = await fetch('/q/' + code + path, {
+    method: body ? 'POST' : 'GET', cache: 'no-store',
+    headers: { 'content-type': 'application/json', 'x-live-device': device }, body: body ? JSON.stringify(body) : undefined,
+  });
+  const data = await r.json().catch(() => ({}));
+  if (data.device && data.device !== device) { device = data.device; try { localStorage.setItem('live-device', device); } catch {} }
+  if (!r.ok) throw new Error(data.error || 'That did not send. Try again.');
+  return data;
+}
+
+function show() {
+  if (!me) return;
+  const poll = me.kind === 'poll';
+  const done = me.answered && me.onePerPerson && !changing;
+  $('closed').hidden = me.open;
+  form.hidden = poll || !me.open || done || (me.answered && !changing && !me.onePerPerson);
+  $('choices').hidden = !poll || !me.open || (me.answered && !changing);
+  thanks.hidden = !me.answered || changing;
+  if (me.answered) {
+    if (poll && me.vote != null) $('thanks-text').textContent = 'Thanks — you voted for “' + options[me.vote] + '”.';
+    else $('thanks-text').textContent = me.onePerPerson ? 'Thanks — you’ve answered.' : 'Thanks — it’s on the screen.';
+    again.hidden = !me.open;
+    again.textContent = poll ? (me.onePerPerson ? 'Change my vote' : 'Vote again') : 'Answer again';
+    if (!poll && me.onePerPerson) again.hidden = true;
+  }
+  for (const b of document.querySelectorAll('.choice')) b.classList.toggle('mine', Number(b.dataset.i) === me.vote);
+  $('vote').hidden = !me.answers || !me.answered;
+  if (me.answers && me.answered) renderAnswers();
+}
+
+function renderAnswers() {
+  const list = $('answers');
+  list.textContent = '';
+  for (const a of me.answers) {
+    const li = document.createElement('li');
+    const t = document.createElement('div');
+    t.className = 't';
+    if (a.name) { const n = document.createElement('span'); n.className = 'n'; n.textContent = a.name; t.append(n); }
+    t.append(a.text);
+    li.append(t);
+    if (!a.mine) {
+      const b = document.createElement('button');
+      b.className = 'heart' + (a.liked ? ' on' : '');
+      b.textContent = (a.liked ? '♥ ' : '♡ ') + a.likes;
+      b.setAttribute('aria-pressed', String(a.liked));
+      b.onclick = async () => {
+        b.disabled = true;
+        try { await call('/answers/' + encodeURIComponent(a.id) + '/like', { liked: !a.liked }); await refresh(); }
+        catch (e) { err.textContent = e.message; }
+        finally { b.disabled = false; }
+      };
+      li.append(b);
+    }
+    list.append(li);
+  }
+}
+
+async function refresh() {
+  try { me = await call('/me'); err.textContent = ''; show(); } catch (e) { err.textContent = e.message; }
+}
+
+text.addEventListener('input', () => { $('count').textContent = text.value.length; });
 form.addEventListener('submit', async (e) => {
   e.preventDefault();
   err.textContent = '';
-  send.disabled = true;
+  $('send').disabled = true;
   try {
-    const r = await fetch('/q/' + code + '/answers', { method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ text: text.value, name: name.value, client }) });
-    const body = await r.json().catch(() => ({}));
-    if (!r.ok) { err.textContent = body.error || 'That did not send. Try again.'; return; }
+    await call('/answers', { text: text.value, name: name.value });
     try { localStorage.setItem('live-name', name.value); } catch {}
-    text.value = ''; document.getElementById('count').textContent = '0';
-    form.hidden = true; thanks.hidden = false;
-  } catch { err.textContent = 'No connection. Try again.'; }
-  finally { send.disabled = false; }
+    text.value = ''; $('count').textContent = '0';
+    changing = false;
+    await refresh();
+  } catch (e) { err.textContent = e.message; }
+  finally { $('send').disabled = false; }
 });
-document.getElementById('again').addEventListener('click', () => { thanks.hidden = true; form.hidden = false; text.focus(); });
+for (const b of document.querySelectorAll('.choice')) {
+  b.addEventListener('click', async () => {
+    err.textContent = '';
+    try { await call('/vote', { option: Number(b.dataset.i) }); changing = false; await refresh(); }
+    catch (e) { err.textContent = e.message; }
+  });
+}
+again.addEventListener('click', () => { changing = true; err.textContent = ''; show(); if (!form.hidden) text.focus(); });
+refresh();
+// The list of answers to vote on grows while the room writes.
+setInterval(() => { if (me && me.answers && me.answered && !document.hidden) refresh(); }, 5000);
 </script>` : ''}
 </body></html>`;
 }

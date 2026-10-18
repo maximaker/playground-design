@@ -44,7 +44,8 @@ import {
 } from './store.ts';
 import { persistence } from './persistence.ts';
 import {
-  LiveError, clearLiveAnswers, createLiveQuestion, getLiveQuestion, hideLiveAnswer, liveQuestionsFor, updateLiveQuestion,
+  LiveError, clearLiveAnswers, createLiveQuestion, getLiveQuestion, hideLiveAnswer, liveQuestionsFor, moderatorView,
+  updateLiveQuestion,
 } from './live.ts';
 import { pageArtboard, slugify } from './publish.ts';
 import { publishHandoff, unpublishHandoff } from './handoff.ts';
@@ -2231,7 +2232,10 @@ function registerWriteTools(server: McpServer, ctx: McpContext): void {
       'Places a Mentimeter-style live question on a slide: the question, a QR code and short URL people answer at on their phones '
       + '(no account), and their answers as cards that update while the slide is shown — on the canvas and in presentation mode. '
       + 'Picks up the artboard’s font and text colour unless given. The presenter can hide answers and close the question from the slide; '
-      + 'list_live_answers reads them afterwards. Defaults to filling the artboard inside a margin.',
+      + 'list_live_answers reads them afterwards. Defaults to filling the artboard inside a margin. '
+      + 'kind "poll" with 2–6 options shows a bar per option with counts and percentages instead of cards. '
+      + 'onePerPerson (default true) allows one answer per phone — for a poll, one vote that can be changed. '
+      + 'votable: true lets the room like text answers, and the board ranks them by likes.',
     inputSchema: {
       question: z.string().min(1).max(200),
       artboardId: z.string().describe('The slide (artboard) to put it on.'),
@@ -2243,20 +2247,26 @@ function registerWriteTools(server: McpServer, ctx: McpContext): void {
       ink: z.string().max(40).optional().describe('Text colour, e.g. #111 or white on a dark slide.'),
       accent: z.string().max(40).optional().describe('Colour for names and the answer count.'),
       card: z.string().max(40).optional().describe('Card background. Defaults to a faint tint of the text colour.'),
+      kind: z.enum(['text', 'poll']).optional().default('text'),
+      options: z.array(z.string().min(1).max(60)).min(2).max(6).optional().describe('A poll’s choices, e.g. ["Vitamin", "Painkiller"].'),
+      onePerPerson: z.boolean().optional().default(true).describe('One answer (or one changeable vote) per phone.'),
+      votable: z.boolean().optional().describe('Text questions: people can like answers; the board ranks by likes.'),
     },
     annotations: { destructiveHint: false },
-  }, async ({ question, artboardId, x, y, width, height, font, ink, accent, card }) => liveGuard(async () => {
+  }, async ({ question, artboardId, x, y, width, height, font, ink, accent, card, kind, options, onePerPerson, votable }) => liveGuard(async () => {
     const doc = requireDoc(ctx);
     const artboard = node(doc, artboardId);
     if (artboard.type !== 'artboard') return fail(`${artboardId} is a ${artboard.type}; a live question goes on an artboard.`);
-    const q = await createLiveQuestion(doc.id, question);
+    if (kind === 'poll' && !options) return fail('A poll needs options: 2 to 6 of them.');
+    if (kind !== 'poll' && options) return fail('options are for kind "poll".');
+    const q = await createLiveQuestion(doc.id, question, { kind, options, onePerPerson, votable });
     const embed = makeLiveQuestionNode({
       baseUrl: ctx.baseUrl, code: q.code, question: q.question, artboard, doc,
       x, y, width, height, look: { font, ink, accent, card },
     });
     commit(ctx, [{ t: 'insert', nodes: [embed], parent: artboard.id, index: artboard.children.length }]);
     return json({
-      id: embed.id, code: q.code, answerUrl: `${ctx.baseUrl}/q/${q.code}`, board: embed.attrs.src,
+      id: embed.id, code: q.code, kind: q.kind, answerUrl: `${ctx.baseUrl}/q/${q.code}`, board: embed.attrs.src,
       next: 'Answers appear on the slide by themselves. list_live_answers reads them; hide_live_answer moderates.',
     });
   }));
@@ -2264,7 +2274,8 @@ function registerWriteTools(server: McpServer, ctx: McpContext): void {
   server.registerTool('list_live_answers', {
     title: 'Read the answers to live questions',
     description:
-      'Every live question in this document with its answers, oldest first — hidden ones included and marked. Pass code for one question.',
+      'Every live question in this document with its answers, oldest first — hidden ones included and marked; '
+      + 'for a poll, each option’s votes and percentage; on a votable question, each answer’s likes. Pass code for one question.',
     inputSchema: {
       code: z.string().optional().describe('One question’s code (the part after /q/). Omit for all of them.'),
       includeHidden: z.boolean().optional().default(true),
@@ -2273,16 +2284,18 @@ function registerWriteTools(server: McpServer, ctx: McpContext): void {
   }, async ({ code, includeHidden }) => liveGuard(async () => {
     const doc = requireDoc(ctx);
     const all = code ? [await ownLiveQuestion(code)] : await liveQuestionsFor(doc.id);
-    return json(all.map((q) => ({
-      code: q.code,
-      question: q.question,
-      open: q.open,
-      answerUrl: `${ctx.baseUrl}/q/${q.code}`,
-      shown: visibleAnswers(q).length,
-      total: q.answers.length,
-      answers: q.answers.filter((a) => includeHidden || !a.hidden)
-        .map((a) => ({ id: a.id, name: a.name, text: a.text, at: new Date(a.createdAt).toISOString(), hidden: a.hidden })),
-    })));
+    return json(all.map((q) => {
+      const view = moderatorView(q);
+      return {
+        ...view,
+        createdAt: undefined,
+        answerUrl: `${ctx.baseUrl}/q/${q.code}`,
+        shown: visibleAnswers(q).length,
+        total: q.answers.length,
+        answers: view.answers.filter((a) => includeHidden || !a.hidden)
+          .map(({ createdAt, ...a }) => ({ ...a, at: new Date(createdAt).toISOString() })),
+      };
+    }));
   }));
 
   server.registerTool('hide_live_answer', {
@@ -2300,20 +2313,27 @@ function registerWriteTools(server: McpServer, ctx: McpContext): void {
   }));
 
   server.registerTool('set_live_question', {
-    title: 'Open, close, reword or clear a live question',
+    title: 'Open, close, reword, reset or reconfigure a live question',
     description:
-      'open: false stops new answers (the slide says closed); open: true reopens. question rewords it. clear: true hides every answer on the slide — they stay stored.',
+      'open: false stops new answers (the slide says closed); open: true reopens. question rewords it. '
+      + 'clear: true hides every text answer on the slide (they stay stored) or resets a poll’s votes to zero. '
+      + 'options replaces a poll’s choices — only while it has no votes. onePerPerson and votable switch those settings.',
     inputSchema: {
       code: z.string(),
       open: z.boolean().optional(),
       question: z.string().min(1).max(200).optional(),
       clear: z.boolean().optional(),
+      options: z.array(z.string().min(1).max(60)).min(2).max(6).optional(),
+      onePerPerson: z.boolean().optional(),
+      votable: z.boolean().optional(),
     },
-  }, async ({ code, open, question, clear }) => liveGuard(async () => {
+  }, async ({ code, open, question, clear, options, onePerPerson, votable }) => liveGuard(async () => {
     const q = await ownLiveQuestion(code);
-    const updated = await updateLiveQuestion(q.code, { open, question });
-    const cleared = clear ? await clearLiveAnswers(q.code) : 0;
-    return json({ code: updated.code, question: updated.question, open: updated.open, cleared });
+    // Clearing first lets one call reset a poll and then relabel it.
+    const cleared = clear ? await clearLiveAnswers(q.code) : null;
+    const updated = await updateLiveQuestion(q.code, { open, question, options, onePerPerson, votable });
+    const view = moderatorView(updated);
+    return json({ ...view, answers: undefined, answerCount: updated.answers.length, cleared });
   }));
 
   server.registerTool('write_html', {
