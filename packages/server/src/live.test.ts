@@ -165,6 +165,8 @@ test('the board state is held until something changes', async () => {
   assert.match(html, /<svg[^>]+viewBox/);
   assert.match(html, /family=Inter/);
   assert.ok(!html.includes('body{x:1'), 'look settings cannot inject CSS');
+  // The screenshot renderer frames it from about:blank; a framing rule left it blank.
+  assert.ok(!/frame-ancestors/.test(board.headers.get('content-security-policy') ?? ''));
 });
 
 test('MCP: add_live_question, list_live_answers, hide_live_answer, set_live_question', async () => {

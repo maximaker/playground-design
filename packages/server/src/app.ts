@@ -61,7 +61,7 @@ import { idUrl, userFromCookies } from './sso.ts';
 import { connect } from './connect.ts';
 import { isOnMountedVolume } from './volume.ts';
 import { dirname } from 'node:path';
-import { clientIp, rateLimit, securityHeaders } from './security.ts';
+import { APP_CSP, clientIp, rateLimit, securityHeaders } from './security.ts';
 import { bodyLimit } from 'hono/body-limit';
 import {
   LiveError, answerPageHtml, boardHtml, clearLiveAnswers, createLiveQuestion, getLiveQuestion, hideLiveAnswer,
@@ -1457,13 +1457,21 @@ app.post('/q/:code/answers', async (c) => {
   } catch (err) { return liveFailure(c, err); }
 });
 
+/**
+ * The board may be framed by anything. Its usual parent is an artboard on this
+ * origin, but the screenshot renderer draws from about:blank, and a framing
+ * rule refused it there — the slide came out empty. Nothing on the board acts
+ * without the viewer's own signed-in, same-origin request.
+ */
+const BOARD_CSP = APP_CSP.split('; ').filter((d) => !d.startsWith('frame-ancestors')).join('; ');
+
 app.get('/q/:code/board', async (c) => {
   const q = await getLiveQuestion(c.req.param('code'));
   if (!q) return c.html(answerPageHtml(null, c.req.param('code')), 404);
   const state = await waitForBoardState(q.code, -1, 0);
   return c.html(boardHtml(q, state!.v, PUBLIC_URL, {
     font: c.req.query('font'), ink: c.req.query('ink'), accent: c.req.query('accent'), card: c.req.query('card'),
-  }), 200, { 'cache-control': 'no-store', 'x-robots-tag': 'noindex' });
+  }), 200, { 'cache-control': 'no-store', 'x-robots-tag': 'noindex', 'content-security-policy': BOARD_CSP });
 });
 
 app.get('/q/:code/state', async (c) => {

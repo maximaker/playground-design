@@ -327,7 +327,7 @@ ${fontHead(l.font)}
   .q { margin: 0; font-size: clamp(18px, 5.4vmin, 120px); line-height: 1.12; font-weight: 700; letter-spacing: -0.02em; text-wrap: balance; }
   .meta { margin-top: 1.6vmin; font-size: clamp(11px, 2.1vmin, 40px); opacity: .6; font-weight: 500; }
   .meta b { color: var(--accent); opacity: 1; font-weight: 700; }
-  .scan { flex: none; display: flex; flex-direction: column; align-items: center; gap: 1vmin; width: 22vmin; }
+  .scan { flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 1vmin; }
   .scan svg { width: 22vmin; height: 22vmin; display: block; border-radius: 1.2vmin; }
   .scan span { font-size: clamp(9px, 1.7vmin, 32px); font-weight: 600; white-space: nowrap; letter-spacing: .01em; }
   .closed .scan svg { opacity: .25; }
