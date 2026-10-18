@@ -230,9 +230,13 @@ export function Present() {
   return createPortal(
     <div
       className={`present${chrome ? '' : ' is-idle'}`}
-      // Only real movement: browsers send a still pointer a move when the
-      // content under it changes, which is every slide change.
-      onPointerMove={(e) => { if (e.movementX || e.movementY) wake(); }}
+      // Only a pointer moving into the bottom band, where the bar lives, shows
+      // it. Moving over the slide, or the slide changing under a still pointer
+      // (browsers report that as a move), leaves the presentation clean.
+      onPointerMove={(e) => {
+        if (!(e.movementX || e.movementY)) return;
+        if (e.clientY > window.innerHeight - 140) wake();
+      }}
       role="dialog"
       aria-label={`Presenting ${doc.name}`}
     >
