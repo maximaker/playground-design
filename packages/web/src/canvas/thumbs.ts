@@ -95,11 +95,15 @@ async function draw(id: NodeId, doc: CanvasDocument, theme: string) {
   // read it, then serialise what it built.
   const parsed = new DOMParser().parseFromString(`<!doctype html><html><body>${html}</body></html>`, 'text/html');
   await inlineImages(parsed.body);
+  for (const el of Array.from(parsed.body.querySelectorAll<HTMLElement>('[style*="url("]'))) {
+    el.setAttribute('style', await inlineCssUrls(el.getAttribute('style') ?? ''));
+  }
+  const sheet = await inlineCssUrls(css);
   const body = new XMLSerializer().serializeToString(parsed.body)
     .replace(/^<body[^>]*>/, '').replace(/<\/body>$/, '');
 
   const style = `*,*::before,*::after{box-sizing:border-box}` +
-    `.thumb-root{width:${width}px;height:${height}px;overflow:hidden;margin:0;background:#fff}` + css;
+    `.thumb-root{width:${width}px;height:${height}px;overflow:hidden;margin:0;background:#fff}` + sheet;
   const svg =
     `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">` +
     `<foreignObject x="0" y="0" width="${width}" height="${height}">` +
@@ -135,18 +139,38 @@ function escapeXml(s: string): string {
 
 const images = new Map<string, Promise<string | null>>();
 
+function fetchAsData(src: string): Promise<string | null> {
+  let p = images.get(src);
+  if (!p) {
+    p = fetch(src).then((r) => (r.ok ? r.blob() : null)).then((b) => (b ? blobToDataUrl(b) : null)).catch(() => null);
+    images.set(src, p);
+  }
+  return p;
+}
+
+/*
+ * An SVG drawn as an image loads nothing from outside itself, so background
+ * images (every image pasted from Figma) showed only on the live frame, which
+ * is why slides had pictures only once selected. They are inlined like <img>.
+ */
+async function inlineCssUrls(css: string): Promise<string> {
+  const re = /url\(\s*(['"]?)([^'")]+)\s*\)/g;
+  const urls = [...new Set([...css.matchAll(re)].map((m) => m[2]!).filter((u) => !u.startsWith('data:') && !u.startsWith('#')))];
+  if (!urls.length) return css;
+  const data = new Map(await Promise.all(urls.map(async (u) => [u, await fetchAsData(u)] as const)));
+  return css.replace(re, (all, _q, u: string) => {
+    const d = data.get(u);
+    return d ? `url('${d}')` : all;
+  });
+}
+
 async function inlineImages(root: HTMLElement): Promise<void> {
   const imgs = Array.from(root.querySelectorAll('img'));
   await Promise.all(imgs.map(async (img) => {
     const src = img.getAttribute('src');
     if (!src || src.startsWith('data:')) return;
     img.removeAttribute('srcset');
-    let p = images.get(src);
-    if (!p) {
-      p = fetch(src).then((r) => (r.ok ? r.blob() : null)).then((b) => (b ? blobToDataUrl(b) : null)).catch(() => null);
-      images.set(src, p);
-    }
-    const data = await p;
+    const data = await fetchAsData(src);
     if (data) img.setAttribute('src', data); else img.removeAttribute('src');
   }));
 }
