@@ -209,6 +209,27 @@ function imageUrl(p: Paint, urls: Record<string, string>): string | undefined {
   return urls[hex];
 }
 
+/**
+ * Where a radial gradient sits and how far it reaches. The paint transform maps
+ * the layer's unit square into gradient space, where the circle is centred at
+ * (0.5, 0.5) with radius 0.5; inverting it gives the centre and the two radii
+ * as fractions of the layer. Dropping it centred every radial in the box, so a
+ * glow Figma placed at the top edge filled the middle instead.
+ */
+export function radialShape(t: Paint['transform']): string {
+  if (!t) return '';
+  const det = t.m00 * t.m11 - t.m01 * t.m10;
+  if (Math.abs(det) < 1e-9) return '';
+  const inv = [t.m11 / det, -t.m01 / det, -t.m10 / det, t.m00 / det];
+  const gx = 0.5 - t.m02, gy = 0.5 - t.m12;
+  const cx = inv[0]! * gx + inv[1]! * gy, cy = inv[2]! * gx + inv[3]! * gy;
+  // The two radii, measured along x and y of the layer.
+  const ax = Math.max(Math.abs(inv[0]! * 0.5), Math.abs(inv[1]! * 0.5)), ay = Math.max(Math.abs(inv[2]! * 0.5), Math.abs(inv[3]! * 0.5));
+  const pc = (n: number) => `${Math.round(n * 1000) / 10}%`;
+  if (Math.abs(cx - 0.5) < 0.005 && Math.abs(cy - 0.5) < 0.005 && Math.abs(ax - 0.5) < 0.005 && Math.abs(ay - 0.5) < 0.005) return '';
+  return `${pc(ax)} ${pc(ay)} at ${pc(cx)} ${pc(cy)}, `;
+}
+
 function background(paints: Paint[], images: ImageState): string {
   const layers: string[] = [];
   for (const p of paints) {
@@ -221,7 +242,7 @@ function background(paints: Paint[], images: ImageState): string {
         const t = p.transform;
         const deg = t ? Math.round((Math.atan2(t.m10, t.m00) * 180) / Math.PI + 90) : 180;
         layers.push(`linear-gradient(${deg}deg, ${stops})`);
-      } else layers.push(`radial-gradient(${stops})`);
+      } else layers.push(`radial-gradient(${radialShape(p.transform)}${stops})`);
     } else if (p.type === 'IMAGE') {
       const url = imageUrl(p, images.urls);
       if (!url) { images.n++; layers.push('linear-gradient(#E3E6EF, #E3E6EF)'); continue; }

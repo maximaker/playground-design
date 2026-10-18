@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { parseSchema, compileSchema, encodeBinarySchema } from 'kiwi-schema';
 import { deflateSync } from 'fflate';
-import { decodeFigmaClipboard, figmaToHtml, isFigmaClipboard, vectorNetworkToPath, type FigMessage, type FigNode } from './figma.ts';
+import { decodeFigmaClipboard, figmaToHtml, isFigmaClipboard, vectorNetworkToPath, radialShape, type FigMessage, type FigNode } from './figma.ts';
 import { parseHtml } from './html.ts';
 
 /* A tiny stand-in for Figma's schema: the decoder reads whatever schema travels. */
@@ -159,4 +159,11 @@ test('a hugging frame whose children are all hidden keeps its Figma size', () =>
     { guid: g(1, 2), type: 'TEXT', name: 'Hidden', visible: false, parentIndex: { guid: g(1, 1), position: '!' }, size: { x: 800, y: 100 } },
   ];
   assert.match(figmaToHtml({ nodeChanges: nodes }).html, /data-name="Column" style="[^"]*width:800px/);
+});
+
+test('radial gradients keep their Figma centre and reach', () => {
+  // Centred at the top edge, reaching the full width and height.
+  assert.equal(radialShape({ m00: 0, m01: 0.5, m02: 0.5, m10: -0.5, m11: 0, m12: 0.75 }), '100% 100% at 50% 0%, ');
+  // Figma's default circle needs nothing.
+  assert.equal(radialShape({ m00: 1, m01: 0, m02: 0, m10: 0, m11: 1, m12: 0 }), '');
 });
