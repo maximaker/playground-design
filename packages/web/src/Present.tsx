@@ -88,7 +88,12 @@ export function Present() {
   const wake = useCallback(() => {
     setChrome(true);
     window.clearTimeout(hideTimer.current);
-    hideTimer.current = window.setTimeout(() => setChrome(false), 2600);
+    // A pointer resting on the bar is using it: keep it until the pointer leaves.
+    const hide = () => {
+      if (document.querySelector('.present-bar:hover')) hideTimer.current = window.setTimeout(hide, 800);
+      else setChrome(false);
+    };
+    hideTimer.current = window.setTimeout(hide, 2600);
   }, []);
 
   // Keyed on presenting at all, not on the slide: moving to the next slide
