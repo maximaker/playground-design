@@ -329,3 +329,65 @@ test('MCP: a poll through add_live_question, counted by list_live_answers', asyn
   assert.deepEqual(relabelled.options.map((o) => o.label), ['Y', 'N']);
   assert.equal(relabelled.cleared.votesReset, 3);
 });
+
+test('presenter controls: slide order, editors only, CSV, the board link, and the list tool', async () => {
+  const doc = getDocument(docId)!;
+  const text = (res: unknown) => (res as { content: { text: string }[] }).content[0]!.text;
+  const artboardId = doc.pages[0]!.artboards[0]!;
+  const placed = JSON.parse(text(await client.callTool({
+    name: 'add_live_question', arguments: { question: 'On the slide', artboardId },
+  }))) as { code: string };
+  await answer(placed.code, { text: '=SUM(A1), "quoted"', name: 'Team, one' });
+
+  const page = await fetch(`${base}/d/${docId}/live`);
+  assert.equal(page.status, 200);
+  assert.match(await page.text(), /Presenter controls/);
+
+  const list = await fetch(`${base}/api/documents/${docId}/live`, { headers: { cookie } });
+  const { questions } = await list.json() as { questions: { code: string; placement: { slide: number } | null; answers: number }[] };
+  const first = questions.findIndex((q) => q.placement);
+  // Placed questions come first, in slide order; ones on no slide after them.
+  assert.ok(questions.slice(first).every((q, i, all) => !q.placement || all.slice(0, i).every((p) => p.placement)));
+  const mine = questions.find((q) => q.code === placed.code)!;
+  assert.equal(mine.placement!.slide, 1);
+  assert.equal(mine.answers, 1);
+  assert.ok(!JSON.stringify(questions).includes('"device"'));
+
+  assert.equal((await fetch(`${base}/api/documents/${docId}/live`)).status, 401);
+  const stranger = (await (await fetch(`${base}/api/auth/signup`, {
+    method: 'POST', headers: jsonHeaders(), body: JSON.stringify({ email: 'stranger@example.com', password: 'a-long-test-password' }),
+  })).headers.get('set-cookie') ?? '').split(';')[0]!;
+  // A document with an owner is closed to everyone else (the test document has none, so anyone may).
+  const owned = ((await (await fetch(`${base}/api/documents`, {
+    method: 'POST', headers: jsonHeaders({ cookie }), body: JSON.stringify({ name: 'Owned' }),
+  })).json()) as { document: { id: string } }).document.id;
+  assert.equal((await fetch(`${base}/api/documents/${owned}/live`, { headers: { cookie } })).status, 200);
+  assert.equal((await fetch(`${base}/api/documents/${owned}/live`, { headers: { cookie: stranger } })).status, 404);
+
+  const csv = await fetch(`${base}/api/live/${placed.code}/csv`, { headers: { cookie } });
+  assert.match(csv.headers.get('content-type') ?? '', /text\/csv/);
+  const body = await csv.text();
+  assert.match(body, /^time,name,answer,hidden\r\n/);
+  assert.match(body, /"Team, one","'=SUM\(A1\), ""quoted""",no/);
+
+  const go = await fetch(`${base}/api/live/${placed.code}/controls`, { headers: { cookie }, redirect: 'manual' });
+  assert.equal(go.status, 302);
+  assert.equal(go.headers.get('location'), `/d/${docId}/live#${placed.code}`);
+  assert.equal((await fetch(`${base}/api/live/${placed.code}/controls`, { redirect: 'manual' })).status, 401);
+
+  const listed = JSON.parse(text(await client.callTool({ name: 'list_live_questions', arguments: {} }))) as { controls: string; questions: { code: string }[] };
+  assert.ok(listed.controls.endsWith(`/d/${docId}/live`));
+  assert.ok(listed.questions.some((q) => q.code === placed.code));
+});
+
+test('qr: false hides the QR block, from the question or the board URL', async () => {
+  const code = await createQuestion('No QR here', { qr: false });
+  assert.equal(((await (await fetch(`${base}/q/${code}/state`)).json()) as { qr: boolean }).qr, false);
+  const text = (res: unknown) => (res as { content: { text: string }[] }).content[0]!.text;
+  await client.callTool({ name: 'set_live_question', arguments: { code, qr: true } });
+  assert.equal(((await (await fetch(`${base}/q/${code}/state`)).json()) as { qr: boolean }).qr, true);
+  const off = JSON.parse(text(await client.callTool({ name: 'set_live_question', arguments: { code, qr: false } }))) as { qr: boolean };
+  assert.equal(off.qr, false);
+  const board = await (await fetch(`${base}/q/${(await createQuestion())}/board?qr=0`)).text();
+  assert.match(board, /const qrOff = true;/);
+});

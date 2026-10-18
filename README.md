@@ -842,6 +842,16 @@ recognised after a redeploy.
   for a poll *Close poll* and *Reset votes*. The controls only appear for someone signed in who
   can edit the document, so a published page or a screenshot never shows them. Hidden answers
   stay stored; reset votes are gone.
+- **Presenter controls:** `/d/<docId>/live` is a mobile-first page for moderating from a phone or
+  laptop while the deck is on a TV. Open it with ⌘K → *Live questions*, or *Open controls* on the
+  board. It lists every question in page and slide order, with an open/closed switch, the count,
+  the short URL, *Clear all* or *Reset votes*, and a CSV download. Tap a question to see its
+  answers, newest first and updating live, each with Hide/Show; for a poll, the option counts.
+  It is for editors of the document only: the page's data comes from the API, which applies the
+  same rule as editing. Agents get the same list from `list_live_questions`.
+- **No QR on the board:** `qr: false` (on `add_live_question` or `set_live_question`, or `?qr=0` on
+  the board URL) hides the QR code and short URL, so the question and answers use the full width.
+  Use it for decks that show the QR on a slide of their own.
 
 On the slide, the question is an ordinary embed of `/q/<code>/board`. The canvas, presentation
 mode, screenshots and published pages therefore all show it the same way. The board takes the

@@ -59,6 +59,8 @@ export interface LiveQuestion {
   onePerPerson?: boolean;
   /** A text question whose answers the room can like; the board ranks by likes. */
   votable?: boolean;
+  /** false hides the QR code and short URL on the board, for a deck that shows them on a slide of their own. */
+  qr?: boolean;
 }
 
 export const LIVE_TEXT_MAX = 280;
@@ -217,4 +219,42 @@ export function makeLiveQuestionNode(opts: {
       border: '0', display: 'block', background: 'transparent', 'pointer-events': 'none',
     },
   });
+}
+
+export interface LivePlacement {
+  pageId: string;
+  pageName: string;
+  /** 1-based position of the artboard on its page: the slide number when presenting. */
+  slide: number;
+  artboardId: string;
+  artboardName: string;
+  nodeId: string;
+}
+
+/**
+ * Where each live question sits, by code, in page and slide order: the order
+ * a presenter meets them. A question placed twice is listed where it comes first.
+ */
+export function livePlacements(doc: CanvasDocument): Map<string, LivePlacement> {
+  const out = new Map<string, LivePlacement>();
+  for (const page of doc.pages) {
+    page.artboards.forEach((artboardId, index) => {
+      const artboard = doc.nodes[artboardId];
+      if (!artboard) return;
+      const stack = [...artboard.children];
+      while (stack.length) {
+        const n = doc.nodes[stack.shift()!];
+        if (!n) continue;
+        const code = n.attrs[LIVE_ATTR];
+        if (code && !out.has(code)) {
+          out.set(code, {
+            pageId: page.id, pageName: page.name, slide: index + 1,
+            artboardId, artboardName: artboard.name, nodeId: n.id,
+          });
+        }
+        stack.push(...n.children);
+      }
+    });
+  }
+  return out;
 }

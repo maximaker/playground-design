@@ -181,6 +181,10 @@ function buildEntries({
   action('present', 'Present this page', 'play', actions.present, 'P');
   action('live-question', 'Add a live question or poll', 'comment', () => { void addLiveQuestion(selection, dispatch, select); },
     undefined, 'The audience answers or votes on their phones');
+  action('live-controls', 'Live questions', 'comment', () => {
+    const id = getDoc()?.id;
+    if (id) window.open(`/d/${id}/live`, '_blank');
+  }, undefined, 'Moderate answers and polls from any device');
   action('share', 'Share a link', 'share', actions.openShare);
   action('shortcuts', 'Keyboard shortcuts', 'keyboard', actions.openShortcuts, '?');
   action('appearance', 'Settings', 'settings', actions.openAppearance, undefined, 'Agents, theme and interface scale');

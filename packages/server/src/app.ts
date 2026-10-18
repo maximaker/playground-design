@@ -65,7 +65,7 @@ import { APP_CSP, clientIp, rateLimit, securityHeaders } from './security.ts';
 import { bodyLimit } from 'hono/body-limit';
 import {
   LiveError, answerPageHtml, boardHtml, castLiveVote, clearLiveAnswers, createLiveQuestion, deviceFor, deviceView,
-  getLiveQuestion, hideLiveAnswer, likeLiveAnswer, moderatorView, submitLiveAnswer, updateLiveQuestion, waitForBoardState,
+  getLiveQuestion, hideLiveAnswer, likeLiveAnswer, moderatorView, liveQuestionsInOrder, answersCsv, controlPageHtml, submitLiveAnswer, updateLiveQuestion, waitForBoardState,
 } from './live.ts';
 
 const PORT = Number(process.env.PORT ?? 4000);
@@ -1368,18 +1368,44 @@ function liveFailure(c: import('hono').Context, err: unknown) {
 
 api.post('/documents/:id/live', async (c) => {
   const body = await c.req.json().catch(() => ({})) as {
-    question?: string; kind?: 'text' | 'poll'; options?: unknown; onePerPerson?: boolean; votable?: boolean;
+    question?: string; kind?: 'text' | 'poll'; options?: unknown; onePerPerson?: boolean; votable?: boolean; qr?: boolean;
   };
   try {
     const q = await createLiveQuestion(c.req.param('id'), body.question ?? '', {
       kind: body.kind, options: body.options,
       onePerPerson: typeof body.onePerPerson === 'boolean' ? body.onePerPerson : undefined,
       votable: body.votable === true,
+      qr: body.qr === false ? false : undefined,
     });
     return c.json({
       code: q.code, question: q.question, kind: q.kind, url: `${PUBLIC_URL}/q/${q.code}`, board: `${PUBLIC_URL}/q/${q.code}/board`,
     }, 201);
   } catch (err) { return liveFailure(c, err); }
+});
+
+/** Every live question in a document, in slide order, for the presenter's control page. */
+api.get('/documents/:id/live', async (c) => {
+  if (!atLeast(c.get('role'), 'editor')) return c.json({ error: 'Only editors can moderate live questions.' }, 403);
+  await ensureLoaded(c.req.param('id'));
+  const doc = getDocument(c.req.param('id'));
+  if (!doc) return c.json({ error: 'not found' }, 404);
+  return c.json({ questions: await liveQuestionsInOrder(doc, PUBLIC_URL) });
+});
+
+/** The board's "Open controls": it knows only its code, so the server finds the page. */
+api.get('/live/:code/controls', async (c) => {
+  const q = await getLiveQuestion(c.req.param('code'));
+  if (!q || !atLeast(c.get('role'), 'editor')) return c.json({ error: 'No such question.' }, 404);
+  return c.redirect(`/d/${q.docId}/live#${q.code}`);
+});
+
+api.get('/live/:code/csv', async (c) => {
+  const q = await getLiveQuestion(c.req.param('code'));
+  if (!q || !atLeast(c.get('role'), 'editor')) return c.json({ error: 'No such question.' }, 404);
+  return c.body(answersCsv(q), 200, {
+    'content-type': 'text/csv; charset=utf-8',
+    'content-disposition': `attachment; filename="live-${q.code}.csv"`,
+  });
 });
 
 api.get('/live/:code', async (c) => {
@@ -1394,7 +1420,7 @@ api.patch('/live/:code', async (c) => {
   try {
     return c.json(moderatorView(await updateLiveQuestion(c.req.param('code'), {
       question: typeof body.question === 'string' ? body.question : undefined,
-      open: flag(body.open), onePerPerson: flag(body.onePerPerson), votable: flag(body.votable),
+      open: flag(body.open), onePerPerson: flag(body.onePerPerson), votable: flag(body.votable), qr: flag(body.qr),
       options: body.options,
     })));
   } catch (err) { return liveFailure(c, err); }
@@ -1506,6 +1532,12 @@ app.post('/q/:code/answers/:answerId/like', async (c) => {
 });
 
 /**
+ * The presenter's control page. The shell is the same for everyone; what it
+ * shows comes from the API, which refuses anyone who cannot edit the document.
+ */
+app.get('/d/:id/live', (c) => c.html(controlPageHtml(c.req.param('id')), 200, { 'cache-control': 'no-store', 'x-robots-tag': 'noindex' }));
+
+/**
  * The board may be framed by anything. Its usual parent is an artboard on this
  * origin, but the screenshot renderer draws from about:blank, and a framing
  * rule refused it there — the slide came out empty. Nothing on the board acts
@@ -1518,7 +1550,7 @@ app.get('/q/:code/board', async (c) => {
   if (!q) return c.html(answerPageHtml(null, c.req.param('code')), 404);
   const state = await waitForBoardState(q.code, -1, 0);
   return c.html(boardHtml(q, state!.v, PUBLIC_URL, {
-    font: c.req.query('font'), ink: c.req.query('ink'), accent: c.req.query('accent'), card: c.req.query('card'),
+    qr: c.req.query('qr'), font: c.req.query('font'), ink: c.req.query('ink'), accent: c.req.query('accent'), card: c.req.query('card'),
   }), 200, { 'cache-control': 'no-store', 'x-robots-tag': 'noindex', 'content-security-policy': BOARD_CSP });
 });
 

@@ -24,7 +24,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import QRCode from 'qrcode';
 import {
-  type LiveAnswer, type LiveKind, type LiveQuestion,
+  type CanvasDocument, type LiveAnswer, type LiveKind, type LiveQuestion, livePlacements,
   LIVE_NAME_MAX, LIVE_QUESTION_MAX, LIVE_TEXT_MAX, cleanLiveText, cleanPollOptions, liveBoardFit, pollCounts, pollPercentages,
   visibleAnswers,
 } from '@playground/shared';
@@ -93,6 +93,7 @@ export interface LiveSettings {
   options?: unknown;
   onePerPerson?: boolean;
   votable?: boolean;
+  qr?: boolean;
 }
 
 export async function createLiveQuestion(docId: string, question: string, settings: LiveSettings = {}): Promise<LiveQuestion> {
@@ -105,6 +106,7 @@ export async function createLiveQuestion(docId: string, question: string, settin
     code, docId, question: text, open: true, createdAt: Date.now(), answers: [], kind,
     // New questions are once per person unless asked otherwise.
     onePerPerson: settings.onePerPerson ?? true,
+    ...(settings.qr === false ? { qr: false } : {}),
   };
   if (kind === 'poll') {
     const options = cleanPollOptions(settings.options);
@@ -128,7 +130,7 @@ async function mustHold(code: string): Promise<Held> {
 
 export async function updateLiveQuestion(
   code: string,
-  patch: { question?: string; open?: boolean; options?: unknown; onePerPerson?: boolean; votable?: boolean },
+  patch: { question?: string; open?: boolean; options?: unknown; onePerPerson?: boolean; votable?: boolean; qr?: boolean },
 ): Promise<LiveQuestion> {
   const h = await mustHold(code);
   const q = h.q;
@@ -150,6 +152,7 @@ export async function updateLiveQuestion(
     q.votable = patch.votable;
   }
   if (patch.onePerPerson !== undefined) q.onePerPerson = patch.onePerPerson;
+  if (patch.qr !== undefined) q.qr = patch.qr;
   if (patch.open !== undefined) q.open = patch.open;
   await changed(h);
   return q;
@@ -412,6 +415,8 @@ export interface BoardState {
   question: string;
   open: boolean;
   votable: boolean;
+  /** Whether the board shows the QR code and short URL. */
+  qr: boolean;
   /** Visible answers, or votes cast in a poll. */
   total: number;
   answers: { id: string; name: string; text: string; likes: number }[];
@@ -427,7 +432,7 @@ function boardState(h: Held): BoardState {
     const counts = pollCounts(q);
     const percents = pollPercentages(counts);
     return {
-      v: h.version, kind: 'poll', question: q.question, open: q.open, votable: false,
+      v: h.version, kind: 'poll', question: q.question, open: q.open, votable: false, qr: q.qr !== false,
       total: counts.reduce((a, b) => a + b, 0),
       answers: [],
       options: (q.options ?? []).map((label, i) => ({ label, count: counts[i]!, percent: percents[i]! })),
@@ -435,7 +440,7 @@ function boardState(h: Held): BoardState {
   }
   const visible = visibleAnswers(q);
   return {
-    v: h.version, kind: 'text', question: q.question, open: q.open, votable: !!q.votable,
+    v: h.version, kind: 'text', question: q.question, open: q.open, votable: !!q.votable, qr: q.qr !== false,
     total: visible.length,
     answers: visible.slice(0, BOARD_MAX).map(({ id, name, text, likes }) => ({ id, name, text, likes: likes?.length ?? 0 })),
     options: [],
@@ -452,6 +457,7 @@ export function moderatorView(q: LiveQuestion) {
     open: q.open,
     onePerPerson: !!q.onePerPerson,
     votable: !!q.votable,
+    qr: q.qr !== false,
     createdAt: q.createdAt,
     ...(q.kind === 'poll'
       ? {
@@ -517,6 +523,8 @@ export function shortAnswerUrl(publicUrl: string, code: string): string {
 const GENERIC_FONTS = new Set(['serif', 'sans-serif', 'monospace', 'system-ui', 'ui-sans-serif', 'ui-serif', 'cursive', 'inherit']);
 
 export interface BoardLook {
+  /** "0" or "false" hides the QR block whatever the question says. */
+  qr?: string;
   font?: string;
   ink?: string;
   accent?: string;
@@ -533,6 +541,7 @@ function safeLook(look: BoardLook): Required<BoardLook> {
     ink: color(look.ink, '#111114'),
     accent: color(look.accent, '#2f6bff'),
     card: color(look.card, ''),
+    qr: look.qr === '0' || look.qr === 'false' ? '0' : '1',
   };
 }
 
@@ -603,15 +612,16 @@ ${fontHead(l.font)}
 <div class="board" id="board">
   <div class="head">
     <div><h1 class="q" id="q">${esc(q.question)}</h1><div class="meta" id="meta"></div></div>
-    <div class="scan">${qrSvg(url)}<span>${esc(shortAnswerUrl(publicUrl, q.code))}</span></div>
+    <div class="scan" id="scan">${qrSvg(url)}<span>${esc(shortAnswerUrl(publicUrl, q.code))}</span></div>
   </div>
   <div class="grid" id="grid"></div>
   <div class="poll" id="poll" hidden></div>
-  <div class="tools"><button id="toggle"></button><button id="clear"></button></div>
+  <div class="tools"><button id="toggle"></button><button id="clear"></button><button id="controls">Open controls</button></div>
 </div>
 <script>
 ${liveBoardFit.toString()}
 const code = ${scriptJson(q.code)};
+const qrOff = ${scriptJson(look.qr === '0' || look.qr === 'false')};
 let state = ${scriptJson(boardState(h))};
 const board = document.getElementById('board');
 const grid = document.getElementById('grid');
@@ -624,6 +634,8 @@ function render() {
   const isPoll = state.kind === 'poll';
   document.getElementById('q').textContent = state.question;
   board.classList.toggle('closed', !state.open);
+  // Without the QR block the question and answers take the full width.
+  document.getElementById('scan').hidden = qrOff || state.qr === false;
   const meta = document.getElementById('meta');
   meta.textContent = '';
   const noun = isPoll ? (state.total === 1 ? ' vote' : ' votes') : (state.total === 1 ? ' answer' : ' answers');
@@ -717,6 +729,8 @@ async function moderate(path, body, method) {
   if (r && r.ok) poll(0);
 }
 document.getElementById('toggle').onclick = () => moderate('', { open: !state.open }, 'PATCH');
+// The board never knows its document; the server resolves it for someone allowed to see it.
+document.getElementById('controls').onclick = () => window.open('/api/live/' + code + '/controls', '_blank');
 document.getElementById('clear').onclick = () => {
   const ask = state.kind === 'poll' ? 'Reset every vote to zero?' : 'Hide every answer? They stay stored.';
   if (confirm(ask)) moderate('/clear');
@@ -915,5 +929,256 @@ refresh();
 // The list of answers to vote on grows while the room writes.
 setInterval(() => { if (me && me.answers && me.answered && !document.hidden) refresh(); }, 5000);
 </script>` : ''}
+</body></html>`;
+}
+
+// ---------------------------------------------------------------------------
+// Presenter controls
+// ---------------------------------------------------------------------------
+
+/**
+ * Every live question in a document, in the order the presenter meets them —
+ * page, then slide — with the ones no longer on any slide at the end.
+ */
+export async function liveQuestionsInOrder(doc: CanvasDocument, publicUrl: string) {
+  const placed = livePlacements(doc);
+  const pageIndex = new Map(doc.pages.map((p, i) => [p.id, i]));
+  const all = await liveQuestionsFor(doc.id);
+  const rank = (code: string) => {
+    const at = placed.get(code);
+    return at ? (pageIndex.get(at.pageId) ?? 0) * 100_000 + at.slide : Number.MAX_SAFE_INTEGER;
+  };
+  return all
+    .sort((a, b) => rank(a.code) - rank(b.code) || a.createdAt - b.createdAt)
+    .map((q) => {
+      const { answers: _answers, ...view } = moderatorView(q);
+      return {
+        ...view,
+        answers: q.answers.length,
+        shown: visibleAnswers(q).length,
+        url: `${publicUrl}/q/${q.code}`,
+        shortUrl: shortAnswerUrl(publicUrl, q.code),
+        placement: placed.get(q.code) ?? null,
+      };
+    });
+}
+
+/** Everything said, for after the session: one row per answer, or per option for a poll. */
+export function answersCsv(q: LiveQuestion): string {
+  const cell = (v: unknown) => {
+    const s = String(v ?? '');
+    // A leading = + - @ makes a spreadsheet run the cell as a formula.
+    const safe = /^[=+\-@]/.test(s) ? `'${s}` : s;
+    return /[",\n]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
+  };
+  const rows: unknown[][] = q.kind === 'poll'
+    ? [['option', 'votes', 'percent'], ...(q.options ?? []).map((o, i) => [o, pollCounts(q)[i], pollPercentages(pollCounts(q))[i]])]
+    : [['time', 'name', 'answer', 'hidden', ...(q.votable ? ['likes'] : [])],
+      ...q.answers.map((a) => [new Date(a.createdAt).toISOString(), a.name, a.text, a.hidden ? 'yes' : 'no', ...(q.votable ? [a.likes?.length ?? 0] : [])])];
+  return rows.map((r) => r.map(cell).join(',')).join('\r\n') + '\r\n';
+}
+
+export function controlPageHtml(docId: string): string {
+  return `<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>Live questions · controls</title>
+<style>
+  :root { color-scheme: light dark; --bg: #ededef; --plate: #fff; --ink: #111114; --mute: #6b6b76; --line: #e3e3e8; --cta: #111114; --cta-ink: #fff;
+          --green: #1f9d55; --accent: #2f6bff; --danger: #d93a1e; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #0e0e13; --plate: #1b1b23; --ink: #f2f2f5; --mute: #9a9aa6; --line: #2c2c38; --cta: #f2f2f5; --cta-ink: #111114; } }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body { margin: 0; min-height: 100dvh; background: var(--bg); color: var(--ink);
+         font: 15px/1.45 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; -webkit-font-smoothing: antialiased; }
+  main { max-width: 40rem; margin: 0 auto; padding: max(20px, env(safe-area-inset-top)) 16px 48px; }
+  header { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; min-height: 40px; }
+  header h1 { flex: 1; margin: 0; font-size: 20px; letter-spacing: -0.01em; min-width: 0; }
+  .eyebrow { font-size: 11px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--mute); }
+  .card { background: var(--plate); border-radius: 18px; padding: 14px 16px; margin-bottom: 12px;
+          box-shadow: 0 1px 2px rgba(17,17,20,.05), 0 6px 18px rgba(17,17,20,.06); }
+  .card.tap { cursor: pointer; }
+  .q { font-size: 17px; font-weight: 650; margin: 2px 0 8px; overflow-wrap: anywhere; }
+  .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .chip { font-size: 12px; font-weight: 600; padding: 3px 9px; border-radius: 99px; background: color-mix(in srgb, var(--ink) 7%, transparent); }
+  .chip.open { background: color-mix(in srgb, var(--green) 16%, transparent); color: var(--green); }
+  .count { margin-left: auto; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .url { font-size: 13px; color: var(--mute); margin: 8px 0 10px; word-break: break-all; }
+  .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+  button, .btn { appearance: none; border: 0; border-radius: 99px; min-height: 40px; padding: 0 14px; font: inherit; font-weight: 600; cursor: pointer;
+                 background: color-mix(in srgb, var(--ink) 7%, transparent); color: var(--ink); text-decoration: none; display: inline-flex; align-items: center; }
+  button.primary { background: var(--cta); color: var(--cta-ink); }
+  button.danger { color: var(--danger); }
+  button:disabled { opacity: .5; }
+  .switch { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; cursor: pointer; user-select: none; }
+  .switch input { appearance: none; width: 44px; height: 26px; border-radius: 99px; background: color-mix(in srgb, var(--ink) 18%, transparent);
+                  position: relative; margin: 0; cursor: pointer; transition: background .2s; }
+  .switch input::after { content: ''; position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 50%; background: #fff;
+                         box-shadow: 0 1px 2px rgba(0,0,0,.3); transition: transform .2s; }
+  .switch input:checked { background: var(--green); }
+  .switch input:checked::after { transform: translateX(18px); }
+  .answer { display: flex; gap: 12px; align-items: flex-start; padding: 12px 0; border-top: 1px solid var(--line); }
+  .answer:first-child { border-top: 0; }
+  .answer .t { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+  .answer .n { display: block; font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--accent); }
+  .answer .m { font-size: 12px; color: var(--mute); }
+  .answer.hidden .t { opacity: .45; text-decoration: line-through; }
+  .opt { margin: 10px 0 14px; }
+  .opt .l { display: flex; justify-content: space-between; font-weight: 600; margin-bottom: 6px; }
+  .bar { height: 10px; border-radius: 99px; background: color-mix(in srgb, var(--ink) 8%, transparent); overflow: hidden; }
+  .bar i { display: block; height: 100%; background: var(--accent); border-radius: 99px; transition: width .5s; }
+  .empty, .note { color: var(--mute); }
+  .where { font-size: 12px; color: var(--mute); }
+</style></head>
+<body><main>
+  <section id="list">
+    <header><div style="flex:1"><div class="eyebrow">Presenter controls</div><h1>Live questions</h1></div></header>
+    <div id="questions"><p class="note">Loading…</p></div>
+  </section>
+  <section id="detail" hidden>
+    <header><button id="back" aria-label="All questions">←</button><div style="flex:1;min-width:0"><div class="eyebrow" id="d-kind"></div></div></header>
+    <div id="d-head"></div>
+    <div class="card" id="d-body"></div>
+  </section>
+</main>
+<script>
+const docId = ${scriptJson(docId)};
+const $ = (id) => document.getElementById(id);
+let questions = [];
+let current = null;
+let detailRun = 0;
+
+function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
+
+async function api(path, method, body) {
+  const r = await fetch('/api' + path, { method: method || 'GET', credentials: 'same-origin', cache: 'no-store',
+    headers: { 'content-type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
+  const data = await r.json().catch(() => ({}));
+  if (r.status === 401) { location.href = '/d/' + docId; throw new Error('Sign in first.'); }
+  if (!r.ok) throw new Error(data.error || 'That did not work.');
+  return data;
+}
+
+/** The controls every question shows, in the list and on its own page. */
+function controls(q, after) {
+  const box = el('div');
+  const row = el('div', 'row');
+  row.append(el('span', 'chip', q.kind === 'poll' ? 'Poll' : q.votable ? 'Votable' : 'Answers'));
+  const sw = el('label', 'switch');
+  const input = document.createElement('input');
+  input.type = 'checkbox'; input.checked = q.open;
+  input.onclick = (e) => e.stopPropagation();
+  input.onchange = async () => { try { await api('/live/' + q.code, 'PATCH', { open: input.checked }); after(); } catch (e) { alert(e.message); input.checked = !input.checked; } };
+  sw.append(input, q.open ? 'Open' : 'Closed');
+  sw.onclick = (e) => e.stopPropagation();
+  row.append(sw);
+  const n = q.kind === 'poll' ? q.totalVotes : (typeof q.answers === 'number' ? q.shown : q.answers.filter((a) => !a.hidden).length);
+  row.append(el('span', 'count', n + (q.kind === 'poll' ? (n === 1 ? ' vote' : ' votes') : (n === 1 ? ' answer' : ' answers'))));
+  box.append(row);
+  box.append(el('div', 'url', q.shortUrl || ''));
+  const actions = el('div', 'actions');
+  const clear = el('button', 'danger', q.kind === 'poll' ? 'Reset votes' : 'Clear all');
+  clear.onclick = async (e) => {
+    e.stopPropagation();
+    const ask = q.kind === 'poll' ? 'Reset every vote on “' + q.question + '” to zero?' : 'Hide every answer to “' + q.question + '”? They stay stored.';
+    if (!confirm(ask)) return;
+    try { await api('/live/' + q.code + '/clear', 'POST'); after(); } catch (err) { alert(err.message); }
+  };
+  const csv = el('a', 'btn', 'Download CSV');
+  csv.href = '/api/live/' + q.code + '/csv';
+  csv.onclick = (e) => e.stopPropagation();
+  actions.append(clear, csv);
+  box.append(actions);
+  return box;
+}
+
+async function loadList() {
+  try {
+    questions = (await api('/documents/' + docId + '/live')).questions;
+  } catch (e) { $('questions').textContent = e.message; return; }
+  const box = $('questions');
+  box.textContent = '';
+  if (!questions.length) { box.append(el('p', 'note', 'No live questions in this document yet. Add one with ⌘K → Add a live question.')); return; }
+  for (const q of questions) {
+    const card = el('div', 'card tap');
+    card.onclick = () => { location.hash = q.code; };
+    card.append(el('div', 'where', q.placement ? q.placement.pageName + ' · slide ' + q.placement.slide : 'Not on a slide'));
+    card.append(el('div', 'q', q.question));
+    card.append(controls(q, loadList));
+    box.append(card);
+  }
+}
+
+async function loadDetail(code) {
+  const q = await api('/live/' + code);
+  q.shortUrl = (questions.find((x) => x.code === code) || {}).shortUrl || location.host + '/q/' + code;
+  current = q;
+  $('d-kind').textContent = q.kind === 'poll' ? 'Poll' : 'Question';
+  const head = $('d-head');
+  head.textContent = '';
+  const card = el('div', 'card');
+  card.append(el('div', 'q', q.question), controls(q, () => loadDetail(code)));
+  head.append(card);
+  const body = $('d-body');
+  body.textContent = '';
+  if (q.kind === 'poll') {
+    for (const o of q.options) {
+      const row = el('div', 'opt');
+      const l = el('div', 'l');
+      l.append(el('span', null, o.label), el('span', null, o.votes + ' · ' + o.percent + '%'));
+      const bar = el('div', 'bar'); const fill = el('i'); fill.style.width = o.percent + '%'; bar.append(fill);
+      row.append(l, bar);
+      body.append(row);
+    }
+    return;
+  }
+  const answers = q.answers.slice().reverse();
+  if (!answers.length) { body.append(el('p', 'empty', 'No answers yet.')); return; }
+  for (const a of answers) {
+    const row = el('div', 'answer' + (a.hidden ? ' hidden' : ''));
+    const t = el('div', 't');
+    if (a.name) t.append(el('span', 'n', a.name));
+    t.append(a.text);
+    t.append(el('div', 'm', new Date(a.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + (q.votable ? ' · ♥ ' + (a.likes || 0) : '') + (a.hidden ? ' · hidden' : '')));
+    const b = el('button', a.hidden ? 'primary' : '', a.hidden ? 'Show' : 'Hide');
+    b.onclick = async () => {
+      b.disabled = true;
+      try { await api('/live/' + code + '/answers/' + encodeURIComponent(a.id) + '/hide', 'POST', { hidden: !a.hidden }); await loadDetail(code); }
+      catch (e) { alert(e.message); b.disabled = false; }
+    };
+    row.append(t, b);
+    body.append(row);
+  }
+}
+
+/** The same held request the board uses: answers the moment the question changes. */
+async function follow(code, run) {
+  let v = -1;
+  while (run === detailRun) {
+    try {
+      const r = await fetch('/q/' + code + '/state?v=' + v + '&wait=' + (v < 0 ? 0 : 25000), { cache: 'no-store' });
+      if (!r.ok) return;
+      const s = await r.json();
+      if (run !== detailRun) return;
+      if (s.v !== v) { if (v >= 0) await loadDetail(code); v = s.v; }
+    } catch { await new Promise((ok) => setTimeout(ok, 3000)); }
+  }
+}
+
+async function route() {
+  const code = location.hash.slice(1);
+  detailRun++;
+  $('list').hidden = !!code;
+  $('detail').hidden = !code;
+  if (!code) { await loadList(); return; }
+  try { await loadDetail(code); follow(code, detailRun); } catch (e) { $('d-body').textContent = e.message; }
+}
+$('back').onclick = () => { location.hash = ''; };
+addEventListener('hashchange', route);
+route();
+// Counts on the list stay roughly current without holding a request per question.
+setInterval(() => { if (!location.hash && !document.hidden) loadList(); }, 5000);
+</script>
 </body></html>`;
 }

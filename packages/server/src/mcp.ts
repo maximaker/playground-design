@@ -44,7 +44,7 @@ import {
 } from './store.ts';
 import { persistence } from './persistence.ts';
 import {
-  LiveError, clearLiveAnswers, createLiveQuestion, getLiveQuestion, hideLiveAnswer, liveQuestionsFor, moderatorView,
+  LiveError, clearLiveAnswers, createLiveQuestion, getLiveQuestion, hideLiveAnswer, liveQuestionsFor, liveQuestionsInOrder, moderatorView,
   updateLiveQuestion,
 } from './live.ts';
 import { pageArtboard, slugify } from './publish.ts';
@@ -2251,15 +2251,16 @@ function registerWriteTools(server: McpServer, ctx: McpContext): void {
       options: z.array(z.string().min(1).max(60)).min(2).max(6).optional().describe('A poll’s choices, e.g. ["Vitamin", "Painkiller"].'),
       onePerPerson: z.boolean().optional().default(true).describe('One answer (or one changeable vote) per phone.'),
       votable: z.boolean().optional().describe('Text questions: people can like answers; the board ranks by likes.'),
+      qr: z.boolean().optional().default(true).describe('false hides the QR code and short URL, so the question and answers use the full width (for decks that show the QR on its own slide).'),
     },
     annotations: { destructiveHint: false },
-  }, async ({ question, artboardId, x, y, width, height, font, ink, accent, card, kind, options, onePerPerson, votable }) => liveGuard(async () => {
+  }, async ({ question, artboardId, x, y, width, height, font, ink, accent, card, kind, options, onePerPerson, votable, qr }) => liveGuard(async () => {
     const doc = requireDoc(ctx);
     const artboard = node(doc, artboardId);
     if (artboard.type !== 'artboard') return fail(`${artboardId} is a ${artboard.type}; a live question goes on an artboard.`);
     if (kind === 'poll' && !options) return fail('A poll needs options: 2 to 6 of them.');
     if (kind !== 'poll' && options) return fail('options are for kind "poll".');
-    const q = await createLiveQuestion(doc.id, question, { kind, options, onePerPerson, votable });
+    const q = await createLiveQuestion(doc.id, question, { kind, options, onePerPerson, votable, qr });
     const embed = makeLiveQuestionNode({
       baseUrl: ctx.baseUrl, code: q.code, question: q.question, artboard, doc,
       x, y, width, height, look: { font, ink, accent, card },
@@ -2269,6 +2270,19 @@ function registerWriteTools(server: McpServer, ctx: McpContext): void {
       id: embed.id, code: q.code, kind: q.kind, answerUrl: `${ctx.baseUrl}/q/${q.code}`, board: embed.attrs.src,
       next: 'Answers appear on the slide by themselves. list_live_answers reads them; hide_live_answer moderates.',
     });
+  }));
+
+  server.registerTool('list_live_questions', {
+    title: 'List the live questions in this document',
+    description:
+      'Every live question and poll, in page and slide order, with its settings, counts, answer URL and where it sits '
+      + '(page, slide number, node id) — without the answers themselves; list_live_answers has those. '
+      + 'Presenters moderate the same list at /d/<documentId>/live.',
+    inputSchema: {},
+    annotations: { readOnlyHint: true },
+  }, async () => liveGuard(async () => {
+    const doc = requireDoc(ctx);
+    return json({ controls: `${ctx.baseUrl}/d/${doc.id}/live`, questions: await liveQuestionsInOrder(doc, ctx.baseUrl) });
   }));
 
   server.registerTool('list_live_answers', {
@@ -2317,7 +2331,8 @@ function registerWriteTools(server: McpServer, ctx: McpContext): void {
     description:
       'open: false stops new answers (the slide says closed); open: true reopens. question rewords it. '
       + 'clear: true hides every text answer on the slide (they stay stored) or resets a poll’s votes to zero. '
-      + 'options replaces a poll’s choices — only while it has no votes. onePerPerson and votable switch those settings.',
+      + 'options replaces a poll’s choices — only while it has no votes. onePerPerson and votable switch those settings. '
+      + 'qr: false hides the QR code and short URL on the board; true shows them again.',
     inputSchema: {
       code: z.string(),
       open: z.boolean().optional(),
@@ -2326,12 +2341,13 @@ function registerWriteTools(server: McpServer, ctx: McpContext): void {
       options: z.array(z.string().min(1).max(60)).min(2).max(6).optional(),
       onePerPerson: z.boolean().optional(),
       votable: z.boolean().optional(),
+      qr: z.boolean().optional(),
     },
-  }, async ({ code, open, question, clear, options, onePerPerson, votable }) => liveGuard(async () => {
+  }, async ({ code, open, question, clear, options, onePerPerson, votable, qr }) => liveGuard(async () => {
     const q = await ownLiveQuestion(code);
     // Clearing first lets one call reset a poll and then relabel it.
     const cleared = clear ? await clearLiveAnswers(q.code) : null;
-    const updated = await updateLiveQuestion(q.code, { open, question, options, onePerPerson, votable });
+    const updated = await updateLiveQuestion(q.code, { open, question, options, onePerPerson, votable, qr });
     const view = moderatorView(updated);
     return json({ ...view, answers: undefined, answerCount: updated.answers.length, cleared });
   }));
