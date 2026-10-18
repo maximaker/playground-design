@@ -16,6 +16,7 @@ import { NodeView } from './NodeView.tsx';
 import { effectiveTheme, pinnedTheme, useViewTheme } from '../state/viewTheme.ts';
 import { requestThumb, useThumb } from './thumbs.ts';
 import { BreakpointBar } from './BreakpointBar.tsx';
+import { artboardSurface } from './surface.ts';
 
 interface Props {
   id: NodeId;
@@ -51,6 +52,7 @@ export const Artboard = memo(function Artboard({ id, live }: Props) {
   }, [live, body]);
 
   const node = getNodeById(id);
+  const surface = artboardSurface(node);
   const doc = getDoc();
 
   // Whether to allow scripts in this frame. Keyed to the structure counter
@@ -143,12 +145,14 @@ export const Artboard = memo(function Artboard({ id, live }: Props) {
       )}
 
       <div
-        className={`artboard-frame${live ? '' : ' is-static'}${isSelected ? ' is-selected' : ''}${agentWorking ? ' is-agent-working' : ''}`}
+        className={`artboard-frame${surface.clear ? ' is-clear' : ''}${live ? '' : ' is-static'}${isSelected ? ' is-selected' : ''}${agentWorking ? ' is-agent-working' : ''}`}
         style={{
           width,
           height,
           transform: `scale(${zoom})`,
           transformOrigin: 'top left',
+          borderRadius: surface.radius,
+          overflow: surface.radius ? 'hidden' : undefined,
         }}
       >
         {live && (
@@ -168,7 +172,7 @@ export const Artboard = memo(function Artboard({ id, live }: Props) {
               // on does not hand an imported SVG a way to run.
               sandbox={hasCodeComponent ? 'allow-same-origin allow-scripts' : 'allow-same-origin'}
               scrolling="no"
-              style={{ border: 0, display: 'block', width, height, background: '#fff' }}
+              style={{ border: 0, display: 'block', width, height, background: surface.sheet }}
             />
             {body && createPortal(<NodeView id={id} isRoot />, body)}
           </>
@@ -176,7 +180,7 @@ export const Artboard = memo(function Artboard({ id, live }: Props) {
         {/* The thumbnail stays on top of a frame that has just gone live until
             the frame has painted, so zooming in never flashes a blank page. */}
         {(!live || !painted) && (
-          <StaticFrame id={id} width={width} height={height} fallback={node.styles['background-color'] ?? '#fff'} />
+          <StaticFrame id={id} width={width} height={height} fallback={surface.clear ? 'transparent' : '#fff'} />
         )}
       </div>
     </div>

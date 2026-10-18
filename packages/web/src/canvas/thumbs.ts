@@ -18,6 +18,7 @@
 import { useSyncExternalStore } from 'react';
 import type { CanvasDocument, NodeId } from '@playground/shared';
 import { emitHtml, getArtboardSize } from '@playground/shared';
+import { artboardSurface } from './surface.ts';
 
 /** Pixels per canvas pixel. Thumbnails are only shown below LIVE_ZOOM, so this
  *  covers a 2x screen out to there without drawing more than needed. */
@@ -103,7 +104,7 @@ async function draw(id: NodeId, doc: CanvasDocument, theme: string) {
     .replace(/^<body[^>]*>/, '').replace(/<\/body>$/, '');
 
   const style = `*,*::before,*::after{box-sizing:border-box}` +
-    `.thumb-root{width:${width}px;height:${height}px;overflow:hidden;margin:0;background:#fff}` + sheet;
+    `.thumb-root{width:${width}px;height:${height}px;overflow:hidden;margin:0;background:${artboardSurface(node).sheet}}` + sheet;
   const svg =
     `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">` +
     `<foreignObject x="0" y="0" width="${width}" height="${height}">` +

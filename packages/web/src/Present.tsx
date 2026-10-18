@@ -23,6 +23,7 @@ import { useArtboardFrame } from './canvas/frame.ts';
 import { NodeView } from './canvas/NodeView.tsx';
 import { CommentPin, CommentComposer, authorName } from './canvas/CommentPin.tsx';
 import { Icon } from './ui/Icon.tsx';
+import { artboardSurface } from './canvas/surface.ts';
 
 type Scaling = 'fit' | 'fill' | 'actual';
 
@@ -393,6 +394,7 @@ function PresentFrame({ id, width, height, scale, scaling, comments, links, onLi
 }) {
   const { frameRef, body } = useArtboardFrame(id, true, { register: false });
   const node = getNodeById(id);
+  const surface = artboardSurface(node);
   const doc = getDoc();
   // Not `s.doc?.comments ?? []`: that returns a fresh array every time the
   // selector runs, which the store reads as a change, which re-renders, which
@@ -426,8 +428,14 @@ function PresentFrame({ id, width, height, scale, scaling, comments, links, onLi
 
   return (
     <div
-      className={`present-frame is-${scaling}`}
-      style={{ width: width * scale, height: height * scale }}
+      className={`present-frame is-${scaling}${surface.clear ? ' is-clear' : ''}`}
+      style={{
+        width: width * scale, height: height * scale,
+        background: surface.sheet,
+        // The radius is the artboard's, in its own pixels, so it scales with it.
+        borderRadius: surface.radius ? `calc(${surface.radius} * ${scale})` : undefined,
+        overflow: surface.radius ? 'hidden' : undefined,
+      }}
     >
       <div
         className="present-frame-inner"
@@ -450,7 +458,7 @@ function PresentFrame({ id, width, height, scale, scaling, comments, links, onLi
            * correct answer is for it not to take the pointer at all.
            */
           style={{
-            width, height, border: 0, display: 'block', background: '#fff',
+            width, height, border: 0, display: 'block', background: surface.sheet,
             pointerEvents: 'none',
           }}
         />
