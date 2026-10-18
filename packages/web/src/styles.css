@@ -3857,3 +3857,8 @@ html:not(.hm-dial-compact):has(.rail-left.is-open) .hm-dial.corner ~ .hm-flyout 
    shadow at all: a filter on every live frame costs too much while panning. */
 .artboard-frame.is-clear, .present-frame.is-clear { background: transparent; box-shadow: none; }
 .present-frame.is-clear { filter: drop-shadow(0 24px 48px color-mix(in srgb, var(--shade) 45%, transparent)); }
+
+/* In the editor the closed dial was a knob floating over the canvas, covering
+   artboards wherever it sat. It is gone until asked for: Ctrl / (⌘ /) opens
+   it, and closing it hides it again. Phones keep their menu button. */
+html:not(.hm-dial-compact) .hm-dial.corner.closed { visibility: hidden; pointer-events: none; }
