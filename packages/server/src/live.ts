@@ -3,7 +3,7 @@
  *
  * Three surfaces, all addressed by the question's code:
  *
- * - `/q/<code>` is the answer page: a text box, or for a poll a button per option. Public, no account, built for a phone on
+ * - `/q/<code>` is the answer page: a text box, a button per option for a poll, or a whole form. Public, no account, built for a phone on
  *   venue Wi-Fi: one small HTML page, no bundle, no fonts to fetch.
  * - `/q/<code>/board` is what sits on the slide, inside an ordinary embed. It
  *   draws the question, a QR code and the answers, and keeps them current.
@@ -24,9 +24,9 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import QRCode from 'qrcode';
 import {
-  type CanvasDocument, type LiveAnswer, type LiveKind, type LiveQuestion, livePlacements,
-  LIVE_NAME_MAX, LIVE_QUESTION_MAX, LIVE_TEXT_MAX, cleanLiveText, cleanPollOptions, liveBoardFit, pollCounts, pollPercentages,
-  visibleAnswers,
+  type CanvasDocument, type LiveAnswer, type LiveFieldSummary, type LiveKind, type LiveQuestion, livePlacements,
+  LIVE_NAME_MAX, LIVE_QUESTION_MAX, LIVE_TEXT_MAX, cleanFormFields, cleanFormValues, cleanLiveText, cleanPollOptions, formSummary,
+  liveBoardFit, pollCounts, pollPercentages, visibleAnswers,
 } from '@playground/shared';
 import { persistence } from './persistence.ts';
 
@@ -94,12 +94,14 @@ export interface LiveSettings {
   onePerPerson?: boolean;
   votable?: boolean;
   qr?: boolean;
+  /** A form's fields; see cleanFormFields. */
+  fields?: unknown;
 }
 
 export async function createLiveQuestion(docId: string, question: string, settings: LiveSettings = {}): Promise<LiveQuestion> {
   const text = cleanLiveText(question, LIVE_QUESTION_MAX);
   if (!text) throw new LiveError('A live question needs some text.');
-  const kind: LiveKind = settings.kind === 'poll' ? 'poll' : 'text';
+  const kind: LiveKind = settings.kind === 'poll' || settings.kind === 'form' ? settings.kind : 'text';
   let code = newCode();
   while (await held(code)) code = newCode();
   const q: LiveQuestion = {
@@ -113,6 +115,11 @@ export async function createLiveQuestion(docId: string, question: string, settin
     if (typeof options === 'string') throw new LiveError(options);
     q.options = options;
     q.votes = [];
+  } else if (kind === 'form') {
+    const fields = cleanFormFields(settings.fields);
+    if (typeof fields === 'string') throw new LiveError(fields);
+    q.fields = fields;
+    q.submissions = [];
   } else if (settings.votable) {
     q.votable = true;
   }
@@ -130,7 +137,7 @@ async function mustHold(code: string): Promise<Held> {
 
 export async function updateLiveQuestion(
   code: string,
-  patch: { question?: string; open?: boolean; options?: unknown; onePerPerson?: boolean; votable?: boolean; qr?: boolean },
+  patch: { question?: string; open?: boolean; options?: unknown; fields?: unknown; onePerPerson?: boolean; votable?: boolean; qr?: boolean },
 ): Promise<LiveQuestion> {
   const h = await mustHold(code);
   const q = h.q;
@@ -147,8 +154,21 @@ export async function updateLiveQuestion(
     if (typeof options === 'string') throw new LiveError(options);
     q.options = options;
   }
+  if (patch.fields !== undefined) {
+    if (q.kind !== 'form') throw new LiveError('Only a form has fields.');
+    // Renaming or reordering fields under existing responses would file people's answers under questions they did not see.
+    const fields = cleanFormFields(patch.fields);
+    if (typeof fields === 'string') throw new LiveError(fields);
+    // Showing or hiding a field on the board only changes the display, so it is allowed under responses.
+    const shape = (list: typeof fields) => JSON.stringify(list.map(({ onBoard: _o, ...f }) => f));
+    if (q.submissions?.length && shape(fields) !== shape(q.fields ?? [])) {
+      throw new LiveError('This form has responses. Reset them before changing the fields (onBoard alone may change).', 409);
+    }
+    q.fields = fields;
+  }
   if (patch.votable !== undefined) {
     if (q.kind === 'poll' && patch.votable) throw new LiveError('A poll is already a vote; votable is for text questions.');
+    if (q.kind === 'form' && patch.votable) throw new LiveError('votable is for text questions, not forms.');
     q.votable = patch.votable;
   }
   if (patch.onePerPerson !== undefined) q.onePerPerson = patch.onePerPerson;
@@ -158,8 +178,24 @@ export async function updateLiveQuestion(
   return q;
 }
 
-export async function hideLiveAnswer(code: string, answerId: string, hidden = true): Promise<LiveAnswer> {
+/**
+ * Hides or shows an answer. In a form an "answer" is one written field of one
+ * submission, addressed as `<submissionId>:<fieldId>`; ratings and choices
+ * are counts, and there is nothing to hide in a count.
+ */
+export async function hideLiveAnswer(code: string, answerId: string, hidden = true): Promise<{ id: string; hidden: boolean }> {
   const h = await mustHold(code);
+  if (h.q.kind === 'form') {
+    const [submissionId, fieldId] = answerId.split(':');
+    const sub = h.q.submissions?.find((s) => s.id === submissionId);
+    const field = h.q.fields?.find((f) => f.id === fieldId && f.type === 'text');
+    if (!sub || !field || sub.values[field.id] === undefined) throw new LiveError('No such answer.', 404);
+    const set = new Set(sub.hidden ?? []);
+    if (hidden) set.add(field.id); else set.delete(field.id);
+    if (set.size) sub.hidden = [...set]; else delete sub.hidden;
+    await changed(h);
+    return { id: answerId, hidden };
+  }
   const answer = h.q.answers.find((a) => a.id === answerId);
   if (!answer) throw new LiveError('No such answer.', 404);
   answer.hidden = hidden;
@@ -174,6 +210,19 @@ export async function hideLiveAnswer(code: string, answerId: string, hidden = tr
  */
 export async function clearLiveAnswers(code: string): Promise<{ hidden: number } | { votesReset: number }> {
   const h = await mustHold(code);
+  if (h.q.kind === 'form') {
+    // A form's ratings and choices stay: clearing takes the written answers off the slide, as for a question.
+    let n = 0;
+    for (const sub of h.q.submissions ?? []) {
+      for (const f of h.q.fields ?? []) {
+        if (f.type !== 'text' || sub.values[f.id] === undefined || sub.hidden?.includes(f.id)) continue;
+        (sub.hidden ??= []).push(f.id);
+        n++;
+      }
+    }
+    await changed(h);
+    return { hidden: n };
+  }
   if (h.q.kind === 'poll') {
     const votesReset = h.q.votes?.length ?? 0;
     h.q.votes = [];
@@ -184,6 +233,19 @@ export async function clearLiveAnswers(code: string): Promise<{ hidden: number }
   for (const a of h.q.answers) if (!a.hidden) { a.hidden = true; n++; }
   await changed(h);
   return { hidden: n };
+}
+
+/**
+ * Deletes every response to a form, so it can be asked again or its fields
+ * changed. Unlike clearing, this is not undoable.
+ */
+export async function resetLiveForm(code: string): Promise<{ submissionsReset: number }> {
+  const h = await mustHold(code);
+  if (h.q.kind !== 'form') throw new LiveError('Only a form has responses to reset; clear a question, or reset a poll’s votes.');
+  const submissionsReset = h.q.submissions?.length ?? 0;
+  h.q.submissions = [];
+  await changed(h);
+  return { submissionsReset };
 }
 
 // ---------------------------------------------------------------------------
@@ -323,6 +385,7 @@ export async function submitLiveAnswer(
 ): Promise<LiveAnswer> {
   const h = await mustHold(code);
   if (h.q.kind === 'poll') throw new LiveError('This is a poll: pick an option.');
+  if (h.q.kind === 'form') throw new LiveError('This is a form: send it whole to /submit.');
   if (!h.q.open) throw new LiveError('This question is closed.', 409);
   const text = cleanLiveText(input.text, LIVE_TEXT_MAX);
   if (!text) throw new LiveError('Write an answer first.');
@@ -366,6 +429,34 @@ export async function castLiveVote(code: string, option: unknown, device: string
   return { option: index, changed: !!mine };
 }
 
+/**
+ * A filled-in form. Once per person, a second submission from the same phone
+ * replaces the first (editing your answers is fine, answering twice is not);
+ * a written answer the presenter hid stays hidden. Otherwise every one counts.
+ */
+export async function submitLiveForm(code: string, values: unknown, device: string, ip: string): Promise<{ id: string; replaced: boolean }> {
+  const h = await mustHold(code);
+  const q = h.q;
+  if (q.kind !== 'form') throw new LiveError('This question is not a form.');
+  if (!q.open) throw new LiveError('This form is closed.', 409);
+  const clean = cleanFormValues(q.fields ?? [], values);
+  if (typeof clean === 'string') throw new LiveError(clean);
+  const subs = (q.submissions ??= []);
+  const mine = q.onePerPerson ? subs.find((s) => s.device === device) : undefined;
+  if (!mine && subs.length >= MAX_ANSWERS) throw new LiveError('This form has all the responses it can take.', 409);
+  const now = Date.now();
+  limitIp(ip, now);
+  limitDevice(code, device, mine ? 1_000 : CLIENT_GAP_MS, now);
+  if (mine) {
+    mine.values = clean;
+    mine.updatedAt = now;
+  } else {
+    subs.push({ id: randomBytes(6).toString('base64url'), device, createdAt: now, values: clean });
+  }
+  await changed(h);
+  return { id: (mine ?? subs[subs.length - 1]!).id, replaced: !!mine };
+}
+
 /** Likes or unlikes an answer on a votable question: one like per answer per phone. */
 export async function likeLiveAnswer(code: string, answerId: string, liked: boolean, device: string, ip: string): Promise<number> {
   const h = await mustHold(code);
@@ -389,6 +480,15 @@ export async function deviceView(code: string, device: string) {
   const h = await mustHold(code);
   const q = h.q;
   const mine = q.answers.filter((a) => a.device === device);
+  if (q.kind === 'form') {
+    const sub = q.submissions?.findLast((s) => s.device === device);
+    return {
+      open: q.open, kind: 'form' as const, onePerPerson: !!q.onePerPerson, answered: !!sub, vote: null,
+      // What "Edit my answers" fills the form with.
+      values: q.onePerPerson && sub ? sub.values : null,
+      answers: undefined,
+    };
+  }
   return {
     open: q.open,
     kind: q.kind ?? 'text',
@@ -421,6 +521,8 @@ export interface BoardState {
   total: number;
   answers: { id: string; name: string; text: string; likes: number }[];
   options: { label: string; count: number; percent: number }[];
+  /** A form's fields with their results; written answers visible only, `shown` of them in all. */
+  fields: (LiveFieldSummary & { shown?: number })[];
 }
 
 /** More than this is never shown at once; the board says how many there are. */
@@ -428,6 +530,19 @@ const BOARD_MAX = 120;
 
 function boardState(h: Held): BoardState {
   const q = h.q;
+  if (q.kind === 'form') {
+    return {
+      v: h.version, kind: 'form', question: q.question, open: q.open, votable: false, qr: q.qr !== false,
+      total: q.submissions?.length ?? 0,
+      answers: [],
+      options: [],
+      fields: formSummary(q).filter((f) => f.onBoard).map((f) => {
+        if (!f.answers) return f;
+        const visible = f.answers.filter((a) => !a.hidden);
+        return { ...f, shown: visible.length, answers: visible.slice(0, BOARD_MAX) };
+      }),
+    };
+  }
   if (q.kind === 'poll') {
     const counts = pollCounts(q);
     const percents = pollPercentages(counts);
@@ -436,6 +551,7 @@ function boardState(h: Held): BoardState {
       total: counts.reduce((a, b) => a + b, 0),
       answers: [],
       options: (q.options ?? []).map((label, i) => ({ label, count: counts[i]!, percent: percents[i]! })),
+      fields: [],
     };
   }
   const visible = visibleAnswers(q);
@@ -444,6 +560,7 @@ function boardState(h: Held): BoardState {
     total: visible.length,
     answers: visible.slice(0, BOARD_MAX).map(({ id, name, text, likes }) => ({ id, name, text, likes: likes?.length ?? 0 })),
     options: [],
+    fields: [],
   };
 }
 
@@ -463,6 +580,22 @@ export function moderatorView(q: LiveQuestion) {
       ? {
         options: (q.options ?? []).map((label, i) => ({ label, votes: counts[i]!, percent: pollPercentages(counts)[i]! })),
         totalVotes: q.votes?.length ?? 0,
+      }
+      : {}),
+    ...(q.kind === 'form'
+      ? {
+        fields: formSummary(q),
+        totalResponses: q.submissions?.length ?? 0,
+        // Oldest first; a choice reads as its label, so nobody has to look an index up.
+        submissions: (q.submissions ?? []).map((s) => ({
+          id: s.id,
+          createdAt: s.createdAt,
+          ...(s.updatedAt ? { updatedAt: s.updatedAt } : {}),
+          values: Object.fromEntries((q.fields ?? []).filter((f) => s.values[f.id] !== undefined).map((f) => [
+            f.id, f.type === 'choice' ? (f.options?.[Number(s.values[f.id])] ?? s.values[f.id]) : s.values[f.id],
+          ])),
+          hidden: s.hidden ?? [],
+        })),
       }
       : {}),
     answers: q.answers.map((a) => ({
@@ -603,6 +736,28 @@ ${fontHead(l.font)}
   .opt .track { grid-column: 1 / -1; height: .9em; border-radius: 99px; background: var(--card); overflow: hidden; }
   .opt .bar { height: 100%; width: 0; border-radius: 99px; background: var(--accent); transition: width .7s cubic-bezier(.2,.8,.2,1); }
   .opt.lead .bar { box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 40%, transparent); }
+  .form { flex: 1; min-height: 0; display: flex; gap: 2.2em; }
+  .form .sums { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 1.5em; overflow: hidden; }
+  .form.split .sums { flex: 0 0 34%; }
+  .form.only-sums .sums { flex-direction: row; gap: 2.4em; }
+  .form.only-sums .sums > .fld { flex: 1 1 0; }
+  .form .texts { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 1.2em; }
+  .fld { min-width: 0; }
+  .fld .lbl { font-size: .72em; font-weight: 600; line-height: 1.25; opacity: .7; margin-bottom: .55em; text-wrap: balance; }
+  .fld .avg { font-weight: 700; line-height: .95; font-variant-numeric: tabular-nums; letter-spacing: -0.03em; white-space: nowrap; }
+  .fld .avg b { font-size: 3.2em; color: var(--accent); }
+  .fld .avg span { font-size: 1.3em; opacity: .45; margin-left: .15em; }
+  .fld .avg small { display: block; margin-top: .55em; font-size: .55em; font-weight: 600; opacity: .55; letter-spacing: 0; }
+  .dist { display: flex; gap: .25em; align-items: flex-end; height: 2.2em; margin-top: .7em; }
+  .dist i { flex: 1; min-height: 3px; height: 0; border-radius: .18em .18em .06em .06em; background: var(--accent); transition: height .7s cubic-bezier(.2,.8,.2,1); }
+  .dist i.zero { background: var(--card); }
+  .nums { display: flex; gap: .25em; margin-top: .3em; font-size: .5em; font-weight: 600; opacity: .5; font-variant-numeric: tabular-nums; }
+  .nums span { flex: 1; text-align: center; }
+  .ends { display: flex; justify-content: space-between; gap: 1em; margin-top: .25em; font-size: .5em; opacity: .55; font-weight: 500; }
+  .fld .opts { display: flex; flex-direction: column; gap: .7em; font-size: .9em; }
+  .fld .opt .track { height: .55em; }
+  .fld.text { flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; }
+  .fld.text .cards { flex: 1; min-height: 0; display: grid; align-content: start; overflow: hidden; }
   .tools { display: none; position: absolute; right: 0; bottom: 0; gap: 6px; font: 600 12px ui-sans-serif, system-ui, sans-serif; }
   .mod:hover .tools { display: flex; }
   .tools button { border: 0; border-radius: 99px; padding: 7px 12px; cursor: pointer; font: inherit; background: #111114; color: #fff; box-shadow: 0 2px 8px rgba(0,0,0,.2); }
@@ -616,6 +771,7 @@ ${fontHead(l.font)}
   </div>
   <div class="grid" id="grid"></div>
   <div class="poll" id="poll" hidden></div>
+  <div class="form" id="form" hidden></div>
   <div class="tools"><button id="toggle"></button><button id="clear"></button><button id="controls">Open controls</button></div>
 </div>
 <script>
@@ -626,25 +782,117 @@ let state = ${scriptJson(boardState(h))};
 const board = document.getElementById('board');
 const grid = document.getElementById('grid');
 const pollBox = document.getElementById('poll');
+const formBox = document.getElementById('form');
 let canModerate = false;
 
 function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
 
 function render() {
   const isPoll = state.kind === 'poll';
+  const isForm = state.kind === 'form';
   document.getElementById('q').textContent = state.question;
   board.classList.toggle('closed', !state.open);
   // Without the QR block the question and answers take the full width.
   document.getElementById('scan').hidden = qrOff || state.qr === false;
   const meta = document.getElementById('meta');
   meta.textContent = '';
-  const noun = isPoll ? (state.total === 1 ? ' vote' : ' votes') : (state.total === 1 ? ' answer' : ' answers');
+  const one = state.total === 1;
+  const noun = isPoll ? (one ? ' vote' : ' votes') : isForm ? (one ? ' response' : ' responses') : (one ? ' answer' : ' answers');
   meta.append(el('b', null, String(state.total)), noun, state.open ? '' : ' · closed');
-  document.getElementById('toggle').textContent = state.open ? (isPoll ? 'Close poll' : 'Close question') : 'Reopen';
+  document.getElementById('toggle').textContent = state.open ? (isPoll ? 'Close poll' : isForm ? 'Close form' : 'Close question') : 'Reopen';
   document.getElementById('clear').textContent = isPoll ? 'Reset votes' : 'Clear all';
-  grid.hidden = isPoll;
+  grid.hidden = isPoll || isForm;
   pollBox.hidden = !isPoll;
-  if (isPoll) renderPoll(); else renderCards();
+  formBox.hidden = !isForm;
+  if (isPoll) renderPoll(); else if (isForm) renderForm(); else renderCards();
+}
+
+/*
+ * A form: ratings and choices as numbers and bars in one column, written
+ * answers as cards beside them. The skeleton is kept while the fields stay the
+ * same, so bars grow from where they were when a response arrives.
+ */
+function renderForm() {
+  const fields = state.fields || [];
+  const sums = fields.filter((f) => f.type !== 'text');
+  const texts = fields.filter((f) => f.type === 'text');
+  const sig = fields.map((f) => f.id + ':' + f.type + ':' + (f.max || (f.options || []).length)).join('|');
+  if (formBox.dataset.sig !== sig) {
+    formBox.dataset.sig = sig;
+    formBox.textContent = '';
+    formBox.className = 'form' + (sums.length && texts.length ? ' split' : sums.length ? ' only-sums' : ' only-texts');
+    const sumCol = el('div', 'sums');
+    const textCol = el('div', 'texts');
+    sumCol.hidden = !sums.length;
+    textCol.hidden = !texts.length;
+    for (const f of fields) {
+      const box = el('div', 'fld ' + f.type);
+      box.dataset.id = f.id;
+      box.append(el('div', 'lbl'));
+      if (f.type === 'rating') {
+        box.append(el('div', 'avg'));
+        const dist = el('div', 'dist'), nums = el('div', 'nums');
+        for (let i = 1; i <= f.max; i++) { dist.append(el('i')); nums.append(el('span', null, String(i))); }
+        box.append(dist, nums);
+        if (f.lowLabel || f.highLabel) { const ends = el('div', 'ends'); ends.append(el('span', null, f.lowLabel || ''), el('span', null, f.highLabel || '')); box.append(ends); }
+      } else if (f.type === 'choice') {
+        const opts = el('div', 'opts');
+        for (const _ of f.options) {
+          const row = el('div', 'opt');
+          row.append(el('div', 'label'), el('div', 'num'));
+          const track = el('div', 'track'); track.append(el('div', 'bar')); row.append(track);
+          opts.append(row);
+        }
+        box.append(opts);
+      } else {
+        box.append(el('div', 'cards'));
+      }
+      (f.type === 'text' ? textCol : sumCol).append(box);
+    }
+    formBox.append(sumCol, textCol);
+  }
+  const rect = formBox.getBoundingClientRect();
+  const w = rect.width || innerWidth, h = rect.height || innerHeight * 0.65;
+  let size = Math.max(11, Math.min(w / (texts.length && sums.length ? 46 : 52), h / 16));
+  formBox.style.fontSize = Math.round(size) + 'px';
+  for (const f of fields) {
+    const box = formBox.querySelector('[data-id="' + CSS.escape(f.id) + '"]');
+    box.querySelector('.lbl').textContent = f.label;
+    if (f.type === 'rating') {
+      const avg = box.querySelector('.avg');
+      avg.textContent = '';
+      avg.append(el('b', null, f.average == null ? '–' : f.average.toFixed(1)), el('span', null, '/ ' + f.max),
+        el('small', null, f.responses + (f.responses === 1 ? ' rating' : ' ratings')));
+      const top = Math.max(1, ...f.distribution);
+      [...box.querySelectorAll('.dist i')].forEach((bar, i) => {
+        const n = f.distribution[i] || 0;
+        bar.title = n + ' × ' + (i + 1);
+        bar.classList.toggle('zero', !n);
+        requestAnimationFrame(() => { bar.style.height = (n ? Math.max(8, (n / top) * 100) : 0) + '%'; });
+      });
+    } else if (f.type === 'choice') {
+      const best = Math.max(...f.options.map((o) => o.count));
+      [...box.querySelectorAll('.opt')].forEach((row, i) => {
+        const o = f.options[i];
+        row.classList.toggle('lead', o.count > 0 && o.count === best);
+        row.querySelector('.label').textContent = o.label;
+        const num = row.querySelector('.num');
+        num.textContent = String(o.count);
+        num.append(el('small', null, o.percent + '%'));
+        requestAnimationFrame(() => { row.querySelector('.bar').style.width = o.percent + '%'; });
+      });
+    }
+  }
+  // The number column shrinks until it fits rather than being cut off.
+  const sumCol = formBox.querySelector('.sums');
+  for (let i = 0; i < 12 && sums.length && sumCol.scrollHeight > sumCol.clientHeight + 1; i++) {
+    size *= 0.92;
+    formBox.style.fontSize = Math.round(size) + 'px';
+  }
+  for (const f of texts) {
+    const box = formBox.querySelector('[data-id="' + CSS.escape(f.id) + '"] .cards');
+    fillCards(box, f.answers, f.shown, state.open ? 'Answers will appear here.' : 'No answers.', false);
+  }
 }
 
 /*
@@ -681,25 +929,30 @@ function renderPoll() {
 }
 
 function renderCards() {
+  fillCards(grid, state.answers, state.total, state.open ? 'Answers will appear here.' : 'No answers.', state.votable);
+}
+
+/** Answer cards into a grid: as many as fit at a readable size, newest first, then "+ N more". */
+function fillCards(grid, answers, total, emptyText, votable) {
   const box = grid.getBoundingClientRect();
-  const fit = liveBoardFit(state.answers.length, box.width || innerWidth, box.height || innerHeight * 0.7);
+  const fit = liveBoardFit(answers.length, box.width || innerWidth, box.height || innerHeight * 0.7);
   grid.style.fontSize = fit.fontPx + 'px';
   grid.style.gap = Math.round(fit.fontPx * 0.8) + 'px';
   grid.style.gridTemplateColumns = 'repeat(auto-fill, minmax(' + Math.min(fit.minCardPx, box.width || fit.minCardPx) + 'px, 1fr))';
   const seen = new Set([...grid.querySelectorAll('.card')].map((c) => c.dataset.id));
   grid.textContent = '';
-  if (!state.answers.length) {
-    grid.append(el('div', 'empty', state.open ? 'Answers will appear here.' : 'No answers.'));
+  if (!answers.length) {
+    grid.append(el('div', 'empty', emptyText));
     return;
   }
-  const shown = state.answers.slice(0, fit.shown);
+  const shown = answers.slice(0, fit.shown);
   for (const a of shown) {
     const card = el('div', 'card');
     card.dataset.id = a.id;
     if (seen.has(a.id)) card.style.animation = 'none';
     if (a.name) card.append(el('div', 'who', a.name));
     card.append(el('div', 'text', a.text));
-    if (state.votable) card.append(el('div', 'likes', '♥ ' + a.likes));
+    if (votable) card.append(el('div', 'likes', '♥ ' + a.likes));
     const x = el('button', 'x', '×');
     x.title = 'Hide this answer';
     x.onclick = (e) => { e.stopPropagation(); moderate('/answers/' + encodeURIComponent(a.id) + '/hide', { hidden: true }); };
@@ -710,7 +963,7 @@ function renderCards() {
   const limit = grid.getBoundingClientRect().bottom;
   const cards = [...grid.querySelectorAll('.card')];
   while (cards.length > 1 && cards[cards.length - 1].getBoundingClientRect().bottom > limit + 1) cards.pop().remove();
-  let rest = state.total - cards.length;
+  let rest = total - cards.length;
   if (rest > 0) {
     const more = el('div', 'more', '+ ' + rest + ' more');
     grid.append(more);
@@ -732,7 +985,8 @@ document.getElementById('toggle').onclick = () => moderate('', { open: !state.op
 // The board never knows its document; the server resolves it for someone allowed to see it.
 document.getElementById('controls').onclick = () => window.open('/api/live/' + code + '/controls', '_blank');
 document.getElementById('clear').onclick = () => {
-  const ask = state.kind === 'poll' ? 'Reset every vote to zero?' : 'Hide every answer? They stay stored.';
+  const ask = state.kind === 'poll' ? 'Reset every vote to zero?'
+    : state.kind === 'form' ? 'Hide every written answer? They stay stored; ratings and choices stay counted.' : 'Hide every answer? They stay stored.';
   if (confirm(ask)) moderate('/clear');
 };
 
@@ -758,17 +1012,43 @@ setTimeout(() => poll(25000), 1200);
 </body></html>`;
 }
 
+/** A form's fields as phone controls, in order. */
+function formFieldsHtml(q: LiveQuestion): string {
+  return (q.fields ?? []).map((f) => {
+    const head = `<legend>${esc(f.label)} <span class="req">${f.required ? 'required' : 'optional'}</span></legend>`;
+    let control = '';
+    if (f.type === 'rating') {
+      const max = f.max ?? 5;
+      control = `<div class="scale" style="--n:${max}">${Array.from({ length: max }, (_, i) =>
+        `<button type="button" class="pip" data-v="${i + 1}" aria-pressed="false" aria-label="${i + 1} of ${max}">${i + 1}</button>`).join('')}</div>`
+        + (f.lowLabel || f.highLabel ? `<div class="ends"><span>${esc(f.lowLabel ?? '')}</span><span>${esc(f.highLabel ?? '')}</span></div>` : '');
+    } else if (f.type === 'choice') {
+      control = `<div class="fchoices">${(f.options ?? []).map((o, i) =>
+        `<button type="button" class="fchoice" data-v="${i}" aria-pressed="false">${esc(o)}</button>`).join('')}</div>`;
+    } else {
+      control = `<textarea maxlength="${LIVE_TEXT_MAX}" rows="4" placeholder="Type here…" aria-label="${esc(f.label)}"></textarea>`
+        + `<div class="count"><span class="n">0</span> / ${LIVE_TEXT_MAX}</div>`;
+    }
+    return `<fieldset class="field" data-id="${esc(f.id)}" data-type="${f.type}" data-label="${esc(f.label)}"${f.required ? ' data-required="1"' : ''}>${head}${control}</fieldset>`;
+  }).join('\n    ');
+}
+
 export function answerPageHtml(q: LiveQuestion | null, code: string): string {
   const poll = q?.kind === 'poll';
+  const isForm = q?.kind === 'form';
   const body = q
     ? `<main>
-  <p class="eyebrow">${poll ? 'Live poll' : 'Live question'}</p>
+  <p class="eyebrow">${poll ? 'Live poll' : isForm ? 'Live feedback' : 'Live question'}</p>
   <h1>${esc(q.question)}</h1>
   <form id="form" hidden>
     <label>Your answer<textarea id="text" name="text" maxlength="${LIVE_TEXT_MAX}" rows="5" required placeholder="Type here…"></textarea></label>
     <div class="count"><span id="count">0</span> / ${LIVE_TEXT_MAX}</div>
     <label>Team or name <span class="opt">optional</span><input id="name" name="name" maxlength="${LIVE_NAME_MAX}" autocomplete="nickname"></label>
     <button type="submit" id="send">Send answer</button>
+  </form>
+  <form id="fform" class="fform" hidden novalidate>
+    ${isForm ? formFieldsHtml(q) : ''}
+    <button type="submit" id="fsend">Submit</button>
   </form>
   <section id="choices" class="choices" hidden>
     ${(q.options ?? []).map((o, i) => `<button type="button" class="choice" data-i="${i}">${esc(o)}</button>`).join('\n    ')}
@@ -828,6 +1108,24 @@ export function answerPageHtml(q: LiveQuestion | null, code: string): string {
   .heart { flex: none; width: auto; min-width: 64px; min-height: 44px; padding: 0 12px; background: transparent; color: var(--ink);
            box-shadow: inset 0 0 0 1px var(--line); font-size: 15px; font-variant-numeric: tabular-nums; }
   .heart.on { color: var(--like); box-shadow: inset 0 0 0 1px var(--like); }
+  form.fform { display: grid; gap: 14px; background: none; padding: 0; box-shadow: none; border-radius: 0; }
+  .field { min-width: 0; margin: 0; border: 0; padding: 18px; background: var(--plate); border-radius: 22px;
+           box-shadow: 0 1px 2px rgba(17,17,20,.05), 0 8px 24px rgba(17,17,20,.07); }
+  .field legend { float: left; width: 100%; padding: 0; margin: 0 0 14px; font-size: 17px; font-weight: 650; line-height: 1.3; }
+  .field legend + * { clear: both; }
+  .req { font-size: 12px; font-weight: 500; color: var(--mute); margin-left: 4px; }
+  .field.missing { box-shadow: inset 0 0 0 2px #d93a1e, 0 8px 24px rgba(17,17,20,.07); }
+  .scale { display: grid; grid-template-columns: repeat(var(--n), minmax(0, 1fr)); gap: 6px; }
+  .pip { min-height: 52px; padding: 0; border-radius: 14px; background: transparent; color: var(--ink); box-shadow: inset 0 0 0 1px var(--line);
+         font-size: 18px; font-variant-numeric: tabular-nums; }
+  .ends { display: flex; justify-content: space-between; gap: 12px; margin-top: 8px; font-size: 13px; color: var(--mute); }
+  .ends span:last-child { text-align: right; }
+  .fchoices { display: grid; gap: 10px; }
+  .fchoice { min-height: 56px; border-radius: 16px; padding: 0 18px; text-align: left; background: transparent; color: var(--ink);
+             box-shadow: inset 0 0 0 1px var(--line); font-size: 18px; }
+  .pip.on, .fchoice.on { background: var(--cta); color: var(--cta-ink); box-shadow: none; }
+  .field textarea { margin-top: 0; }
+  .field .count { margin: 6px 0 0; }
 </style></head>
 <body>${body}
 ${q ? `<script>
@@ -854,6 +1152,19 @@ async function call(path, body) {
 
 function show() {
   if (!me) return;
+  if (me.kind === 'form') {
+    const done = me.answered && !changing;
+    $('closed').hidden = me.open;
+    form.hidden = true; $('choices').hidden = true; $('vote').hidden = true;
+    fform.hidden = !me.open || done;
+    thanks.hidden = !done;
+    if (done) {
+      $('thanks-text').textContent = 'Thanks — you’ve answered.';
+      again.hidden = !me.open;
+      again.textContent = me.onePerPerson ? 'Edit my answers' : 'Answer again';
+    }
+    return;
+  }
   const poll = me.kind === 'poll';
   const done = me.answered && me.onePerPerson && !changing;
   $('closed').hidden = me.open;
@@ -924,7 +1235,63 @@ for (const b of document.querySelectorAll('.choice')) {
     catch (e) { err.textContent = e.message; }
   });
 }
-again.addEventListener('click', () => { changing = true; err.textContent = ''; show(); if (!form.hidden) text.focus(); });
+again.addEventListener('click', () => {
+  changing = true; err.textContent = '';
+  if (me && me.kind === 'form') prefill(me.onePerPerson ? me.values : null);
+  show();
+  if (!form.hidden) text.focus();
+});
+
+// A form: one value per field, sent whole.
+const fform = $('fform');
+let fvals = {};
+const fields = [...document.querySelectorAll('.field')];
+function paint() {
+  for (const fs of fields) {
+    for (const b of fs.querySelectorAll('[data-v]')) {
+      const on = fvals[fs.dataset.id] === Number(b.dataset.v);
+      b.classList.toggle('on', on);
+      b.setAttribute('aria-pressed', String(on));
+    }
+  }
+}
+function prefill(values) {
+  fvals = Object.assign({}, values || {});
+  for (const fs of fields) {
+    const ta = fs.querySelector('textarea');
+    if (ta) { ta.value = fvals[fs.dataset.id] || ''; fs.querySelector('.n').textContent = ta.value.length; }
+    fs.classList.remove('missing');
+  }
+  paint();
+}
+for (const fs of fields) {
+  const id = fs.dataset.id;
+  for (const b of fs.querySelectorAll('[data-v]')) {
+    b.addEventListener('click', () => {
+      const v = Number(b.dataset.v);
+      if (fvals[id] === v) delete fvals[id]; else fvals[id] = v;
+      fs.classList.remove('missing');
+      paint();
+    });
+  }
+  const ta = fs.querySelector('textarea');
+  if (ta) ta.addEventListener('input', () => { fvals[id] = ta.value; fs.querySelector('.n').textContent = ta.value.length; fs.classList.remove('missing'); });
+}
+fform.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  err.textContent = '';
+  const missing = fields.filter((fs) => fs.dataset.required && (fvals[fs.dataset.id] === undefined || String(fvals[fs.dataset.id]).trim() === ''));
+  for (const fs of fields) fs.classList.toggle('missing', missing.includes(fs));
+  if (missing.length) {
+    err.textContent = '“' + missing[0].dataset.label + '” needs an answer.';
+    missing[0].scrollIntoView({ behavior: 'smooth', block: 'center' });
+    return;
+  }
+  $('fsend').disabled = true;
+  try { await call('/submit', { values: fvals }); changing = false; await refresh(); window.scrollTo(0, 0); }
+  catch (e) { err.textContent = e.message; }
+  finally { $('fsend').disabled = false; }
+});
 refresh();
 // The list of answers to vote on grows while the room writes.
 setInterval(() => { if (me && me.answers && me.answered && !document.hidden) refresh(); }, 5000);
@@ -951,11 +1318,13 @@ export async function liveQuestionsInOrder(doc: CanvasDocument, publicUrl: strin
   return all
     .sort((a, b) => rank(a.code) - rank(b.code) || a.createdAt - b.createdAt)
     .map((q) => {
-      const { answers: _answers, ...view } = moderatorView(q);
+      const { answers: _answers, submissions: _submissions, fields, ...view } = moderatorView(q);
       return {
         ...view,
-        answers: q.answers.length,
-        shown: visibleAnswers(q).length,
+        // The list carries a form's results but not what each person wrote; the detail has those.
+        ...(fields ? { fields: fields.map(({ answers: _a, ...f }) => f) } : {}),
+        answers: q.kind === 'form' ? (q.submissions?.length ?? 0) : q.answers.length,
+        shown: q.kind === 'form' ? (q.submissions?.length ?? 0) : visibleAnswers(q).length,
         url: `${publicUrl}/q/${q.code}`,
         shortUrl: shortAnswerUrl(publicUrl, q.code),
         placement: placed.get(q.code) ?? null,
@@ -971,6 +1340,22 @@ export function answersCsv(q: LiveQuestion): string {
     const safe = /^[=+\-@]/.test(s) ? `'${s}` : s;
     return /[",\n]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
   };
+  if (q.kind === 'form') {
+    const fields = q.fields ?? [];
+    const rows: unknown[][] = [
+      ['time', 'edited', ...fields.map((f) => f.label), 'hidden'],
+      ...(q.submissions ?? []).map((s) => [
+        new Date(s.createdAt).toISOString(),
+        s.updatedAt ? new Date(s.updatedAt).toISOString() : '',
+        ...fields.map((f) => {
+          const v = s.values[f.id];
+          return v === undefined ? '' : f.type === 'choice' ? (f.options?.[Number(v)] ?? '') : v;
+        }),
+        fields.filter((f) => s.hidden?.includes(f.id)).map((f) => f.label).join('; '),
+      ]),
+    ];
+    return rows.map((r) => r.map(cell).join(',')).join('\r\n') + '\r\n';
+  }
   const rows: unknown[][] = q.kind === 'poll'
     ? [['option', 'votes', 'percent'], ...(q.options ?? []).map((o, i) => [o, pollCounts(q)[i], pollPercentages(pollCounts(q))[i]])]
     : [['time', 'name', 'answer', 'hidden', ...(q.votable ? ['likes'] : [])],
@@ -1030,6 +1415,22 @@ export function controlPageHtml(docId: string): string {
   .bar i { display: block; height: 100%; background: var(--accent); border-radius: 99px; transition: width .5s; }
   .empty, .note { color: var(--mute); }
   .where { font-size: 12px; color: var(--mute); }
+  .fsum { margin: 4px 0 18px; }
+  .fsum .l { font-weight: 650; margin-bottom: 6px; }
+  .fsum .big { font-size: 28px; font-weight: 750; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
+  .fsum .big small { font-size: 14px; font-weight: 600; color: var(--mute); margin-left: 6px; letter-spacing: 0; }
+  .hist { display: flex; gap: 4px; align-items: flex-end; height: 40px; margin-top: 6px; }
+  .hist i { flex: 1; min-height: 2px; border-radius: 4px 4px 1px 1px; background: var(--accent); }
+  .hist-n { display: flex; gap: 4px; font-size: 11px; color: var(--mute); font-variant-numeric: tabular-nums; }
+  .hist-n span { flex: 1; text-align: center; }
+  h3 { font-size: 13px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--mute); margin: 22px 0 4px; }
+  .sub { padding: 12px 0; border-top: 1px solid var(--line); }
+  .sub .kv { margin: 6px 0 0; }
+  .sub .kv .k { display: block; font-size: 12px; color: var(--mute); }
+  .sub .kv .v { display: flex; gap: 10px; align-items: flex-start; }
+  .sub .kv .v span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+  .sub .kv.hidden .v span { opacity: .45; text-decoration: line-through; }
+  .sub button { min-height: 32px; font-size: 13px; }
 </style></head>
 <body><main>
   <section id="list">
@@ -1064,7 +1465,7 @@ async function api(path, method, body) {
 function controls(q, after) {
   const box = el('div');
   const row = el('div', 'row');
-  row.append(el('span', 'chip', q.kind === 'poll' ? 'Poll' : q.votable ? 'Votable' : 'Answers'));
+  row.append(el('span', 'chip', q.kind === 'poll' ? 'Poll' : q.kind === 'form' ? 'Form' : q.votable ? 'Votable' : 'Answers'));
   const sw = el('label', 'switch');
   const input = document.createElement('input');
   input.type = 'checkbox'; input.checked = q.open;
@@ -1073,22 +1474,35 @@ function controls(q, after) {
   sw.append(input, q.open ? 'Open' : 'Closed');
   sw.onclick = (e) => e.stopPropagation();
   row.append(sw);
-  const n = q.kind === 'poll' ? q.totalVotes : (typeof q.answers === 'number' ? q.shown : q.answers.filter((a) => !a.hidden).length);
-  row.append(el('span', 'count', n + (q.kind === 'poll' ? (n === 1 ? ' vote' : ' votes') : (n === 1 ? ' answer' : ' answers'))));
+  const n = q.kind === 'poll' ? q.totalVotes : q.kind === 'form' ? q.totalResponses : (typeof q.answers === 'number' ? q.shown : q.answers.filter((a) => !a.hidden).length);
+  const noun = q.kind === 'poll' ? ['vote', 'votes'] : q.kind === 'form' ? ['response', 'responses'] : ['answer', 'answers'];
+  row.append(el('span', 'count', n + ' ' + noun[n === 1 ? 0 : 1]));
   box.append(row);
   box.append(el('div', 'url', q.shortUrl || ''));
   const actions = el('div', 'actions');
   const clear = el('button', 'danger', q.kind === 'poll' ? 'Reset votes' : 'Clear all');
   clear.onclick = async (e) => {
     e.stopPropagation();
-    const ask = q.kind === 'poll' ? 'Reset every vote on “' + q.question + '” to zero?' : 'Hide every answer to “' + q.question + '”? They stay stored.';
+    const ask = q.kind === 'poll' ? 'Reset every vote on “' + q.question + '” to zero?'
+      : q.kind === 'form' ? 'Hide every written answer to “' + q.question + '”? They stay stored; ratings and choices stay counted.'
+      : 'Hide every answer to “' + q.question + '”? They stay stored.';
     if (!confirm(ask)) return;
     try { await api('/live/' + q.code + '/clear', 'POST'); after(); } catch (err) { alert(err.message); }
   };
   const csv = el('a', 'btn', 'Download CSV');
   csv.href = '/api/live/' + q.code + '/csv';
   csv.onclick = (e) => e.stopPropagation();
-  actions.append(clear, csv);
+  actions.append(clear);
+  if (q.kind === 'form') {
+    const reset = el('button', 'danger', 'Reset responses');
+    reset.onclick = async (e) => {
+      e.stopPropagation();
+      if (!confirm('Delete every response to “' + q.question + '”? This cannot be undone.')) return;
+      try { await api('/live/' + q.code + '/reset', 'POST'); after(); } catch (err) { alert(err.message); }
+    };
+    actions.append(reset);
+  }
+  actions.append(csv);
   box.append(actions);
   return box;
 }
@@ -1114,7 +1528,7 @@ async function loadDetail(code) {
   const q = await api('/live/' + code);
   q.shortUrl = (questions.find((x) => x.code === code) || {}).shortUrl || location.host + '/q/' + code;
   current = q;
-  $('d-kind').textContent = q.kind === 'poll' ? 'Poll' : 'Question';
+  $('d-kind').textContent = q.kind === 'poll' ? 'Poll' : q.kind === 'form' ? 'Form' : 'Question';
   const head = $('d-head');
   head.textContent = '';
   const card = el('div', 'card');
@@ -1122,6 +1536,7 @@ async function loadDetail(code) {
   head.append(card);
   const body = $('d-body');
   body.textContent = '';
+  if (q.kind === 'form') { renderFormDetail(q, code, body); return; }
   if (q.kind === 'poll') {
     for (const o of q.options) {
       const row = el('div', 'opt');
@@ -1148,6 +1563,64 @@ async function loadDetail(code) {
       catch (e) { alert(e.message); b.disabled = false; }
     };
     row.append(t, b);
+    body.append(row);
+  }
+}
+
+/** A form: each rating and choice summed up, then every response, newest first, with Hide/Show on written answers. */
+function renderFormDetail(q, code, body) {
+  for (const f of q.fields) {
+    if (f.type === 'text') continue;
+    const box = el('div', 'fsum');
+    box.append(el('div', 'l', f.label));
+    if (f.type === 'rating') {
+      const big = el('div', 'big', f.average == null ? '–' : f.average.toFixed(1));
+      big.append(el('small', null, '/ ' + f.max + ' · ' + f.responses + (f.responses === 1 ? ' rating' : ' ratings')));
+      const hist = el('div', 'hist'), nums = el('div', 'hist-n');
+      const top = Math.max(1, ...f.distribution);
+      f.distribution.forEach((c, i) => {
+        const bar = el('i'); bar.style.height = (c / top) * 100 + '%'; bar.title = c + ' × ' + (i + 1); hist.append(bar);
+        nums.append(el('span', null, (i + 1) + (c ? ' · ' + c : '')));
+      });
+      box.append(big, hist, nums);
+    } else {
+      for (const o of f.options) {
+        const row = el('div', 'opt');
+        const l = el('div', 'l');
+        l.append(el('span', null, o.label), el('span', null, o.count + ' · ' + o.percent + '%'));
+        const bar = el('div', 'bar'); const fill = el('i'); fill.style.width = o.percent + '%'; bar.append(fill);
+        row.append(l, bar);
+        box.append(row);
+      }
+    }
+    body.append(box);
+  }
+  body.append(el('h3', null, 'Responses'));
+  const subs = q.submissions.slice().reverse();
+  if (!subs.length) { body.append(el('p', 'empty', 'No responses yet.')); return; }
+  for (const s of subs) {
+    const row = el('div', 'sub');
+    const when = (t) => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    row.append(el('div', 'where', when(s.createdAt) + (s.updatedAt ? ' · edited ' + when(s.updatedAt) : '')));
+    for (const f of q.fields) {
+      if (s.values[f.id] === undefined) continue;
+      const hidden = s.hidden.includes(f.id);
+      const kv = el('div', 'kv' + (hidden ? ' hidden' : ''));
+      kv.append(el('span', 'k', f.label));
+      const v = el('div', 'v');
+      v.append(el('span', null, f.type === 'rating' ? s.values[f.id] + ' / ' + f.max : String(s.values[f.id])));
+      if (f.type === 'text') {
+        const b = el('button', hidden ? 'primary' : '', hidden ? 'Show' : 'Hide');
+        b.onclick = async () => {
+          b.disabled = true;
+          try { await api('/live/' + code + '/answers/' + encodeURIComponent(s.id + ':' + f.id) + '/hide', 'POST', { hidden: !hidden }); await loadDetail(code); }
+          catch (e) { alert(e.message); b.disabled = false; }
+        };
+        v.append(b);
+      }
+      kv.append(v);
+      row.append(kv);
+    }
     body.append(row);
   }
 }

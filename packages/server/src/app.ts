@@ -65,7 +65,7 @@ import { APP_CSP, clientIp, rateLimit, securityHeaders } from './security.ts';
 import { bodyLimit } from 'hono/body-limit';
 import {
   LiveError, answerPageHtml, boardHtml, castLiveVote, clearLiveAnswers, createLiveQuestion, deviceFor, deviceView,
-  getLiveQuestion, hideLiveAnswer, likeLiveAnswer, moderatorView, liveQuestionsInOrder, answersCsv, controlPageHtml, submitLiveAnswer, updateLiveQuestion, waitForBoardState,
+  getLiveQuestion, hideLiveAnswer, likeLiveAnswer, resetLiveForm, submitLiveForm, moderatorView, liveQuestionsInOrder, answersCsv, controlPageHtml, submitLiveAnswer, updateLiveQuestion, waitForBoardState,
 } from './live.ts';
 
 const PORT = Number(process.env.PORT ?? 4000);
@@ -1368,11 +1368,11 @@ function liveFailure(c: import('hono').Context, err: unknown) {
 
 api.post('/documents/:id/live', async (c) => {
   const body = await c.req.json().catch(() => ({})) as {
-    question?: string; kind?: 'text' | 'poll'; options?: unknown; onePerPerson?: boolean; votable?: boolean; qr?: boolean;
+    question?: string; kind?: 'text' | 'poll' | 'form'; options?: unknown; fields?: unknown; onePerPerson?: boolean; votable?: boolean; qr?: boolean;
   };
   try {
     const q = await createLiveQuestion(c.req.param('id'), body.question ?? '', {
-      kind: body.kind, options: body.options,
+      kind: body.kind, options: body.options, fields: body.fields,
       onePerPerson: typeof body.onePerPerson === 'boolean' ? body.onePerPerson : undefined,
       votable: body.votable === true,
       qr: body.qr === false ? false : undefined,
@@ -1421,7 +1421,7 @@ api.patch('/live/:code', async (c) => {
     return c.json(moderatorView(await updateLiveQuestion(c.req.param('code'), {
       question: typeof body.question === 'string' ? body.question : undefined,
       open: flag(body.open), onePerPerson: flag(body.onePerPerson), votable: flag(body.votable), qr: flag(body.qr),
-      options: body.options,
+      options: body.options, fields: body.fields,
     })));
   } catch (err) { return liveFailure(c, err); }
 });
@@ -1431,6 +1431,13 @@ api.post('/live/:code/answers/:answerId/hide', async (c) => {
   try {
     const answer = await hideLiveAnswer(c.req.param('code'), c.req.param('answerId'), body.hidden !== false);
     return c.json({ id: answer.id, hidden: answer.hidden });
+  } catch (err) { return liveFailure(c, err); }
+});
+
+/** Deletes a form's responses; not undoable, unlike clearing. */
+api.post('/live/:code/reset', async (c) => {
+  try {
+    return c.json(await resetLiveForm(c.req.param('code')));
   } catch (err) { return liveFailure(c, err); }
 });
 
@@ -1510,6 +1517,16 @@ app.post('/q/:code/answers', async (c) => {
   try {
     const answer = await submitLiveAnswer(c.req.param('code').toLowerCase(), body, device.id, clientIp(c) ?? 'unknown');
     return c.json({ ok: true, id: answer.id, device: device.token }, 201);
+  } catch (err) { return liveFailure(c, err); }
+});
+
+/** A whole form at once: `{ values: { <fieldId>: score | option index or label | text } }`. */
+app.post('/q/:code/submit', async (c) => {
+  const body = await c.req.json().catch(() => ({})) as Record<string, unknown>;
+  const device = liveDevice(c, body);
+  try {
+    const sent = await submitLiveForm(c.req.param('code').toLowerCase(), body.values, device.id, clientIp(c) ?? 'unknown');
+    return c.json({ ok: true, ...sent, device: device.token }, sent.replaced ? 200 : 201);
   } catch (err) { return liveFailure(c, err); }
 });
 

@@ -809,7 +809,7 @@ answer on their phones without an account. The answers appear on the slide as ca
 within about a second, both on the canvas and in presentation mode. When there are more answers
 than fit at a readable size, the slide shows the newest ones and says how many more there are.
 
-There are three kinds of question:
+There are four kinds of question:
 
 - **Written answers** (the default): a text box on the phone, and cards on the slide.
 - **Poll** (`kind: "poll"` with 2–6 options, such as *Vitamin* / *Painkiller*): one big button per
@@ -818,6 +818,17 @@ There are three kinds of question:
 - **Votable** (`votable: true` on a written question): after answering, a phone lists the other
   answers with a ♥ button. Each phone can like an answer once, and not its own. The slide ranks
   cards by likes and shows each card's count.
+- **Form** (`kind: "form"` with 1–8 `fields`): session feedback behind one QR code. Each field is
+  `{ id, type: "rating" | "choice" | "text", label, options? (choice, 2–6), max? (rating, 2–10, default 5),
+  lowLabel?, highLabel?, required?, onBoard? }`. The phone shows every field in order (a row of numbers,
+  big buttons, or a 280-character text box) and one Submit; required fields are checked on the phone and
+  the server. Phones post `{ values: { <fieldId>: score | option index or label | text } }` to
+  `/q/<code>/submit`. Once per person, a resubmission replaces the earlier one ("Edit my answers"). The
+  slide shows the response count, each rating's average ("4.3 / 5") with its distribution, each choice
+  as bars, and written answers as cards. `onBoard: false` collects a field without showing it on the
+  slide. *Clear all* hides the written answers (ratings and choices stay counted); *Reset responses*
+  deletes them all and is the only way to change a form's fields (other than `onBoard`) once it has
+  responses. The CSV has one row per response and a column per field. Forms are made by agents only.
 
 **Once per person** (`onePerPerson`, on by default for new questions) allows one answer per phone.
 In a poll, a phone gets one vote and can change it ("Change my vote"); the vote is replaced, not

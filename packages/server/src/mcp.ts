@@ -44,7 +44,7 @@ import {
 } from './store.ts';
 import { persistence } from './persistence.ts';
 import {
-  LiveError, clearLiveAnswers, createLiveQuestion, getLiveQuestion, hideLiveAnswer, liveQuestionsFor, liveQuestionsInOrder, moderatorView,
+  LiveError, clearLiveAnswers, createLiveQuestion, resetLiveForm, getLiveQuestion, hideLiveAnswer, liveQuestionsFor, liveQuestionsInOrder, moderatorView,
   updateLiveQuestion,
 } from './live.ts';
 import { pageArtboard, slugify } from './publish.ts';
@@ -2226,6 +2226,18 @@ function registerWriteTools(server: McpServer, ctx: McpContext): void {
     try { return await fn(); } catch (err) { if (err instanceof LiveError) return fail(err.message); throw err; }
   });
 
+  const liveField = z.object({
+    id: z.string().regex(/^[A-Za-z0-9_-]{1,32}$/).optional().describe('Stable key for the field; defaults to f1, f2…'),
+    type: z.enum(['rating', 'choice', 'text']),
+    label: z.string().min(1).max(120),
+    options: z.array(z.string().min(1).max(60)).min(2).max(6).optional().describe('choice only: 2–6 options.'),
+    max: z.number().int().min(2).max(10).optional().describe('rating only: the scale runs 1..max (default 5).'),
+    lowLabel: z.string().max(60).optional().describe('rating only: words under the lowest score.'),
+    highLabel: z.string().max(60).optional().describe('rating only: words under the highest score.'),
+    required: z.boolean().optional(),
+    onBoard: z.boolean().optional().describe('false collects the field but keeps it off the slide (default true).'),
+  });
+
   server.registerTool('add_live_question', {
     title: 'Put a live audience question on an artboard',
     description:
@@ -2235,7 +2247,10 @@ function registerWriteTools(server: McpServer, ctx: McpContext): void {
       + 'list_live_answers reads them afterwards. Defaults to filling the artboard inside a margin. '
       + 'kind "poll" with 2–6 options shows a bar per option with counts and percentages instead of cards. '
       + 'onePerPerson (default true) allows one answer per phone — for a poll, one vote that can be changed. '
-      + 'votable: true lets the room like text answers, and the board ranks them by likes.',
+      + 'votable: true lets the room like text answers, and the board ranks them by likes. '
+      + 'kind "form" with 1–8 fields (rating | choice | text) collects feedback with one QR code: the phone shows every field and one Submit; '
+      + 'the board shows the response count, each rating’s average and distribution, each choice as bars, and written answers as cards. '
+      + 'With onePerPerson a phone’s resubmission replaces its earlier one.',
     inputSchema: {
       question: z.string().min(1).max(200),
       artboardId: z.string().describe('The slide (artboard) to put it on.'),
@@ -2247,20 +2262,23 @@ function registerWriteTools(server: McpServer, ctx: McpContext): void {
       ink: z.string().max(40).optional().describe('Text colour, e.g. #111 or white on a dark slide.'),
       accent: z.string().max(40).optional().describe('Colour for names and the answer count.'),
       card: z.string().max(40).optional().describe('Card background. Defaults to a faint tint of the text colour.'),
-      kind: z.enum(['text', 'poll']).optional().default('text'),
+      kind: z.enum(['text', 'poll', 'form']).optional().default('text'),
+      fields: z.array(liveField).min(1).max(8).optional().describe('kind "form": the fields in order. Ids unique; choice needs 2–6 options.'),
       options: z.array(z.string().min(1).max(60)).min(2).max(6).optional().describe('A poll’s choices, e.g. ["Vitamin", "Painkiller"].'),
       onePerPerson: z.boolean().optional().default(true).describe('One answer (or one changeable vote) per phone.'),
       votable: z.boolean().optional().describe('Text questions: people can like answers; the board ranks by likes.'),
       qr: z.boolean().optional().default(true).describe('false hides the QR code and short URL, so the question and answers use the full width (for decks that show the QR on its own slide).'),
     },
     annotations: { destructiveHint: false },
-  }, async ({ question, artboardId, x, y, width, height, font, ink, accent, card, kind, options, onePerPerson, votable, qr }) => liveGuard(async () => {
+  }, async ({ question, artboardId, x, y, width, height, font, ink, accent, card, kind, options, fields, onePerPerson, votable, qr }) => liveGuard(async () => {
     const doc = requireDoc(ctx);
     const artboard = node(doc, artboardId);
     if (artboard.type !== 'artboard') return fail(`${artboardId} is a ${artboard.type}; a live question goes on an artboard.`);
     if (kind === 'poll' && !options) return fail('A poll needs options: 2 to 6 of them.');
     if (kind !== 'poll' && options) return fail('options are for kind "poll".');
-    const q = await createLiveQuestion(doc.id, question, { kind, options, onePerPerson, votable, qr });
+    if (kind === 'form' && !fields) return fail('A form needs fields: 1 to 8 of them.');
+    if (kind !== 'form' && fields) return fail('fields are for kind "form".');
+    const q = await createLiveQuestion(doc.id, question, { kind, options, fields, onePerPerson, votable, qr });
     const embed = makeLiveQuestionNode({
       baseUrl: ctx.baseUrl, code: q.code, question: q.question, artboard, doc,
       x, y, width, height, look: { font, ink, accent, card },
@@ -2289,7 +2307,9 @@ function registerWriteTools(server: McpServer, ctx: McpContext): void {
     title: 'Read the answers to live questions',
     description:
       'Every live question in this document with its answers, oldest first — hidden ones included and marked; '
-      + 'for a poll, each option’s votes and percentage; on a votable question, each answer’s likes. Pass code for one question.',
+      + 'for a poll, each option’s votes and percentage; on a votable question, each answer’s likes. '
+      + 'For a form: fields (per field: rating average and distribution, choice counts and percentages, text answers with ids for hide_live_answer) '
+      + 'and submissions (raw, oldest first, choices as labels). Pass code for one question.',
     inputSchema: {
       code: z.string().optional().describe('One question’s code (the part after /q/). Omit for all of them.'),
       includeHidden: z.boolean().optional().default(true),
@@ -2304,8 +2324,11 @@ function registerWriteTools(server: McpServer, ctx: McpContext): void {
         ...view,
         createdAt: undefined,
         answerUrl: `${ctx.baseUrl}/q/${q.code}`,
-        shown: visibleAnswers(q).length,
-        total: q.answers.length,
+        shown: q.kind === 'form' ? (q.submissions?.length ?? 0) : visibleAnswers(q).length,
+        total: q.kind === 'form' ? (q.submissions?.length ?? 0) : q.answers.length,
+        ...(view.fields && !includeHidden
+          ? { fields: view.fields.map((f) => (f.answers ? { ...f, answers: f.answers.filter((a) => !a.hidden) } : f)) }
+          : {}),
         answers: view.answers.filter((a) => includeHidden || !a.hidden)
           .map(({ createdAt, ...a }) => ({ ...a, at: new Date(createdAt).toISOString() })),
       };
@@ -2314,7 +2337,8 @@ function registerWriteTools(server: McpServer, ctx: McpContext): void {
 
   server.registerTool('hide_live_answer', {
     title: 'Hide (or unhide) a live answer',
-    description: 'Takes an answer off the slide. It stays stored and list_live_answers still returns it. hidden: false puts it back.',
+    description: 'Takes an answer off the slide. It stays stored and list_live_answers still returns it. hidden: false puts it back. '
+      + 'In a form, answerId is a written answer’s id from list_live_answers: "<submissionId>:<fieldId>".',
     inputSchema: {
       code: z.string(),
       answerId: z.string(),
@@ -2332,7 +2356,9 @@ function registerWriteTools(server: McpServer, ctx: McpContext): void {
       'open: false stops new answers (the slide says closed); open: true reopens. question rewords it. '
       + 'clear: true hides every text answer on the slide (they stay stored) or resets a poll’s votes to zero. '
       + 'options replaces a poll’s choices — only while it has no votes. onePerPerson and votable switch those settings. '
-      + 'qr: false hides the QR code and short URL on the board; true shows them again.',
+      + 'qr: false hides the QR code and short URL on the board; true shows them again. '
+      + 'For a form, clear: true hides every written answer (ratings and choices stay); resetResponses: true deletes every response; '
+      + 'fields replaces the fields — only while it has no responses, except that changing just onBoard is always allowed.',
     inputSchema: {
       code: z.string(),
       open: z.boolean().optional(),
@@ -2342,14 +2368,20 @@ function registerWriteTools(server: McpServer, ctx: McpContext): void {
       onePerPerson: z.boolean().optional(),
       votable: z.boolean().optional(),
       qr: z.boolean().optional(),
+      fields: z.array(liveField).min(1).max(8).optional(),
+      resetResponses: z.boolean().optional().describe('Form only: delete every response. Not undoable.'),
     },
-  }, async ({ code, open, question, clear, options, onePerPerson, votable, qr }) => liveGuard(async () => {
+  }, async ({ code, open, question, clear, options, fields, resetResponses, onePerPerson, votable, qr }) => liveGuard(async () => {
     const q = await ownLiveQuestion(code);
+    const reset = resetResponses ? await resetLiveForm(q.code) : null;
     // Clearing first lets one call reset a poll and then relabel it.
     const cleared = clear ? await clearLiveAnswers(q.code) : null;
-    const updated = await updateLiveQuestion(q.code, { open, question, options, onePerPerson, votable, qr });
+    const updated = await updateLiveQuestion(q.code, { open, question, options, fields, onePerPerson, votable, qr });
     const view = moderatorView(updated);
-    return json({ ...view, answers: undefined, answerCount: updated.answers.length, cleared });
+    return json({
+      ...view, answers: undefined, submissions: undefined,
+      answerCount: updated.kind === 'form' ? (updated.submissions?.length ?? 0) : updated.answers.length, cleared, ...(reset ? { reset } : {}),
+    });
   }));
 
   server.registerTool('write_html', {

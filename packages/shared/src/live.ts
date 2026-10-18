@@ -35,7 +35,42 @@ export interface LiveVote {
   at: number;
 }
 
-export type LiveKind = 'text' | 'poll';
+export type LiveKind = 'text' | 'poll' | 'form';
+
+export type LiveFieldType = 'rating' | 'choice' | 'text';
+
+/** One question inside a form: a rating scale, a pick-one choice, or a short written answer. */
+export interface LiveFormField {
+  /** Stable within the form; values and the CSV are keyed by it. */
+  id: string;
+  type: LiveFieldType;
+  label: string;
+  /** A choice field's options, 2–6. */
+  options?: string[];
+  /** A rating's top score; the scale runs 1..max. Default 5. */
+  max?: number;
+  /** Words under the two ends of a rating scale, e.g. "Not useful" / "Very useful". */
+  lowLabel?: string;
+  highLabel?: string;
+  required?: boolean;
+  /** false keeps the field off the board while it is still collected. Default true. */
+  onBoard?: boolean;
+}
+
+/**
+ * One phone's filled-in form. A rating is its score, a choice the option's
+ * index, text the cleaned answer. A field left blank is absent.
+ */
+export interface LiveSubmission {
+  id: string;
+  device: string;
+  createdAt: number;
+  /** Set when the phone edited its answers (once per person replaces, not adds). */
+  updatedAt?: number;
+  values: Record<string, number | string>;
+  /** Text fields the presenter took off the board. Their text stays stored. */
+  hidden?: string[];
+}
 
 export interface LiveQuestion {
   /** The public code: `/q/<code>` answers it. */
@@ -61,6 +96,10 @@ export interface LiveQuestion {
   votable?: boolean;
   /** false hides the QR code and short URL on the board, for a deck that shows them on a slide of their own. */
   qr?: boolean;
+  /** A form's fields, in the order the phone shows them. */
+  fields?: LiveFormField[];
+  /** A form's responses, oldest first. */
+  submissions?: LiveSubmission[];
 }
 
 export const LIVE_TEXT_MAX = 280;
@@ -83,6 +122,152 @@ export function cleanPollOptions(raw: unknown): string[] | string {
   const seen = new Set(options.map((o) => o.toLowerCase()));
   if (seen.size !== options.length) return 'Two options say the same thing.';
   return options;
+}
+
+export const LIVE_FIELDS_MIN = 1;
+export const LIVE_FIELDS_MAX = 8;
+export const LIVE_FIELD_LABEL_MAX = 120;
+export const LIVE_RATING_MAX = 10;
+const FIELD_ID = /^[A-Za-z0-9_-]{1,32}$/;
+
+/**
+ * A form's fields, cleaned, or a reason they cannot be used. Ids are kept as
+ * given (they key the values and the CSV); a field without one gets `f<n>`.
+ */
+export function cleanFormFields(raw: unknown): LiveFormField[] | string {
+  if (!Array.isArray(raw)) return 'A form needs a list of fields.';
+  if (raw.length < LIVE_FIELDS_MIN || raw.length > LIVE_FIELDS_MAX) {
+    return `A form needs ${LIVE_FIELDS_MIN} to ${LIVE_FIELDS_MAX} fields; got ${raw.length}.`;
+  }
+  const out: LiveFormField[] = [];
+  const ids = new Set<string>();
+  for (const [i, f] of raw.entries()) {
+    if (!f || typeof f !== 'object') return `Field ${i + 1} is not an object.`;
+    const r = f as Record<string, unknown>;
+    const id = r.id === undefined || r.id === '' ? `f${i + 1}` : r.id;
+    if (typeof id !== 'string' || !FIELD_ID.test(id)) return `Field ${i + 1}: id must be 1–32 letters, digits, _ or -.`;
+    if (ids.has(id)) return `Two fields have the id "${id}".`;
+    ids.add(id);
+    const type = r.type;
+    if (type !== 'rating' && type !== 'choice' && type !== 'text') return `Field "${id}": type must be rating, choice or text.`;
+    const label = cleanLiveText(r.label, LIVE_FIELD_LABEL_MAX);
+    if (!label) return `Field "${id}" needs a label.`;
+    const field: LiveFormField = { id, type, label, required: r.required === true, ...(r.onBoard === false ? { onBoard: false } : {}) };
+    if (type === 'choice') {
+      const options = cleanPollOptions(r.options);
+      if (typeof options === 'string') return `Field "${id}": a choice needs ${LIVE_OPTIONS_MIN} to ${LIVE_OPTIONS_MAX} different options.`;
+      field.options = options;
+    } else if (r.options !== undefined) {
+      return `Field "${id}": options are for choice fields.`;
+    }
+    if (type === 'rating') {
+      const max = r.max === undefined ? 5 : r.max;
+      if (typeof max !== 'number' || !Number.isInteger(max) || max < 2 || max > LIVE_RATING_MAX) {
+        return `Field "${id}": max must be a whole number from 2 to ${LIVE_RATING_MAX}.`;
+      }
+      field.max = max;
+      const low = cleanLiveText(r.lowLabel, LIVE_OPTION_MAX);
+      const high = cleanLiveText(r.highLabel, LIVE_OPTION_MAX);
+      if (low) field.lowLabel = low;
+      if (high) field.highLabel = high;
+    }
+    out.push(field);
+  }
+  return out;
+}
+
+/**
+ * A phone's values for a form, cleaned, or the first problem in them. A choice
+ * may be sent as its index or its label; unknown field ids are ignored.
+ */
+export function cleanFormValues(fields: LiveFormField[], raw: unknown): Record<string, number | string> | string {
+  const input = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw as Record<string, unknown> : {};
+  const out: Record<string, number | string> = {};
+  for (const f of fields) {
+    const v = input[f.id];
+    const blank = v === undefined || v === null || v === '';
+    if (!blank) {
+      if (f.type === 'rating') {
+        const n = typeof v === 'string' ? Number(v) : v;
+        if (typeof n !== 'number' || !Number.isInteger(n) || n < 1 || n > (f.max ?? 5)) return `“${f.label}”: pick 1 to ${f.max ?? 5}.`;
+        out[f.id] = n;
+      } else if (f.type === 'choice') {
+        const options = f.options ?? [];
+        const n = typeof v === 'number' ? v : options.findIndex((o) => typeof v === 'string' && o.toLowerCase() === v.trim().toLowerCase());
+        if (!Number.isInteger(n) || n < 0 || n >= options.length) return `“${f.label}”: pick one of the options.`;
+        out[f.id] = n;
+      } else {
+        const text = cleanLiveText(v, LIVE_TEXT_MAX);
+        if (text) out[f.id] = text;
+      }
+    }
+    if (f.required && out[f.id] === undefined) return `“${f.label}” needs an answer.`;
+  }
+  if (!Object.keys(out).length) return 'Answer at least one question first.';
+  return out;
+}
+
+export interface LiveFormTextAnswer {
+  /** `<submissionId>:<fieldId>`: what hiding it takes. */
+  id: string;
+  text: string;
+  createdAt: number;
+  hidden: boolean;
+}
+
+/** One field's results: what the board draws and what an agent reads. */
+export interface LiveFieldSummary {
+  id: string;
+  type: LiveFieldType;
+  label: string;
+  required: boolean;
+  /** false: collected, but not drawn on the board. */
+  onBoard: boolean;
+  /** Submissions that answered this field. */
+  responses: number;
+  /** Rating: mean score to one decimal, or null with no ratings. */
+  average?: number | null;
+  max?: number;
+  lowLabel?: string;
+  highLabel?: string;
+  /** Rating: how many gave each score; index 0 is a score of 1. */
+  distribution?: number[];
+  /** Choice: each option's count and whole percentage. */
+  options?: { label: string; count: number; percent: number }[];
+  /** Text: the answers, newest first, hidden ones included and marked. */
+  answers?: LiveFormTextAnswer[];
+}
+
+/** Per-field results of a form, in field order. */
+export function formSummary(q: Pick<LiveQuestion, 'fields' | 'submissions'>): LiveFieldSummary[] {
+  const subs = q.submissions ?? [];
+  return (q.fields ?? []).map((f): LiveFieldSummary => {
+    const given = subs.filter((s) => s.values[f.id] !== undefined);
+    const base = { id: f.id, type: f.type, label: f.label, required: !!f.required, onBoard: f.onBoard !== false, responses: given.length };
+    if (f.type === 'rating') {
+      const max = f.max ?? 5;
+      const distribution = Array.from({ length: max }, () => 0);
+      let sum = 0;
+      for (const s of given) { const n = Number(s.values[f.id]); if (n >= 1 && n <= max) { distribution[n - 1]!++; sum += n; } }
+      const count = distribution.reduce((a, b) => a + b, 0);
+      return {
+        ...base, max, distribution, average: count ? Math.round((sum / count) * 10) / 10 : null,
+        ...(f.lowLabel ? { lowLabel: f.lowLabel } : {}), ...(f.highLabel ? { highLabel: f.highLabel } : {}),
+      };
+    }
+    if (f.type === 'choice') {
+      const counts = (f.options ?? []).map(() => 0);
+      for (const s of given) { const n = Number(s.values[f.id]); if (n >= 0 && n < counts.length) counts[n]!++; }
+      const percents = pollPercentages(counts);
+      return { ...base, options: (f.options ?? []).map((label, i) => ({ label, count: counts[i]!, percent: percents[i]! })) };
+    }
+    return {
+      ...base,
+      answers: given
+        .map((s) => ({ id: `${s.id}:${f.id}`, text: String(s.values[f.id]), createdAt: s.updatedAt ?? s.createdAt, hidden: !!s.hidden?.includes(f.id) }))
+        .sort((a, b) => b.createdAt - a.createdAt),
+    };
+  });
 }
 
 /** Votes per option, in option order. */

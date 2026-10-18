@@ -391,3 +391,155 @@ test('qr: false hides the QR block, from the question or the board URL', async (
   const board = await (await fetch(`${base}/q/${(await createQuestion())}/board?qr=0`)).text();
   assert.match(board, /const qrOff = true;/);
 });
+
+const FORM_FIELDS = [
+  { id: 'useful', type: 'rating', label: 'How useful was this session?', lowLabel: 'Not useful', highLabel: 'Very useful', required: true },
+  { id: 'recommend', type: 'choice', label: 'Would you recommend it?', options: ['Yes', 'Maybe', 'No'] },
+  { id: 'change', type: 'text', label: 'One thing to change?' },
+  { id: 'email', type: 'text', label: 'Follow-up contact', onBoard: false },
+];
+
+function submit(code: string, values: Record<string, unknown>, device?: string) {
+  return fetch(`${base}/q/${code}/submit`, {
+    method: 'POST', headers: jsonHeaders(device ? { 'x-live-device': device } : {}), body: JSON.stringify({ values }),
+  });
+}
+
+type FormState = { kind: string; total: number; fields: { id: string; average?: number | null; distribution?: number[]; options?: { count: number }[]; answers?: { id: string; text: string }[]; shown?: number }[] };
+
+test('form: validated on create, required enforced, one submission per phone that is replaced, aggregates on the board', async () => {
+  const bad = await fetch(`${base}/api/documents/${docId}/live`, {
+    method: 'POST', headers: jsonHeaders({ cookie }), body: JSON.stringify({ question: 'Feedback', kind: 'form', fields: [] }),
+  });
+  assert.equal(bad.status, 400);
+  const code = await createQuestion('Session feedback', { kind: 'form', fields: FORM_FIELDS });
+
+  const page = await (await fetch(`${base}/q/${code}`)).text();
+  assert.match(page, /class="pip" data-v="5"/);
+  assert.match(page, /Not useful/);
+  assert.match(page, /data-required="1"/);
+
+  assert.equal((await submit(code, { recommend: 0 })).status, 400, 'required rating missing');
+  assert.equal((await answer(code, { text: 'hi' })).status, 400, 'a form takes /submit, not /answers');
+  const me = await phone(code);
+  const first = await submit(code, { useful: 2, recommend: 'No', change: '<b>Shorter</b> intro', email: 'x@example.com' }, me);
+  assert.equal(first.status, 201);
+  const firstBody = await first.json() as { id: string; replaced: boolean };
+  assert.equal(firstBody.replaced, false);
+  await submit(code, { useful: 5, recommend: 0 });
+  await submit(code, { useful: 4, recommend: 1, change: 'More examples' });
+
+  await new Promise((ok) => setTimeout(ok, 1100));
+  const again = await submit(code, { useful: 4, recommend: 'Yes', change: 'Shorter intro please' }, me);
+  assert.equal(again.status, 200);
+  assert.deepEqual(await again.json().then((b: { id: string; replaced: boolean }) => [b.id, b.replaced]), [firstBody.id, true]);
+
+  const view = await (await fetch(`${base}/q/${code}/me`, { headers: { 'x-live-device': me } })).json() as { answered: boolean; values: Record<string, unknown> };
+  assert.equal(view.answered, true);
+  assert.deepEqual(view.values, { useful: 4, recommend: 0, change: 'Shorter intro please' });
+
+  const s = await (await fetch(`${base}/q/${code}/state`)).json() as FormState;
+  assert.equal(s.kind, 'form');
+  assert.equal(s.total, 3);
+  assert.deepEqual(s.fields.map((f) => f.id), ['useful', 'recommend', 'change'], 'onBoard: false stays off the board');
+  assert.equal(s.fields[0]!.average, 4.3);
+  assert.deepEqual(s.fields[0]!.distribution, [0, 0, 0, 2, 1]);
+  assert.deepEqual(s.fields[1]!.options!.map((o) => o.count), [2, 1, 0]);
+  assert.deepEqual(s.fields[2]!.answers!.map((a) => a.text), ['Shorter intro please', 'More examples']);
+  assert.ok(!JSON.stringify(s).includes('device'));
+
+  await fetch(`${base}/api/live/${code}`, { method: 'PATCH', headers: jsonHeaders({ cookie }), body: JSON.stringify({ open: false }) });
+  assert.equal((await submit(code, { useful: 3 })).status, 409);
+});
+
+test('form: moderation hides single written answers, clear hides all, reset deletes, CSV has a column per field', async () => {
+  const code = await createQuestion('Feedback two', { kind: 'form', fields: FORM_FIELDS });
+  await submit(code, { useful: 3, recommend: 2, change: '=cmd()', email: 'a@example.com' });
+  await submit(code, { useful: 5, change: 'Nothing' });
+
+  const detail = await (await fetch(`${base}/api/live/${code}`, { headers: { cookie } })).json() as {
+    fields: { id: string; answers?: { id: string; text: string }[] }[]; submissions: { id: string; values: Record<string, unknown> }[]; totalResponses: number;
+  };
+  assert.equal(detail.totalResponses, 2);
+  assert.equal(detail.submissions[0]!.values.recommend, 'No');
+  const target = detail.fields.find((f) => f.id === 'change')!.answers!.find((a) => a.text === 'Nothing')!;
+  assert.equal((await fetch(`${base}/api/live/${code}/answers/${encodeURIComponent(target.id)}/hide`, { method: 'POST' })).status, 401);
+  const hid = await fetch(`${base}/api/live/${code}/answers/${encodeURIComponent(target.id)}/hide`, {
+    method: 'POST', headers: jsonHeaders({ cookie }), body: JSON.stringify({ hidden: true }),
+  });
+  assert.equal(hid.status, 200);
+  let s = await (await fetch(`${base}/q/${code}/state`)).json() as FormState;
+  assert.deepEqual(s.fields[2]!.answers!.map((a) => a.text), ['=cmd()']);
+  assert.equal(s.fields[0]!.average, 4, 'ratings are not touched by hiding text');
+
+  const csv = await (await fetch(`${base}/api/live/${code}/csv`, { headers: { cookie } })).text();
+  const lines = csv.trim().split('\r\n');
+  assert.equal(lines[0], 'time,edited,How useful was this session?,Would you recommend it?,One thing to change?,Follow-up contact,hidden');
+  assert.match(lines[1]!, /,3,No,'=cmd\(\),a@example.com,$/);
+  assert.match(lines[2]!, /,5,,Nothing,,One thing to change\?$/);
+
+  const cleared = await (await fetch(`${base}/api/live/${code}/clear`, { method: 'POST', headers: { cookie } })).json() as { hidden: number };
+  assert.ok(cleared.hidden >= 1);
+  s = await (await fetch(`${base}/q/${code}/state`)).json() as FormState;
+  assert.equal(s.fields[2]!.shown, 0);
+  assert.equal(s.total, 2);
+
+  const list = await (await fetch(`${base}/api/documents/${docId}/live`, { headers: { cookie } })).json() as { questions: { code: string; answers: number; totalResponses: number }[] };
+  const listed = list.questions.find((q) => q.code === code)!;
+  assert.equal(listed.answers, 2);
+  assert.ok(!JSON.stringify(listed).includes('Nothing'), 'the list carries counts, not what people wrote');
+
+  const reset = await (await fetch(`${base}/api/live/${code}/reset`, { method: 'POST', headers: { cookie } })).json() as { submissionsReset: number };
+  assert.equal(reset.submissionsReset, 2);
+  assert.equal(((await (await fetch(`${base}/q/${code}/state`)).json()) as FormState).total, 0);
+});
+
+test('MCP: a form through add_live_question, list_live_answers and set_live_question', async () => {
+  const doc = getDocument(docId)!;
+  const artboardId = doc.pages[0]!.artboards[0]!;
+  const text = (res: unknown) => (res as { content: { text: string }[] }).content[0]!.text;
+
+  const noFields = await client.callTool({ name: 'add_live_question', arguments: { question: 'Feedback', artboardId, kind: 'form' } });
+  assert.equal((noFields as { isError?: boolean }).isError, true);
+  const added = JSON.parse(text(await client.callTool({
+    name: 'add_live_question', arguments: { question: 'Session feedback', artboardId, kind: 'form', fields: FORM_FIELDS, qr: false },
+  }))) as { code: string; kind: string };
+  assert.equal(added.kind, 'form');
+
+  const before = JSON.parse(text(await client.callTool({
+    name: 'set_live_question', arguments: { code: added.code, fields: FORM_FIELDS.slice(0, 2) },
+  }))) as { fields: unknown[] };
+  assert.equal(before.fields.length, 2, 'fields change freely before any response');
+  await client.callTool({ name: 'set_live_question', arguments: { code: added.code, fields: FORM_FIELDS } });
+
+  await submit(added.code, { useful: 4, recommend: 0, change: 'Less slides' });
+  await submit(added.code, { useful: 2, recommend: 2 });
+
+  const listed = JSON.parse(text(await client.callTool({ name: 'list_live_answers', arguments: { code: added.code } }))) as {
+    total: number; fields: { id: string; average?: number; distribution?: number[]; options?: { label: string; count: number }[]; answers?: { id: string; text: string }[] }[];
+    submissions: { values: Record<string, unknown> }[];
+  }[];
+  const form = listed[0]!;
+  assert.equal(form.total, 2);
+  assert.equal(form.fields[0]!.average, 3);
+  assert.deepEqual(form.fields[0]!.distribution, [0, 1, 0, 1, 0]);
+  assert.deepEqual(form.fields[1]!.options!.map((o) => o.count), [1, 0, 1]);
+  assert.deepEqual(form.submissions.map((s) => s.values.recommend), ['Yes', 'No']);
+  const answerId = form.fields[2]!.answers![0]!.id;
+
+  const hid = JSON.parse(text(await client.callTool({ name: 'hide_live_answer', arguments: { code: added.code, answerId } }))) as { hidden: boolean };
+  assert.equal(hid.hidden, true);
+
+  const refused = await client.callTool({ name: 'set_live_question', arguments: { code: added.code, fields: FORM_FIELDS.slice(0, 2) } });
+  assert.equal((refused as { isError?: boolean }).isError, true, 'fields are locked once there are responses');
+  const offBoard = FORM_FIELDS.map((f) => (f.id === 'change' ? { ...f, onBoard: false } : f));
+  await client.callTool({ name: 'set_live_question', arguments: { code: added.code, fields: offBoard } });
+  const s = await (await fetch(`${base}/q/${added.code}/state`)).json() as FormState;
+  assert.deepEqual(s.fields.map((f) => f.id), ['useful', 'recommend'], 'onBoard may change under responses');
+
+  const reset = JSON.parse(text(await client.callTool({
+    name: 'set_live_question', arguments: { code: added.code, resetResponses: true, fields: FORM_FIELDS.slice(0, 1) },
+  }))) as { answerCount: number; fields: unknown[] };
+  assert.equal(reset.answerCount, 0);
+  assert.equal(reset.fields.length, 1);
+});
