@@ -58,7 +58,12 @@ export const Artboard = memo(function Artboard({ id, live }: Props) {
   // Whether to allow scripts in this frame. Keyed to the structure counter
   // rather than every edit: it only changes when a node is added or removed.
   const hasCodeComponent = useMemo(
-    () => !!doc && descendants(doc, id).some((n) => doc.nodes[n]?.type === 'code'),
+    // A live question's board is our own page drawn by its script: without it
+    // the canvas showed the bare server render (a QR code, no answers).
+    () => !!doc && descendants(doc, id).some((n) => {
+      const node = doc.nodes[n];
+      return node?.type === 'code' || /(^|\/\/[^/]+)\/q\/[a-z0-9]+\/board/.test(String(node?.attrs?.src ?? ''));
+    }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [doc, id, structureVersion],
   );
