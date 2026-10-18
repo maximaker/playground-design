@@ -1463,8 +1463,8 @@ function registerReadTools(server: McpServer, ctx: McpContext): void {
     title: 'Add an image to the document',
     description:
       'Stores an image in this document and returns its URL, to use as an <img src> or a background-image in write_html. ' +
-      'Pass `url` for an image from Figma (the signed links in a Figma clipboard; other hosts are refused), or `data` (base64) with `mime` ' +
-      'for any image you have. Images written with an outside URL break when that URL changes; stored ones do not.',
+      'Pass `url` for any public https image (a CDN, Unsplash, a Figma clipboard link; private addresses are refused), or `data` (base64) with `mime` ' +
+      'for a small image you only have locally; prefer a link for photos. Images written with an outside URL break when that URL changes; stored ones do not.',
     inputSchema: {
       url: z.string().url().optional(),
       data: z.string().optional().describe('Base64 image bytes (no data: prefix).'),
