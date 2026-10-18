@@ -532,6 +532,9 @@ export function parseHtml(html: string, opts: ParseOptions = {}): ParseResult {
     return frame.id;
   };
 
+  // Containers whose layout drops edge spaces (flex, grid): inline runs inside
+  // them are trimmed; everywhere else a run keeps one space at each edge.
+  const collapsing = new Set<NodeId>();
   const walk = (el: ParsedElement, parent: NodeId | null): NodeId | null => {
     const raw = el.rawTagName;
     let tag = raw?.toLowerCase();
@@ -586,7 +589,13 @@ export function parseHtml(html: string, opts: ParseOptions = {}): ParseResult {
     });
 
     if (type === 'text') {
-      node.text = decodeEntities(el.textContent ?? '').trim();
+      // An inline run keeps one space at its edges: <span>pain </span><b>real</b>
+      // and <span> </span> between styled words were trimmed to nothing, so
+      // written text came out as "painreal" and "How tovalidate".
+      const text = decodeEntities(el.textContent ?? '');
+      const inline = INLINE_TAGS.has(tag) && parent !== null && !collapsing.has(parent);
+      const collapsed = text.replace(/\s+/g, ' ');
+      node.text = inline ? (collapsed.trim() ? collapsed : (text ? ' ' : '')) : text.trim();
       node.children = [];
     } else if (type === 'vector') {
       node.text = el.innerHTML;
@@ -609,6 +618,7 @@ export function parseHtml(html: string, opts: ParseOptions = {}): ParseResult {
       const kids = el.childNodes;
       const layout = String(styles.display ?? '');
       const collapses = /flex|grid/.test(layout);
+      if (collapses) collapsing.add(node.id);
       for (const [i, child] of kids.entries()) {
         if (isElement(child)) {
           const cid = walk(child as ParsedElement, node.id);

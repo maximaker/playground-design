@@ -140,3 +140,9 @@ test('export adds no whitespace inside pre-wrap, where it would show as blank li
   applyOp(doc, { t: 'insert', nodes: parsed.nodes, parent: artboard, index: 0 });
   assert.match(emitStandalone(doc, artboard), /<ul[^>]*><li[^>]*>One<\/li><li[^>]*>Two<\/li><\/ul>/);
 });
+
+test('parseHtml keeps edge spaces inside inline runs', () => {
+  const doc = parseHtml('<p><span>Is the pain </span><span style="font-weight:700">real</span><span> </span><span>today</span></p>');
+  const texts = doc.nodes.filter((n) => n.type === 'text').map((n) => n.text);
+  assert.deepEqual(texts, ['Is the pain ', 'real', ' ', 'today']);
+});

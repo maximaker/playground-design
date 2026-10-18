@@ -724,15 +724,15 @@ export function cloneSubtree(
   for (const id of all) idMap[id] = newId();
 
   const nodes = all.map((id) => {
-    const src = doc.nodes[id]!;
+    // A deep copy: a shallow one left an instance's overrides (and props) shared
+    // with the original, and set_override edits them in place, so changing one
+    // copy's page number or eyebrow changed every copy and the source.
+    const src = structuredClone(doc.nodes[id]!);
     return {
       ...src,
       id: idMap[id]!,
       parent: src.parent && idMap[src.parent] ? idMap[src.parent]! : null,
       children: src.children.map((c) => idMap[c]!),
-      styles: { ...src.styles },
-      attrs: { ...src.attrs },
-      variants: src.variants.map((v) => ({ selector: v.selector, styles: { ...v.styles } })),
     } as CanvasNode;
   });
 
