@@ -292,9 +292,35 @@ function Editor({ source, onHome, appearance, onAppearance, session }: {
   // The first thing you see of a document is all of it. The viewport used to
   // start at a fixed offset and zoom, which opened most documents on the top
   // left corner of the first frame.
+  //
+  // Unless this browser has been here before: a refresh put you back on the
+  // first page, zoomed out, wherever you had been working. The page and view
+  // are remembered per document (in this browser only) and restored first.
   const docReady = !!doc;
   useEffect(() => {
-    if (docReady) requestAnimationFrame(() => zoomToFit());
+    if (!docReady) return;
+    const { docId, doc: d } = useCanvas.getState();
+    const key = `pg.view.${docId}`;
+    let saved: { pageId?: string; x?: number; y?: number; zoom?: number } | null = null;
+    try { saved = JSON.parse(localStorage.getItem(key) ?? 'null'); } catch { /* private window */ }
+    const page = saved?.pageId && d?.pages.some((p) => p.id === saved!.pageId) ? saved.pageId : null;
+    if (page && typeof saved?.zoom === 'number' && typeof saved.x === 'number' && typeof saved.y === 'number') {
+      useCanvas.getState().setPage(page);
+      useCanvas.getState().setViewport({ x: saved.x, y: saved.y, zoom: saved.zoom });
+    } else {
+      if (page) useCanvas.getState().setPage(page);
+      requestAnimationFrame(() => zoomToFit());
+    }
+    let t = 0;
+    const unsub = useCanvas.subscribe((s, prev) => {
+      if (s.viewport === prev.viewport && s.pageId === prev.pageId) return;
+      window.clearTimeout(t);
+      t = window.setTimeout(() => {
+        const { pageId, viewport } = useCanvas.getState();
+        try { localStorage.setItem(key, JSON.stringify({ pageId, ...viewport })); } catch { /* not critical */ }
+      }, 400);
+    });
+    return () => { unsub(); window.clearTimeout(t); };
   }, [docReady]);
 
   // And read back on arrival, once the document is there to check it against.
