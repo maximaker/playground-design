@@ -91,8 +91,11 @@ export function Present() {
     hideTimer.current = window.setTimeout(() => setChrome(false), 2600);
   }, []);
 
+  // Keyed on presenting at all, not on the slide: moving to the next slide
+  // re-ran this and woke the bar on every arrow press, even in full screen.
+  const presenting = !!present;
   useEffect(() => {
-    if (!present) return;
+    if (!presenting) return;
     wake();
     const measure = () => {
       const box = stageRef.current?.getBoundingClientRect();
@@ -114,7 +117,7 @@ export function Present() {
       window.removeEventListener('resize', measure);
       window.clearTimeout(hideTimer.current);
     };
-  }, [present, wake]);
+  }, [presenting, wake]);
 
   const onKey = useCallback((e: KeyboardEvent) => {
     const target = e.target as HTMLElement | null;
@@ -125,7 +128,8 @@ export function Present() {
     if (!keys.includes(e.key) || e.metaKey || e.ctrlKey) return;
     e.preventDefault();
     e.stopPropagation();
-    wake();
+    // Navigating is not asking for the controls; only the pointer brings them back.
+    if (e.key === 'f' || e.key === 'c') wake();
     if (e.key === 'Escape') {
       if (useCanvas.getState().draftComment) return useCanvas.getState().setDraftComment(null);
       return exit(setPresent);
@@ -226,7 +230,9 @@ export function Present() {
   return createPortal(
     <div
       className={`present${chrome ? '' : ' is-idle'}`}
-      onPointerMove={wake}
+      // Only real movement: browsers send a still pointer a move when the
+      // content under it changes, which is every slide change.
+      onPointerMove={(e) => { if (e.movementX || e.movementY) wake(); }}
       role="dialog"
       aria-label={`Presenting ${doc.name}`}
     >
@@ -244,7 +250,6 @@ export function Present() {
           const dx = e.clientX - start.x, dy = e.clientY - start.y;
           if (Math.abs(dx) > 48 && Math.abs(dx) > Math.abs(dy) * 1.5 && Date.now() - start.at < 700) {
             swiped.current = true;
-            wake();
             go(index + (dx < 0 ? 1 : -1));
           }
         }}
