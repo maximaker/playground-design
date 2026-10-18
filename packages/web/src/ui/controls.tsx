@@ -287,17 +287,115 @@ export function ColorInput({ value, onCommit, tokens }: {
       </label>
       <TextInput value={value} onCommit={onCommit} placeholder="transparent" mono />
       {tokens && tokens.length > 0 && (
-        <select
-          className="token-pick"
-          title="Use a design token"
-          value={token?.usage ?? ''}
-          onChange={(e) => e.target.value && onCommit(e.target.value)}
-        >
-          <option value="">token…</option>
-          {tokens.map((t) => <option key={t.name} value={t.usage}>{t.name}</option>)}
-        </select>
+        <TokenPicker tokens={tokens} value={token?.usage ?? ''} onPick={onCommit} />
       )}
     </div>
+  );
+}
+
+type ColorToken = { name: string; usage: string; resolved: string };
+
+/**
+ * Colour tokens with their colours.
+ *
+ * A native select can only list names, so "color.slate" and "color.ink" had to
+ * be told apart from memory. Each row shows the swatch, the name and the value
+ * it resolves to, filters as you type, and works from the keyboard.
+ */
+export function TokenPicker({ tokens, value, onPick, title = 'Use a design token' }: {
+  tokens: ColorToken[];
+  value: string;
+  onPick: (usage: string) => void;
+  title?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState('');
+  const [hi, setHi] = useState(0);
+  const [at, setAt] = useState<{ top: number; left: number; up: boolean } | null>(null);
+  const btn = useRef<HTMLButtonElement>(null);
+  const list = useRef<HTMLDivElement>(null);
+  const current = tokens.find((t) => t.usage === value);
+  const shown = tokens.filter((t) => !q || t.name.toLowerCase().includes(q.toLowerCase()) || t.resolved.toLowerCase().includes(q.toLowerCase()));
+
+  const show = () => {
+    const r = btn.current?.getBoundingClientRect();
+    if (!r) return;
+    // Fixed to the viewport: the properties panel scrolls and clips.
+    const up = r.bottom + 340 > window.innerHeight && r.top > 340;
+    setAt({ top: up ? r.top - 6 : r.bottom + 6, left: Math.max(8, Math.min(r.right - 260, window.innerWidth - 268)), up });
+    setQ('');
+    setHi(Math.max(0, tokens.findIndex((t) => t.usage === value)));
+    setOpen(true);
+  };
+  const pick = (t: ColorToken | undefined) => { if (t) onPick(t.usage); setOpen(false); btn.current?.focus(); };
+
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: PointerEvent) => {
+      if (!list.current?.contains(e.target as Node) && !btn.current?.contains(e.target as Node)) setOpen(false);
+    };
+    window.addEventListener('pointerdown', close, true);
+    return () => window.removeEventListener('pointerdown', close, true);
+  }, [open]);
+  useEffect(() => {
+    list.current?.querySelector<HTMLElement>('.is-hi')?.scrollIntoView({ block: 'nearest' });
+  }, [hi, open]);
+
+  return (
+    <>
+      <button
+        ref={btn}
+        type="button"
+        className={`token-pick${current ? ' has-token' : ''}`}
+        title={current ? `${current.name} · ${current.resolved}` : title}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        onClick={() => (open ? setOpen(false) : show())}
+      >
+        {current
+          ? <><span className="token-dot" style={{ background: current.resolved }} /><span className="token-pick-name">{current.name.replace(/^color\./, '')}</span></>
+          : <span className="token-pick-name">token…</span>}
+      </button>
+      {open && at && (
+        <div
+          ref={list}
+          className="token-menu"
+          style={{ left: at.left, ...(at.up ? { bottom: window.innerHeight - at.top } : { top: at.top }) }}
+          onKeyDown={(e) => {
+            if (e.key === 'ArrowDown') { e.preventDefault(); setHi((h) => Math.min(h + 1, shown.length - 1)); }
+            else if (e.key === 'ArrowUp') { e.preventDefault(); setHi((h) => Math.max(h - 1, 0)); }
+            else if (e.key === 'Enter') { e.preventDefault(); pick(shown[hi]); }
+            else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setOpen(false); btn.current?.focus(); }
+          }}
+        >
+          <input
+            autoFocus
+            className="token-filter"
+            placeholder="Find a colour"
+            value={q}
+            onChange={(e) => { setQ(e.target.value); setHi(0); }}
+          />
+          <div className="token-list" role="listbox" aria-label="Colour tokens">
+            {shown.map((t, i) => (
+              <button
+                key={t.name}
+                type="button"
+                role="option"
+                aria-selected={t.usage === value}
+                className={`token-row${i === hi ? ' is-hi' : ''}${t.usage === value ? ' is-current' : ''}`}
+                onPointerEnter={() => setHi(i)}
+                onClick={() => pick(t)}
+              >
+                <span className="token-chip" style={{ background: t.resolved }} />
+                <span className="token-name">{t.name.replace(/^color\./, '')}</span>
+                <span className="token-value">{t.resolved}</span>
+              </button>
+            ))}
+            {!shown.length && <p className="token-empty">No colour matches “{q}”.</p>}
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 

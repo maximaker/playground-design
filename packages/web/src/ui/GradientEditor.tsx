@@ -11,7 +11,7 @@ import {
   type Gradient, type GradientType,
   DEFAULT_GRADIENT, parseGradient, serializeGradient,
 } from '@playground/shared';
-import { TextInput } from './controls.tsx';
+import { TextInput, TokenPicker } from './controls.tsx';
 import { Icon } from './Icon.tsx';
 
 interface Props {
@@ -129,15 +129,12 @@ export function GradientEditor({ value, onCommit, tokens }: Props) {
             onChange={(e) => setStop(selected, { position: Number(e.target.value) })}
           />
           {tokens && tokens.length > 0 && (
-            <select
-              className="token-pick"
+            <TokenPicker
+              tokens={tokens}
+              value={tokens.find((t) => t.usage === active.color)?.usage ?? ''}
+              onPick={(usage) => setStop(selected, { color: usage })}
               title="Use a token"
-              value=""
-              onChange={(e) => e.target.value && setStop(selected, { color: e.target.value })}
-            >
-              <option value="">token…</option>
-              {tokens.map((t) => <option key={t.name} value={t.usage}>{t.name}</option>)}
-            </select>
+            />
           )}
           <button
             className="icon-button"
