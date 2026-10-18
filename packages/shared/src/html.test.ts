@@ -146,3 +146,8 @@ test('parseHtml keeps edge spaces inside inline runs', () => {
   const texts = doc.nodes.filter((n) => n.type === 'text').map((n) => n.text);
   assert.deepEqual(texts, ['Is the pain ', 'real', ' ', 'today']);
 });
+
+test('parseHtml keeps edge spaces in top-level inline runs (write_html fragments)', () => {
+  const doc = parseHtml('<span>a</span><span> </span><span>b </span>');
+  assert.deepEqual(doc.nodes.filter((n) => n.type === 'text').map((n) => n.text), ['a', ' ', 'b ']);
+});

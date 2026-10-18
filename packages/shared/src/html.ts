@@ -593,7 +593,7 @@ export function parseHtml(html: string, opts: ParseOptions = {}): ParseResult {
       // and <span> </span> between styled words were trimmed to nothing, so
       // written text came out as "painreal" and "How tovalidate".
       const text = decodeEntities(el.textContent ?? '');
-      const inline = INLINE_TAGS.has(tag) && parent !== null && !collapsing.has(parent);
+      const inline = INLINE_TAGS.has(tag) && (parent === null || !collapsing.has(parent));
       const collapsed = text.replace(/\s+/g, ' ');
       node.text = inline ? (collapsed.trim() ? collapsed : (text ? ' ' : '')) : text.trim();
       node.children = [];
