@@ -76,6 +76,37 @@ export function ContextMenu({ state, onClose, onExport }: {
     }
   };
 
+  /*
+   * Pictures, through the same server render Export uses. The PNG goes on the
+   * clipboard as an image (pastes into Figma, Slack, docs); the SVG as its
+   * markup, which Figma and most design tools paste as vectors. The fetch is
+   * handed to the clipboard as a promise so the click still counts as the
+   * user's gesture while the render runs.
+   */
+  const copyPicture = async (format: 'png' | 'svg') => {
+    const id = ids[0];
+    const docId = useCanvas.getState().docId;
+    if (!id || !docId) return;
+    const url = `/api/documents/${docId}/export/${id}?format=${format}&scale=${format === 'png' ? 2 : 1}`;
+    const fetched = fetch(url, { credentials: 'same-origin' }).then((r) => {
+      if (!r.ok) throw new Error(String(r.status));
+      return r.blob();
+    });
+    try {
+      if (format === 'png') {
+        await navigator.clipboard.write([new ClipboardItem({ 'image/png': fetched.then((b) => new Blob([b], { type: 'image/png' })) })]);
+      } else {
+        const svg = await (await fetched).text();
+        await navigator.clipboard.write([new ClipboardItem({
+          'text/plain': new Blob([svg], { type: 'text/plain' }),
+        })]);
+      }
+      toast(`Copied as ${format.toUpperCase()}${ids.length > 1 ? ' (first selected layer)' : ''}`, 'success');
+    } catch {
+      toast(`Could not copy as ${format.toUpperCase()}`, 'error');
+    }
+  };
+
   const hasComponents = Object.keys(doc?.components ?? {}).length > 0;
 
   const items: Item[] = [
@@ -83,6 +114,8 @@ export function ContextMenu({ state, onClose, onExport }: {
     { label: 'Copy as JSX + inline styles', run: () => void copy('jsx'), disabled: !has },
     { label: 'Copy as HTML', run: () => void copy('html'), disabled: !has },
     { label: 'Copy as CSS', shortcut: `${MOD}⇧C`, run: () => void copy('css'), disabled: !has },
+    { label: 'Copy as PNG', run: () => void copyPicture('png'), disabled: !has },
+    { label: 'Copy as SVG', run: () => void copyPicture('svg'), disabled: !has },
     { label: '', separator: true },
     {
       label: 'Rename',
