@@ -154,11 +154,11 @@ function fetchAsData(src: string): Promise<string | null> {
  * is why slides had pictures only once selected. They are inlined like <img>.
  */
 async function inlineCssUrls(css: string): Promise<string> {
-  const re = /url\(\s*(['"]?)([^'")]+)\s*\)/g;
-  const urls = [...new Set([...css.matchAll(re)].map((m) => m[2]!).filter((u) => !u.startsWith('data:') && !u.startsWith('#')))];
+  const re = /url\(\s*['"]?([^'")]+?)['"]?\s*\)/g;
+  const urls = [...new Set([...css.matchAll(re)].map((m) => m[1]!).filter((u) => !u.startsWith('data:') && !u.startsWith('#')))];
   if (!urls.length) return css;
   const data = new Map(await Promise.all(urls.map(async (u) => [u, await fetchAsData(u)] as const)));
-  return css.replace(re, (all, _q, u: string) => {
+  return css.replace(re, (all, u: string) => {
     const d = data.get(u);
     return d ? `url('${d}')` : all;
   });
