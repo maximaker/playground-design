@@ -801,6 +801,33 @@ documents**: they come back as unfiled, and the confirmation says so before you 
 | `PUT /api/documents/:id/project` | `{ projectId }`, or `null` to unfile |
 | `POST /api/documents` | Accepts `projectId`, so create-and-file is one call |
 
+## Live questions
+
+A slide can ask the room something and show the answers as they arrive, Mentimeter-style. The
+slide shows the question, a QR code and a short URL (`<host>/q/<code>`, eight characters). People
+answer on their phones without an account. The answers appear on the slide as cards, newest first,
+within about a second, both on the canvas and in presentation mode. When there are more answers
+than fit at a readable size, the slide shows the newest ones and says how many more there are.
+
+- **Editor:** ⌘K → *Add a live question* puts one on the selected slide, or on the page's first slide.
+- **Agents:** `add_live_question` (question, artboardId, optional position, size and look),
+  `list_live_answers` (all answers, hidden ones included and marked, for use after the session),
+  `hide_live_answer`, and `set_live_question` (open/close, reword, clear).
+- **Moderation:** while presenting, or once the question is selected on the canvas, hover over a
+  card and click × to hide it. Hovering over the board shows *Close question* and *Clear all*. The
+  controls only appear for someone signed in who can edit the document, so a published page or a
+  screenshot never shows them. Hidden answers stay stored.
+
+On the slide, the question is an ordinary embed of `/q/<code>/board`. The canvas, presentation
+mode, screenshots and published pages therefore all show it the same way. The board takes the
+slide's font and text colour, and fetches the font from Google Fonts when it is not a system font.
+It is transparent, so the slide's background shows through. Answers are capped at 280 characters,
+HTML is stripped, and each phone is limited to one answer every 3 s and 12 per 10 minutes; a
+whole venue behind one IP address is not blocked. The board long-polls `/q/<code>/state` instead
+of using the document socket, so an anonymous page never gets a document channel. Answers are
+stored per question in their own table (`live_questions`), not in the document, so undo and
+version restores never touch them.
+
 ## Sharing
 
 A document URL is an edit credential — anyone holding `/d/<id>` can change the file — so showing work

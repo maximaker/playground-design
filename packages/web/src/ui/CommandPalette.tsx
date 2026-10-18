@@ -7,7 +7,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { componentsOf, makeNode, type NodeId } from '@playground/shared';
+import { artboardOf, componentsOf, makeLiveQuestionNode, makeNode, type NodeId } from '@playground/shared';
 import { useCanvas, getDoc, currentPage } from '../state/store.ts';
 import { Icon, iconForNodeType, type IconName } from './Icon.tsx';
 import {
@@ -179,6 +179,8 @@ function buildEntries({
   action('import', 'Import a webpage', 'download', actions.openImport);
   action('export', 'Export', 'upload', actions.openExport, '⌘⇧E');
   action('present', 'Present this page', 'play', actions.present, 'P');
+  action('live-question', 'Add a live question', 'comment', () => { void addLiveQuestion(selection, dispatch, select); },
+    undefined, 'The audience answers on their phones');
   action('share', 'Share a link', 'share', actions.openShare);
   action('shortcuts', 'Keyboard shortcuts', 'keyboard', actions.openShortcuts, '?');
   action('appearance', 'Settings', 'settings', actions.openAppearance, undefined, 'Agents, theme and interface scale');
@@ -291,6 +293,36 @@ function buildEntries({
 
   void onClose;
   return entries;
+}
+
+/**
+ * Puts a live question on the selected slide, or the page's first. The
+ * question is created on the server first — it owns the code and the answers —
+ * and the slide gets an embed of its board.
+ */
+async function addLiveQuestion(
+  selection: NodeId[],
+  dispatch: ReturnType<typeof useCanvas.getState>['dispatch'],
+  select: (ids: NodeId[]) => void,
+): Promise<void> {
+  const doc = getDoc();
+  const page = currentPage();
+  if (!doc || !page) return;
+  const artboardId = (selection[0] && artboardOf(doc, stripKey(selection[0]))) || page.artboards[0];
+  const artboard = artboardId ? doc.nodes[artboardId] : undefined;
+  if (!artboard) { window.alert('Add a slide first: a live question goes on an artboard.'); return; }
+  const question = window.prompt('Ask the audience', 'What’s your idea in one sentence?')?.trim();
+  if (!question) return;
+  const res = await fetch(`/api/documents/${doc.id}/live`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ question }),
+  }).catch(() => null);
+  const body = res ? await res.json().catch(() => ({})) as { code?: string; question?: string; error?: string } : {};
+  if (!res?.ok || !body.code) { window.alert(body.error ?? 'Could not create the question.'); return; }
+  const embed = makeLiveQuestionNode({
+    baseUrl: window.location.origin, code: body.code, question: body.question ?? question, artboard, doc,
+  });
+  dispatch([{ t: 'insert', nodes: [embed], parent: artboard.id, index: artboard.children.length }]);
+  select([embed.id]);
 }
 
 /**

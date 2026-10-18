@@ -36,12 +36,16 @@ import {
   decisionsOf, addDecisionOps, resolveWithOutcomeOps, describeDecision, decisionsMarkdown,
   sectionOfArtboard, normaliseFlowCard, sectionHeading, findVersionTarget, versionOps, describeVersion, versionOf, targetTitle, VERSION_KINDS,
   GOOGLE_FONT_WEIGHTS, artboardTheme, REPEAT_DATA_ATTR, REPEAT_TEMPLATE_ATTR, REPEAT_STYLE_ATTR, expandRepeat,
+  makeLiveQuestionNode, visibleAnswers,
 } from '@playground/shared';
 import {
   applyOps, ensureLoaded, getDocument, getSnapshot, listSnapshots, StoreError, createSnapshot,
   subscribe as subscribeToDocument,
 } from './store.ts';
 import { persistence } from './persistence.ts';
+import {
+  LiveError, clearLiveAnswers, createLiveQuestion, getLiveQuestion, hideLiveAnswer, liveQuestionsFor, updateLiveQuestion,
+} from './live.ts';
 import { pageArtboard, slugify } from './publish.ts';
 import { publishHandoff, unpublishHandoff } from './handoff.ts';
 import {
@@ -2204,6 +2208,112 @@ function registerWriteTools(server: McpServer, ctx: McpContext): void {
     embed.parent = artboard.id;
     commit(ctx, [{ t: 'insert', nodes: [artboard, embed], parent: null, index: page.artboards.length, page: page.id }]);
     return json({ id: embed.id, artboardId: artboard.id, src, x, y: topY, width, height });
+  }));
+
+  // -------------------------------------------------------------------------
+  // Live questions
+  // -------------------------------------------------------------------------
+
+  /** A live question this document owns, or a tool error naming what is wrong. */
+  async function ownLiveQuestion(code: string) {
+    const doc = requireDoc(ctx);
+    const q = await getLiveQuestion(code.trim().toLowerCase());
+    if (!q || q.docId !== doc.id) throw new LiveError(`No live question "${code}" in this document. list_live_answers lists them.`, 404);
+    return q;
+  }
+  const liveGuard = <T>(fn: () => Promise<T>) => guard(async () => {
+    try { return await fn(); } catch (err) { if (err instanceof LiveError) return fail(err.message); throw err; }
+  });
+
+  server.registerTool('add_live_question', {
+    title: 'Put a live audience question on an artboard',
+    description:
+      'Places a Mentimeter-style live question on a slide: the question, a QR code and short URL people answer at on their phones '
+      + '(no account), and their answers as cards that update while the slide is shown — on the canvas and in presentation mode. '
+      + 'Picks up the artboard’s font and text colour unless given. The presenter can hide answers and close the question from the slide; '
+      + 'list_live_answers reads them afterwards. Defaults to filling the artboard inside a margin.',
+    inputSchema: {
+      question: z.string().min(1).max(200),
+      artboardId: z.string().describe('The slide (artboard) to put it on.'),
+      x: z.number().optional().describe('Left edge within the artboard, px.'),
+      y: z.number().optional().describe('Top edge within the artboard, px.'),
+      width: z.number().min(240).max(8000).optional(),
+      height: z.number().min(160).max(8000).optional(),
+      font: z.string().max(80).optional().describe('Font family for the board, e.g. "Inter". Google Fonts families load automatically.'),
+      ink: z.string().max(40).optional().describe('Text colour, e.g. #111 or white on a dark slide.'),
+      accent: z.string().max(40).optional().describe('Colour for names and the answer count.'),
+      card: z.string().max(40).optional().describe('Card background. Defaults to a faint tint of the text colour.'),
+    },
+    annotations: { destructiveHint: false },
+  }, async ({ question, artboardId, x, y, width, height, font, ink, accent, card }) => liveGuard(async () => {
+    const doc = requireDoc(ctx);
+    const artboard = node(doc, artboardId);
+    if (artboard.type !== 'artboard') return fail(`${artboardId} is a ${artboard.type}; a live question goes on an artboard.`);
+    const q = await createLiveQuestion(doc.id, question);
+    const embed = makeLiveQuestionNode({
+      baseUrl: ctx.baseUrl, code: q.code, question: q.question, artboard, doc,
+      x, y, width, height, look: { font, ink, accent, card },
+    });
+    commit(ctx, [{ t: 'insert', nodes: [embed], parent: artboard.id, index: artboard.children.length }]);
+    return json({
+      id: embed.id, code: q.code, answerUrl: `${ctx.baseUrl}/q/${q.code}`, board: embed.attrs.src,
+      next: 'Answers appear on the slide by themselves. list_live_answers reads them; hide_live_answer moderates.',
+    });
+  }));
+
+  server.registerTool('list_live_answers', {
+    title: 'Read the answers to live questions',
+    description:
+      'Every live question in this document with its answers, oldest first — hidden ones included and marked. Pass code for one question.',
+    inputSchema: {
+      code: z.string().optional().describe('One question’s code (the part after /q/). Omit for all of them.'),
+      includeHidden: z.boolean().optional().default(true),
+    },
+    annotations: { readOnlyHint: true },
+  }, async ({ code, includeHidden }) => liveGuard(async () => {
+    const doc = requireDoc(ctx);
+    const all = code ? [await ownLiveQuestion(code)] : await liveQuestionsFor(doc.id);
+    return json(all.map((q) => ({
+      code: q.code,
+      question: q.question,
+      open: q.open,
+      answerUrl: `${ctx.baseUrl}/q/${q.code}`,
+      shown: visibleAnswers(q).length,
+      total: q.answers.length,
+      answers: q.answers.filter((a) => includeHidden || !a.hidden)
+        .map((a) => ({ id: a.id, name: a.name, text: a.text, at: new Date(a.createdAt).toISOString(), hidden: a.hidden })),
+    })));
+  }));
+
+  server.registerTool('hide_live_answer', {
+    title: 'Hide (or unhide) a live answer',
+    description: 'Takes an answer off the slide. It stays stored and list_live_answers still returns it. hidden: false puts it back.',
+    inputSchema: {
+      code: z.string(),
+      answerId: z.string(),
+      hidden: z.boolean().optional().default(true),
+    },
+  }, async ({ code, answerId, hidden }) => liveGuard(async () => {
+    const q = await ownLiveQuestion(code);
+    const answer = await hideLiveAnswer(q.code, answerId, hidden);
+    return json({ id: answer.id, hidden: answer.hidden });
+  }));
+
+  server.registerTool('set_live_question', {
+    title: 'Open, close, reword or clear a live question',
+    description:
+      'open: false stops new answers (the slide says closed); open: true reopens. question rewords it. clear: true hides every answer on the slide — they stay stored.',
+    inputSchema: {
+      code: z.string(),
+      open: z.boolean().optional(),
+      question: z.string().min(1).max(200).optional(),
+      clear: z.boolean().optional(),
+    },
+  }, async ({ code, open, question, clear }) => liveGuard(async () => {
+    const q = await ownLiveQuestion(code);
+    const updated = await updateLiveQuestion(q.code, { open, question });
+    const cleared = clear ? await clearLiveAnswers(q.code) : 0;
+    return json({ code: updated.code, question: updated.question, open: updated.open, cleared });
   }));
 
   server.registerTool('write_html', {

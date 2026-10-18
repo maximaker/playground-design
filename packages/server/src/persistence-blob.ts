@@ -21,7 +21,7 @@
  */
 
 import { createHash } from 'node:crypto';
-import type { CanvasDocument } from '@playground/shared';
+import type { CanvasDocument, LiveQuestion } from '@playground/shared';
 import type {
   DocSummary, Persistence, StoredAsset, StoredConnection, StoredMembership, StoredProject,
   StoredInvite, StoredPublication, StoredSession, StoredShare, StoredSnapshot, StoredThumbnail,
@@ -352,6 +352,21 @@ export class BlobPersistence implements Persistence {
       return loaded.filter((s): s is StoredShare => !!s);
     });
     return all.filter((s) => s.docId === docId).sort((a, b) => b.createdAt - a.createdAt);
+  }
+
+  async saveLiveQuestion(q: LiveQuestion) {
+    this.invalidate('live');
+    await this.putJson(`live/${q.code}.json`, q);
+  }
+  async loadLiveQuestion(code: string) { return this.getJson<LiveQuestion>(`live/${code}.json`); }
+  async loadLiveQuestions(docId: string): Promise<LiveQuestion[]> {
+    const all = await this.cachedList('live', async () => {
+      const { list } = await this.blob();
+      const { blobs } = await list({ prefix: 'live/', token: this.token, limit: 500 });
+      const loaded = await Promise.all(blobs.map((b) => this.getJson<LiveQuestion>(b.pathname)));
+      return loaded.filter((q): q is LiveQuestion => !!q);
+    });
+    return all.filter((q) => q.docId === docId).sort((a, b) => a.createdAt - b.createdAt);
   }
 
   async saveAsset(a: StoredAsset) {

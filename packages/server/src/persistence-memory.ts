@@ -1,6 +1,6 @@
 /** In-memory persistence. Used as a fallback and by tests; nothing survives a restart. */
 
-import type { CanvasDocument } from '@playground/shared';
+import type { CanvasDocument, LiveQuestion } from '@playground/shared';
 import type {
   DocSummary, Persistence, StoredAsset, StoredConnection, StoredMembership, StoredProject,
   StoredInvite, StoredPublication, StoredSession, StoredShare, StoredSnapshot, StoredThumbnail,
@@ -14,6 +14,7 @@ export class MemoryPersistence implements Persistence {
   private docs = new Map<string, { doc: CanvasDocument; updatedAt: number }>();
   private connections = new Map<string, StoredConnection>();
   private shares = new Map<string, StoredShare>();
+  private live = new Map<string, LiveQuestion>();
   private projects = new Map<string, StoredProject>();
   private assets = new Map<string, StoredAsset>();
   private snapshots = new Map<string, StoredSnapshot>();
@@ -105,6 +106,13 @@ export class MemoryPersistence implements Persistence {
       .sort((a, b) => b.createdAt - a.createdAt);
   }
   async loadShare(token: string) { return this.shares.get(token) ?? null; }
+
+  async saveLiveQuestion(q: LiveQuestion) { this.live.set(q.code, structuredClone(q)); }
+  async loadLiveQuestion(code: string) { const q = this.live.get(code); return q ? structuredClone(q) : null; }
+  async loadLiveQuestions(docId: string) {
+    return [...this.live.values()].filter((q) => q.docId === docId)
+      .sort((a, b) => a.createdAt - b.createdAt).map((q) => structuredClone(q));
+  }
 
   async saveAsset(asset: StoredAsset) { this.assets.set(asset.id, asset); }
   async loadAsset(id: string) { return this.assets.get(id) ?? null; }

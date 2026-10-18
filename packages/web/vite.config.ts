@@ -17,6 +17,7 @@ export default defineConfig({
       // links it hands out point here in dev, so they must pass through too.
       '^/p/': { target: API, changeOrigin: true },
       '^/mcp/': { target: API, changeOrigin: true },
+      '^/q/': { target: API, changeOrigin: true },
       '/ws': { target: API.replace('http', 'ws'), ws: true },
     },
   },

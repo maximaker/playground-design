@@ -8,7 +8,7 @@
  * backend did not turn the whole codebase async.
  */
 
-import type { CanvasDocument } from '@playground/shared';
+import type { CanvasDocument, LiveQuestion } from '@playground/shared';
 
 export interface DocSummary {
   id: string;
@@ -242,6 +242,11 @@ export interface Persistence {
   loadThumbnail(docId: string, key: string): Promise<StoredThumbnail | null>;
 
   /** The document's activity log (what was done, by whom, when). Kept so it survives restarts. */
+  /** Live questions and their answers, one record per question. */
+  saveLiveQuestion(q: LiveQuestion): Promise<void>;
+  loadLiveQuestion(code: string): Promise<LiveQuestion | null>;
+  loadLiveQuestions(docId: string): Promise<LiveQuestion[]>;
+
   saveHistory(docId: string, entries: unknown[]): Promise<void>;
   loadHistory(docId: string): Promise<unknown[]>;
   saveSnapshot(snapshot: StoredSnapshot): Promise<void>;

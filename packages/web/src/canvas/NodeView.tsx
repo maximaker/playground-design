@@ -13,7 +13,7 @@
 
 import { createElement, memo, useCallback, useEffect, useRef } from 'react';
 import {
-  type ExpandedNode, type NodeId, codeComponentOf, contestedProperties, expandInstance, resolvedCodeProps, sanitizeMarkup,
+  type ExpandedNode, type NodeId, LIVE_ATTR, codeComponentOf, contestedProperties, expandInstance, resolvedCodeProps, sanitizeMarkup,
 } from '@playground/shared';
 import { CodeFrame } from './CodeFrame.tsx';
 import { useCanvas, getDoc, getNodeById } from '../state/store.ts';
@@ -35,6 +35,10 @@ export const NodeView = memo(function NodeView({ id, isRoot }: Props) {
 
   const editingText = useCanvas((s) => s.editingText);
   const node = getNodeById(id);
+  // A live question takes clicks — hiding an answer, closing the question —
+  // only while presenting or once selected; otherwise it is an ordinary embed
+  // the canvas can select and move.
+  const liveActive = useCanvas((s) => !!node?.attrs[LIVE_ATTR] && (!!s.present || s.selection.includes(id)));
   const doc = getDoc();
   if (!doc || !node || !node.visible) return null;
 
@@ -47,6 +51,7 @@ export const NodeView = memo(function NodeView({ id, isRoot }: Props) {
   }
 
   const props = domProps(node.attrs, id, node.styles, isRoot, contestedProperties(node));
+  if (liveActive) props.style = { ...(props.style as object), pointerEvents: 'auto' };
 
   if (node.type === 'code') {
     const component = codeComponentOf(doc, node);

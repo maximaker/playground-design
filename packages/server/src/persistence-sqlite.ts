@@ -4,7 +4,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { CanvasDocument } from '@playground/shared';
+import type { CanvasDocument, LiveQuestion } from '@playground/shared';
 import type {
   DocSummary, MemberRole, Persistence, ShareRole, StoredAsset, StoredConnection, StoredMembership,
   StoredInvite, StoredProject, StoredPublication, StoredSession, StoredShare, StoredSnapshot,
@@ -67,6 +67,16 @@ export class SqlitePersistence implements Persistence {
         revoked INTEGER NOT NULL DEFAULT 0
       );
       CREATE INDEX IF NOT EXISTS shares_doc ON shares(doc_id);
+
+      -- A live question and its answers in one row: answers are read and
+      -- written together, and a slide holds tens of them, not thousands.
+      CREATE TABLE IF NOT EXISTS live_questions (
+        code TEXT PRIMARY KEY,
+        doc_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+        data TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS live_questions_doc ON live_questions(doc_id);
 
       CREATE TABLE IF NOT EXISTS assets (
         id TEXT PRIMARY KEY,
@@ -246,6 +256,21 @@ export class SqlitePersistence implements Persistence {
   async loadShare(token: string): Promise<StoredShare | null> {
     const row = this.db.prepare('SELECT * FROM shares WHERE token = ?').get(token) as Record<string, unknown> | undefined;
     return row ? shareRow(row) : null;
+  }
+
+  async saveLiveQuestion(q: LiveQuestion): Promise<void> {
+    this.db.prepare('INSERT OR REPLACE INTO live_questions (code, doc_id, data, created_at) VALUES (?, ?, ?, ?)')
+      .run(q.code, q.docId, JSON.stringify(q), q.createdAt);
+  }
+
+  async loadLiveQuestion(code: string): Promise<LiveQuestion | null> {
+    const row = this.db.prepare('SELECT data FROM live_questions WHERE code = ?').get(code) as { data: string } | undefined;
+    return row ? JSON.parse(row.data) as LiveQuestion : null;
+  }
+
+  async loadLiveQuestions(docId: string): Promise<LiveQuestion[]> {
+    const rows = this.db.prepare('SELECT data FROM live_questions WHERE doc_id = ? ORDER BY created_at').all(docId) as { data: string }[];
+    return rows.map((r) => JSON.parse(r.data) as LiveQuestion);
   }
 
   async saveAsset(a: StoredAsset): Promise<void> {

@@ -61,8 +61,12 @@ import { idUrl, userFromCookies } from './sso.ts';
 import { connect } from './connect.ts';
 import { isOnMountedVolume } from './volume.ts';
 import { dirname } from 'node:path';
-import { rateLimit, securityHeaders } from './security.ts';
+import { clientIp, rateLimit, securityHeaders } from './security.ts';
 import { bodyLimit } from 'hono/body-limit';
+import {
+  LiveError, answerPageHtml, boardHtml, clearLiveAnswers, createLiveQuestion, getLiveQuestion, hideLiveAnswer,
+  submitLiveAnswer, updateLiveQuestion, waitForBoardState,
+} from './live.ts';
 
 const PORT = Number(process.env.PORT ?? 4000);
 const PUBLIC_URL =
@@ -128,6 +132,8 @@ app.use('/api/shares/*', rateLimit({ name: 'shares', limit: 120, windowMs: 60_00
   bodyLimit({ maxSize: 1024 * 1024, onError: (c) => c.json({ error: 'Request body too large.' }, 413) }));
 app.use('/api/connect/*', rateLimit({ name: 'connect', limit: 120, windowMs: 60_000 }));
 app.use('/mcp/*', rateLimit({ name: 'mcp', limit: 600, windowMs: 60_000 }));
+// Answers carry their own per-client limit (live.ts); this only caps the body.
+app.use('/q/*', bodyLimit({ maxSize: 8 * 1024, onError: (c) => c.json({ error: 'Request body too large.' }, 413) }));
 
 /**
  * Turns an unhandled failure into something the caller can act on.
@@ -242,6 +248,8 @@ api.use('*', async (c, next) => {
 async function documentIdFor(method: string, path: string): Promise<string | null> {
   const seg = path.split('/').filter(Boolean);
   if (seg[0] === 'documents' && seg[1] && seg[1] !== 'import') return seg[1];
+  // Moderating a live question names its code; the gate needs its document.
+  if (seg[0] === 'live' && seg[1]) return (await getLiveQuestion(seg[1]))?.docId ?? null;
   // Revoking a connection names the code, not the document it belongs to.
   if (seg[0] === 'connections' && seg[1] && method === 'DELETE') {
     const conn = await (await persistence()).loadConnection(seg[1]);
@@ -1348,6 +1356,53 @@ api.post('/documents/:id/assets/import', async (c) => {
   }
 });
 
+// ---------------------------------------------------------------------------
+// Live questions — moderation. Public answering is under /q below.
+// ---------------------------------------------------------------------------
+
+/** A LiveError is the caller's to fix and says so; anything else is ours. */
+function liveFailure(c: import('hono').Context, err: unknown) {
+  if (err instanceof LiveError) return c.json({ error: err.message }, err.status);
+  throw err;
+}
+
+api.post('/documents/:id/live', async (c) => {
+  const body = await c.req.json().catch(() => ({})) as { question?: string };
+  try {
+    const q = await createLiveQuestion(c.req.param('id'), body.question ?? '');
+    return c.json({ code: q.code, question: q.question, url: `${PUBLIC_URL}/q/${q.code}`, board: `${PUBLIC_URL}/q/${q.code}/board` }, 201);
+  } catch (err) { return liveFailure(c, err); }
+});
+
+api.get('/live/:code', async (c) => {
+  const q = await getLiveQuestion(c.req.param('code'));
+  if (!q) return c.json({ error: 'No such question.' }, 404);
+  return c.json({ ...q, canModerate: atLeast(c.get('role'), 'editor') });
+});
+
+api.patch('/live/:code', async (c) => {
+  const body = await c.req.json().catch(() => ({})) as { question?: string; open?: boolean };
+  try {
+    return c.json(await updateLiveQuestion(c.req.param('code'), {
+      question: typeof body.question === 'string' ? body.question : undefined,
+      open: typeof body.open === 'boolean' ? body.open : undefined,
+    }));
+  } catch (err) { return liveFailure(c, err); }
+});
+
+api.post('/live/:code/answers/:answerId/hide', async (c) => {
+  const body = await c.req.json().catch(() => ({})) as { hidden?: boolean };
+  try {
+    return c.json(await hideLiveAnswer(c.req.param('code'), c.req.param('answerId'), body.hidden !== false));
+  } catch (err) { return liveFailure(c, err); }
+});
+
+api.post('/live/:code/clear', async (c) => {
+  try {
+    return c.json({ hidden: await clearLiveAnswers(c.req.param('code')) });
+  } catch (err) { return liveFailure(c, err); }
+});
+
 // heymax connect does its own auth (session or CONNECT_TOKEN), so it is
 // mounted before the API and its gate ever see the request.
 app.route('/api/connect', connect);
@@ -1381,6 +1436,42 @@ app.get('/p/:slug', async (c) => {
     // publishing from a design tool is that edits show up.
     'cache-control': 'public, max-age=30, stale-while-revalidate=300',
   });
+});
+
+/**
+ * A live question: the answer page, the board that sits on the slide, and the
+ * state the board polls. No account; the code is the whole credential, and it
+ * only ever lets someone add an answer.
+ */
+app.get('/q/:code', async (c) => {
+  const code = c.req.param('code').toLowerCase();
+  const q = await getLiveQuestion(code);
+  return c.html(answerPageHtml(q, code), q ? 200 : 404, { 'cache-control': 'no-store', 'x-robots-tag': 'noindex' });
+});
+
+app.post('/q/:code/answers', async (c) => {
+  const body = await c.req.json().catch(() => ({})) as Record<string, unknown>;
+  try {
+    const answer = await submitLiveAnswer(c.req.param('code').toLowerCase(), body, clientIp(c) ?? 'unknown');
+    return c.json({ ok: true, id: answer.id }, 201);
+  } catch (err) { return liveFailure(c, err); }
+});
+
+app.get('/q/:code/board', async (c) => {
+  const q = await getLiveQuestion(c.req.param('code'));
+  if (!q) return c.html(answerPageHtml(null, c.req.param('code')), 404);
+  const state = await waitForBoardState(q.code, -1, 0);
+  return c.html(boardHtml(q, state!.v, PUBLIC_URL, {
+    font: c.req.query('font'), ink: c.req.query('ink'), accent: c.req.query('accent'), card: c.req.query('card'),
+  }), 200, { 'cache-control': 'no-store', 'x-robots-tag': 'noindex' });
+});
+
+app.get('/q/:code/state', async (c) => {
+  const since = Number(c.req.query('v') ?? -1);
+  const wait = Math.max(0, Math.min(25_000, Number(c.req.query('wait') ?? 0) || 0));
+  const state = await waitForBoardState(c.req.param('code'), Number.isFinite(since) ? since : -1, wait, c.req.raw.signal);
+  if (!state) return c.json({ error: 'No such question.' }, 404);
+  return c.json(state, 200, { 'cache-control': 'no-store' });
 });
 
 /** A handoff site: read-only spec for a document or one section, no account. */
