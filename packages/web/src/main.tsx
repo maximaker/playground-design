@@ -5,6 +5,7 @@ import { ErrorBoundary } from './ui/ErrorBoundary.tsx';
 import './kit-tokens.css';
 import './kit-topbar.css';
 import './styles.css';
+import './tempo.css';
 import { wireSwitcher } from './ui/switcher.ts';
 
 // Esc and an outside click close the app switcher everywhere.

@@ -12,15 +12,16 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { FamilyTopBar } from './ui/FamilyTopBar.tsx';
+import { AppSwitcher } from './ui/FamilyTopBar.tsx';
+import { LogoMark } from './ui/Logo.tsx';
 import { ConnectSearch, LinkedWork } from './connect.tsx';
 import { useLayoutMode } from './hooks/useLayout.ts';
 import { Icon } from './ui/Icon.tsx';
 import { Settings } from './ui/Settings.tsx';
 import type { Appearance } from './state/appearance.ts';
 import type { useSession } from './state/session.ts';
-import { AccountMenu } from './ui/AccountMenu.tsx';
-import { dialItems, dialPanel, firstName, navigate, openRow, useDial } from './ui/Dial.ts';
+import { AccountMenu, initials } from './ui/AccountMenu.tsx';
+import { navigate } from './ui/Dial.ts';
 
 interface DocSummary {
   id: string; name: string; rev: number; updatedAt: number; nodeCount: number;
@@ -262,21 +263,6 @@ export function Home({ onOpen, appearance, onAppearance, session }: {
   };
 
 
-  useDial(session.user ? {
-    label: firstName(session.user.name),
-    items: dialItems(loading ? null : docs.length, false),
-    activeId: filter === null ? 'home' : 'docs',
-    panel: dialPanel(docs, projects, null, typeof filter === 'string' && filter !== 'unfiled' ? filter : null),
-    corner: false,
-    onSelect: (id) => {
-      if (id === 'search') searchRef.current?.focus();
-      else if (id === 'new') void create();
-      else if (id === 'templates') openStart();
-      else if (id === 'import') importRef.current?.click();
-      else if (id === 'home') { navigate('/'); window.scrollTo({ top: 0 }); }
-    },
-    onRow: openRow,
-  } : null);
 
   const setScope = (next: Filter) => {
     navigate(typeof next === 'string' && next !== 'unfiled' ? `/?project=${encodeURIComponent(next)}` : '/');
@@ -289,11 +275,63 @@ export function Home({ onOpen, appearance, onAppearance, session }: {
     : projects.find((p) => p.id === filter)?.name ?? 'Project';
 
   return (
-    <div className="home-shell">
-    <FamilyTopBar
-      middle={
-        <label className="library-search family-search">
-          <Icon name="search" size={13} />
+    <div className="home-shell tempo-stage">
+    <div className="tempo-window">
+    <aside className="tempo-side" aria-label="Library">
+      <div className="tempo-brand">
+        <a href="/" onClick={(e) => { e.preventDefault(); setScope(null); }}>
+          <span className="tempo-mark" aria-hidden><i /></span>
+          Playground
+        </a>
+        <AppSwitcher />
+      </div>
+      <nav className="tempo-navgroup" aria-label="Documents">
+        <div className="tempo-label">Library</div>
+        <button className="tempo-nav" aria-current={filter === null ? 'page' : undefined} onClick={() => setScope(null)}>
+          <Icon name="folder" size={18} /> All documents <em>{loading ? '' : docs.length}</em>
+        </button>
+        <button className="tempo-nav" aria-current={filter === 'unfiled' ? 'page' : undefined} onClick={() => setScope('unfiled')}>
+          <Icon name="page" size={18} /> Unfiled <em>{loading ? '' : unfiled}</em>
+        </button>
+      </nav>
+      <nav className="tempo-navgroup" aria-label="Projects">
+        <div className="tempo-label">Projects</div>
+        {projects.map((p) => (
+          <button
+            key={p.id}
+            className="tempo-nav"
+            aria-current={filter === p.id ? 'page' : undefined}
+            onClick={() => setScope(p.id)}
+            onDragOver={(e) => { if (e.dataTransfer.types.includes('text/x-playground-doc')) { e.preventDefault(); e.currentTarget.classList.add('is-drop'); } }}
+            onDragLeave={(e) => e.currentTarget.classList.remove('is-drop')}
+            onDrop={(e) => {
+              e.currentTarget.classList.remove('is-drop');
+              const id = e.dataTransfer.getData('text/x-playground-doc');
+              if (id) { e.preventDefault(); void file(id, p.id); }
+            }}
+          >
+            <span className="hm-dot" style={faceStyle(p.id)} aria-hidden /> <span className="tempo-nav-text">{p.name}</span> <em>{p.documentCount}</em>
+          </button>
+        ))}
+        <button className="tempo-nav is-quiet" onClick={addProject}><Icon name="plus" size={18} /> New project</button>
+      </nav>
+      <nav className="tempo-navgroup" aria-label="Make">
+        <div className="tempo-label">Make</div>
+        <button className="tempo-nav" onClick={() => void create()} disabled={creating}><Icon name="plus" size={18} /> Blank page</button>
+        <button className="tempo-nav" onClick={openStart}><Icon name="grid" size={18} /> Starting points</button>
+        <button className="tempo-nav" onClick={() => importRef.current?.click()}><Icon name="upload" size={18} /> Import a bundle</button>
+      </nav>
+      {session.user && (
+        <button className="tempo-me" onClick={() => setShowSettings(true)} title="Settings">
+          <span className="tempo-initials" aria-hidden>{initials(session.user.name)}</span>
+          <div><b>{session.user.name}</b><span>Settings</span></div>
+        </button>
+      )}
+    </aside>
+    <div className="tempo-main">
+    <header className="tempo-bar">
+        <label className="library-search family-search tempo-search">
+          <Icon name="search" size={15} />
           <input
             ref={searchRef}
             type="search"
@@ -303,8 +341,12 @@ export function Home({ onOpen, appearance, onAppearance, session }: {
             onChange={(e) => setQuery(e.target.value)}
           />
         </label>
-      }
-      end={
+        <span className="topbar-spacer" />
+        <div className="hm-dots" aria-hidden="true">
+          {['studio', 'artifactory', 'playground', 'notes', 'kit'].map((k) => (
+            <span key={k} data-current={k === 'playground' ? '' : undefined} />
+          ))}
+        </div>
         <div className="home-account">
           {/* The library has no palette of its own, so ⌘K here searches across heymax. */}
           <ConnectSearch />
@@ -315,10 +357,8 @@ export function Home({ onOpen, appearance, onAppearance, session }: {
             <AccountMenu user={session.user} onAppearance={() => setShowSettings(true)} onSignedOut={() => { void session.refresh(); }} />
           )}
         </div>
-      }
-    />
-    <div className="hm-dial-offset">
-    <div className="home">
+    </header>
+    <div className="home tempo-content">
       <div className="home-head">
         <div className="library-title">
           <h1 className="home-page-title">{title === 'All documents' ? 'Documents' : title}</h1>
@@ -450,7 +490,7 @@ export function Home({ onOpen, appearance, onAppearance, session }: {
 
               <div className="library-tools">
                 {/* What the sidebar used to choose: everything, unfiled, or one project. */}
-                <label className="library-sort">
+                <label className="library-sort library-scope">
                   <span className="sr-only">Show</span>
                   <select
                     aria-label="Show"
@@ -624,6 +664,7 @@ export function Home({ onOpen, appearance, onAppearance, session }: {
           </section>
         </div>
       )}
+    </div>
     </div>
     </div>
     </div>

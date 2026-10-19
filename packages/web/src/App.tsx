@@ -37,7 +37,7 @@ import { Settings } from './ui/Settings.tsx';
 import { Landing } from './Landing.tsx';
 import { Join } from './Join.tsx';
 import { AccountMenu } from './ui/AccountMenu.tsx';
-import { createBlank, dialItems, dialPanel, firstName, importBundleFile, navigate, openRow, useDial, useLibrary } from './ui/Dial.ts';
+import { createBlank, importBundleFile, navigate } from './ui/Dial.ts';
 import { goToSignIn, useSession } from './state/session.ts';
 import { OverflowMenu } from './ui/OverflowMenu.tsx';
 import { CommandPalette } from './ui/CommandPalette.tsx';
@@ -393,28 +393,14 @@ function Editor({ source, onHome, appearance, onAppearance, session }: {
   });
   useClipboard();
 
-  // Navigation: the dial as a knob in the corner, so the panels keep their
-  // room. A share-link viewer has no library to navigate, so no dial.
-  const withDial = source.kind === 'doc' && !!session.user;
-  const library = useLibrary(withDial);
-  const openDocId = source.kind === 'doc' ? source.id : null;
-  useDial(withDial ? {
-    label: firstName(session.user?.name),
-    items: dialItems(library.docs ? library.docs.length : null, true),
-    activeId: 'docs',
-    panel: dialPanel(library.docs ?? [], library.projects, openDocId, null),
-    corner: true,
-    onSelect: (id) => {
-      const projectId = useCanvas.getState().doc?.projectId ?? null;
-      if (id === 'search') setShowPalette(true);
-      else if (id === 'new') void createBlank(projectId).then((d) => navigate(`/d/${d}`));
-      else if (id === 'templates') navigate('/#start');
-      else if (id === 'components') { setLeftTab('components'); setOpenPanel('left'); }
-      else if (id === 'import') void importBundleFile(projectId).then((d) => { if (d) navigate(`/d/${d}`); });
-      else if (id === 'home') navigate('/');
-    },
-    onRow: openRow,
-  } : null);
+  // Navigation lives on Home's side nav; in the editor the palette carries
+  // what the corner dial used to (new, starting points, import, all documents).
+  const withLibrary = source.kind === 'doc' && !!session.user;
+  const libraryActions = withLibrary ? {
+    newBlank: () => void createBlank(useCanvas.getState().doc?.projectId ?? null).then((d) => navigate(`/d/${d}`)),
+    startingPoints: () => navigate('/#start'),
+    importBundle: () => void importBundleFile(useCanvas.getState().doc?.projectId ?? null).then((d) => { if (d) navigate(`/d/${d}`); }),
+  } : {};
 
   const readOnly = source.kind === 'share';
 
@@ -852,6 +838,7 @@ function Editor({ source, onHome, appearance, onAppearance, session }: {
             openAppearance: () => setShowSettings(true),
             present: startPresenting,
             goHome: onHome,
+            ...libraryActions,
           }}
         />
       )}

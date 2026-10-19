@@ -31,6 +31,10 @@ export interface PaletteActions {
   present: () => void;
   /** Null for a viewer on a share link, who has no library to go back to. */
   goHome: (() => void) | null;
+  /** What the editor's dial used to offer; absent for a share-link viewer. */
+  newBlank?: () => void;
+  startingPoints?: () => void;
+  importBundle?: () => void;
 }
 
 interface Entry {
@@ -247,6 +251,9 @@ function buildEntries({
   action('spec', 'Spec', 'ruler', () => actions.openPanel('spec'), undefined, 'Measured size, tokens and code');
   action('history', 'Version history', 'history', () => useCanvas.getState().requestPanel('history'));
   if (actions.goHome) action('home', 'All documents', 'page', actions.goHome);
+  if (actions.newBlank) action('new-blank', 'New blank page', 'plus', actions.newBlank);
+  if (actions.startingPoints) action('starting-points', 'Starting points', 'grid', actions.startingPoints);
+  if (actions.importBundle) action('import-bundle', 'Import a bundle', 'upload', actions.importBundle);
 
   // --- Layers --------------------------------------------------------------
 
