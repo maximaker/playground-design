@@ -29,3 +29,4 @@ export * from './svg.ts';
 export * from './figma.ts';
 export * from './live.ts';
 export * from './marquee.ts';
+export * from './timer.ts';

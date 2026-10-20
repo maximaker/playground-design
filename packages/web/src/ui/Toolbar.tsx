@@ -14,6 +14,7 @@ import { MOD, TOOLS } from './tools.ts';
 import { useViewTheme } from '../state/viewTheme.ts';
 import { zoomStep, zoomTo, zoomToFit, zoomToSelection } from '../hooks/commands.ts';
 import { OverflowMenu } from './OverflowMenu.tsx';
+import { insertTimer } from '../canvas/insertTimer.ts';
 import { getArtboardSize } from '@playground/shared';
 import { getDoc } from '../state/store.ts';
 import { getFrame } from '../canvas/registry.ts';
@@ -165,6 +166,11 @@ export function Toolbar({ compact }: { compact?: boolean }) {
       )}
 
       {GROUPS.map((g) => <ToolGroup key={g.id} group={g} faces={faces} readOnly={readOnly} />)}
+      {!compact && !readOnly && (
+        <button className="tip is-top" data-tip="Countdown timer — runs in Present" aria-label="Insert countdown timer" onClick={insertTimer}>
+          <Icon name="timer" size={16} />
+        </button>
+      )}
       {!compact && !readOnly && <span className="toolbar-divider" />}
       {!compact && !readOnly && <DeviceToggle />}
       {!compact && <ViewAsSelect />}

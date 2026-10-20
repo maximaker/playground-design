@@ -1565,3 +1565,44 @@ test('link_items links a document to a Studio task through the links store', asy
   }
   await agent.close();
 });
+
+test('add_timer: schema, placement and a static face in exported HTML', async () => {
+  const { tools } = await client.listTools();
+  const t = tools.find((x) => x.name === 'add_timer');
+  assert.ok(t, 'add_timer is listed');
+  const props = (t!.inputSchema as { properties: Record<string, { enum?: string[] }>; required?: string[] }).properties;
+  for (const k of ['artboardId', 'minutes', 'seconds', 'autostart', 'variant', 'end', 'chime', 'label']) assert.ok(props[k], `add_timer has ${k}`);
+  assert.deepEqual(props.autostart!.enum, ['slide', 'click']);
+  assert.deepEqual(props.variant!.enum, ['ring', 'pill', 'bar']);
+  assert.deepEqual(props.end!.enum, ['message', 'pulse']);
+  assert.deepEqual((t!.inputSchema as { required?: string[] }).required, ['artboardId']);
+
+  const info = jsonOf<{ artboards: { id: string }[] }>(await client.callTool({ name: 'get_basic_info', arguments: {} }));
+  const artboard = info.artboards[0]!.id;
+  const made = jsonOf<{ id: string; seconds: number }>(await client.callTool({
+    name: 'add_timer', arguments: { artboardId: artboard, minutes: 2, seconds: 30, autostart: 'click', variant: 'pill', label: 'Pairs' },
+  }));
+  assert.equal(made.seconds, 150);
+  const doc = (await getDocument(docId))!;
+  const node = doc.nodes[made.id]!;
+  assert.equal(node.attrs['data-timer'], '150');
+  assert.equal(node.attrs['data-timer-start'], 'click');
+  assert.equal(node.attrs['data-timer-style'], 'pill');
+  assert.equal(node.parent, artboard);
+  assert.equal(node.styles.position, 'absolute');
+
+  const html = textOf(await client.callTool({ name: 'get_html', arguments: { id: made.id } }));
+  assert.match(html, /2:30/);
+
+  assert.ok(isError(await client.callTool({ name: 'add_timer', arguments: { artboardId: artboard, minutes: 0, seconds: 0 } })));
+  assert.ok(isError(await client.callTool({ name: 'add_timer', arguments: { artboardId: artboard, variant: 'donut' } })));
+
+  // The same thing through write_html.
+  const w = jsonOf<{ roots: { id: string }[] }>(await client.callTool({
+    name: 'write_html',
+    arguments: { targetId: artboard, mode: 'insert-children', html: '<timer minutes="1" seconds="5" autostart="slide" variant="bar"></timer>' },
+  }));
+  const fromHtml = (await getDocument(docId))!.nodes[w.roots[0]!.id]!;
+  assert.equal(fromHtml.attrs['data-timer'], '65');
+  assert.equal(fromHtml.attrs['data-timer-style'], 'bar');
+});

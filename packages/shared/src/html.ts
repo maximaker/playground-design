@@ -8,6 +8,7 @@
 
 import { sanitizeMarkup } from './sanitize.ts';
 import { fontFamiliesIn, googleFontsHref } from './fonts.ts';
+import { TIMER_ASPECT, TIMER_ATTR, isTimer, makeTimerNode, readTimer, timerSpecFromTag, timerSvg } from './timer.ts';
 import { parse as parseHtmlDom, type HTMLElement as ParsedElement } from 'node-html-parser';
 import {
   type CanvasDocument, type CanvasNode, type ComponentDef, type InstanceOverride, type NodeId, type NodeType, type StyleMap,
@@ -169,6 +170,8 @@ export function emitHtml(doc: CanvasDocument, rootId: NodeId, opts: EmitOptions 
     if (VOID_TAGS.has(tag)) return `${pad}<${tag}${attrStr} />`;
     if (node.type === 'vector') return `${pad}<${tag}${attrStr}>${sanitizeMarkup(node.text ?? '')}</${tag}>`;
     if (node.type === 'text') return `${pad}<${tag}${attrStr}>${escapeText(node.text ?? '')}</${tag}>`;
+    // A countdown's face, at full duration: export and thumbnails are static.
+    if (isTimer(node)) return `${pad}<${tag}${attrStr}>${timerSvg(readTimer(node.attrs))}</${tag}>`;
 
     // Mixed text and inline elements are one run: no whitespace between them.
     // Also flat where whitespace is significant: under pre-wrap the indentation
@@ -532,6 +535,36 @@ export function parseHtml(html: string, opts: ParseOptions = {}): ParseResult {
     return frame.id;
   };
 
+  // A countdown: `<timer minutes="3">` as an agent writes it, or the
+  // `<div data-timer>` export emits (its SVG face is regenerated, not kept).
+  const walkTimer = (el: ParsedElement, parent: NodeId | null, authored: boolean): NodeId => {
+    const raw: Record<string, string> = {};
+    for (const [k, v] of Object.entries(el.attributes ?? {})) raw[k] = String(v);
+    let spec;
+    if (authored) {
+      const r = timerSpecFromTag(raw);
+      warnings.push(...r.warnings);
+      spec = r.spec;
+    } else spec = readTimer(raw);
+    const { base } = resolveStyles(el, rules, ruleHits);
+    const made = makeTimerNode(spec);
+    const styles: StyleMap = { 'font-family': made.styles['font-family']!, ...base };
+    if (!styles.width && !styles.height) {
+      const w = spec.variant === 'ring' ? 320 : spec.variant === 'pill' ? 300 : 600;
+      styles.width = `${w}px`;
+      styles.height = `${Math.round(w / TIMER_ASPECT[spec.variant])}px`;
+    }
+    const node = makeNode({
+      ...made, id: newId(), parent, styles,
+      name: el.getAttribute('data-name') ?? el.getAttribute('name') ?? made.name,
+    });
+    if (raw.id) node.attrs.id = raw.id;
+    elements++;
+    nodes.push(node);
+    if (parent === null) roots.push(node.id);
+    return node.id;
+  };
+
   // Containers whose layout drops edge spaces (flex, grid): inline runs inside
   // them are trimmed; everywhere else a run keeps one space at each edge.
   const collapsing = new Set<NodeId>();
@@ -540,6 +573,7 @@ export function parseHtml(html: string, opts: ParseOptions = {}): ParseResult {
     let tag = raw?.toLowerCase();
     if (!tag) return null;
     if (tag === 'repeat') return walkRepeat(el, parent);
+    if (tag === 'timer' || el.getAttribute(TIMER_ATTR) !== undefined) return walkTimer(el, parent, tag === 'timer');
     if (tag === 'component' || isComponentTag(raw)) {
       const name = tag === 'component' ? el.getAttribute('name') ?? '' : raw;
       const def = byKey.get(componentKey(name));

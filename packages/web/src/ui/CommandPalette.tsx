@@ -6,6 +6,7 @@
  * before this a person had no way to search at all.
  */
 
+import { insertTimer } from '../canvas/insertTimer.ts';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { artboardOf, componentsOf, makeLiveQuestionNode, makeNode, type NodeId } from '@playground/shared';
 import { useCanvas, getDoc, currentPage } from '../state/store.ts';
@@ -185,6 +186,7 @@ function buildEntries({
   action('present', 'Present this page', 'play', actions.present, 'P');
   action('live-question', 'Add a live question or poll', 'comment', () => { void addLiveQuestion(selection, dispatch, select); },
     undefined, 'The audience answers or votes on their phones');
+  action('timer', 'Add a countdown timer', 'timer', insertTimer, undefined, 'Counts down on the slide in Present');
   action('live-controls', 'Live questions', 'comment', () => {
     const id = getDoc()?.id;
     if (id) window.open(`/d/${id}/live`, '_blank');

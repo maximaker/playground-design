@@ -25,6 +25,7 @@ import { CommentPin, CommentComposer, authorName } from './canvas/CommentPin.tsx
 import { Icon } from './ui/Icon.tsx';
 import { liveCount, openLiveControls } from './ui/LiveMenu.tsx';
 import { artboardSurface } from './canvas/surface.ts';
+import { PresentingTimers, sendTimer, timerAt } from './canvas/TimerView.tsx';
 
 type Scaling = 'fit' | 'fill' | 'actual';
 
@@ -139,7 +140,7 @@ export function Present() {
     const typing = target?.tagName === 'TEXTAREA' || target?.tagName === 'INPUT';
     if (typing && e.key !== 'Escape') return;
     const keys = ['ArrowRight', 'ArrowLeft', 'ArrowDown', 'ArrowUp', ' ', 'Home', 'End',
-      'Escape', 'PageDown', 'PageUp', 'f', 'c', 'l', 'L'];
+      'Escape', 'PageDown', 'PageUp', 'f', 'c', 'l', 'L', 't', 'T', 'r', 'R'];
     if (!keys.includes(e.key) || e.metaKey || e.ctrlKey) return;
     if ((e.key === 'l' || e.key === 'L') && !showLive) return;
     e.preventDefault();
@@ -157,6 +158,9 @@ export function Present() {
     else if (e.key === 'f') void toggleFullscreen();
     else if (e.key === 'c') setShowComments((v) => !v);
     else if ((e.key === 'l' || e.key === 'L') && liveDocId) openLiveControls(liveDocId);
+    // Countdown timers on this slide: T starts, pauses and resumes; R resets.
+    else if (e.key === 't' || e.key === 'T') sendTimer('toggle');
+    else if (e.key === 'r' || e.key === 'R') sendTimer('reset');
   }, [index, frames.length, go, setPresent, wake, showLive, liveDocId]);
 
   useEffect(() => {
@@ -433,9 +437,15 @@ function PresentFrame({ id, width, height, scale, scaling, comments, links, onLi
     c.x >= origin.x && c.x <= origin.x + width && c.y >= origin.y && c.y <= origin.y + height);
 
   const place = (e: React.MouseEvent) => {
-    if (!comments || readOnly || !doc) return;
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
     const local = { x: (e.clientX - rect.left) / scale, y: (e.clientY - rect.top) / scale };
+    // The frame does not take the pointer, so a click on a timer is found here.
+    if (!comments) {
+      const frameDoc = (e.currentTarget as HTMLElement).querySelector('iframe')?.contentDocument;
+      const timer = timerAt(frameDoc, local.x, local.y);
+      if (timer) { sendTimer('toggle', timer); return; }
+    }
+    if (!comments || readOnly || !doc) return;
     setOpenComment(null);
     setDraftComment(makeComment({
       pageId: doc.pages.find((p) => p.artboards.includes(id))?.id ?? doc.pages[0]!.id,
@@ -482,7 +492,7 @@ function PresentFrame({ id, width, height, scale, scaling, comments, links, onLi
             pointerEvents: 'none',
           }}
         />
-        {body && createPortal(<NodeView id={id} isRoot />, body)}
+        {body && createPortal(<PresentingTimers.Provider value><NodeView id={id} isRoot /></PresentingTimers.Provider>, body)}
       </div>
 
       {links.length > 0 && (

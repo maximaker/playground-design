@@ -37,6 +37,7 @@ import {
   sectionOfArtboard, normaliseFlowCard, sectionHeading, findVersionTarget, versionOps, describeVersion, versionOf, targetTitle, VERSION_KINDS,
   GOOGLE_FONT_WEIGHTS, artboardTheme, REPEAT_DATA_ATTR, REPEAT_TEMPLATE_ATTR, REPEAT_STYLE_ATTR, expandRepeat,
   makeLiveQuestionNode, visibleAnswers,
+  makeTimerNode,
 } from '@playground/shared';
 import {
   applyOps, ensureLoaded, getDocument, getSnapshot, listSnapshots, StoreError, createSnapshot,
@@ -2290,6 +2291,51 @@ function registerWriteTools(server: McpServer, ctx: McpContext): void {
     });
   }));
 
+  server.registerTool('add_timer', {
+    title: 'Put a countdown timer on a slide',
+    description:
+      'Places a countdown timer on an artboard (slide). On the canvas, in thumbnails and exports it shows the full duration; '
+      + 'in presentation mode it counts down live — from when the slide is shown (autostart "slide") or on a click / the T key (autostart "click"). '
+      + 'The presenter clicks it or presses T to pause/resume and R to reset; returning to the slide restarts it. '
+      + 'It takes the text colour around it (or `color`) and turns orange in the last 30 seconds. '
+      + 'variant: ring (large ring, default), pill (compact), bar (wide progress bar). end: message ("Time’s up", default) or pulse. chime defaults to off. '
+      + 'Centred on the slide unless x/y/width/height are given. Equivalent markup for write_html: '
+      + '<timer minutes="3" seconds="0" autostart="slide" variant="ring" label=""></timer>. To change one later, set_attributes on '
+      + 'data-timer (seconds), data-timer-start, data-timer-style, data-timer-end, data-timer-chime, data-timer-label.',
+    inputSchema: {
+      artboardId: z.string().describe('The slide (artboard) to put it on.'),
+      minutes: z.number().int().min(0).max(99).optional().default(3),
+      seconds: z.number().int().min(0).max(59).optional().default(0),
+      autostart: z.enum(['slide', 'click']).optional().default('slide').describe('slide: starts when the slide is shown in Present. click: waits for a click or T.'),
+      variant: z.enum(['ring', 'pill', 'bar']).optional().default('ring'),
+      end: z.enum(['message', 'pulse']).optional().default('message').describe('At zero: show "Time’s up", or pulse 0:00.'),
+      chime: z.boolean().optional().default(false).describe('A soft two-note chime at zero.'),
+      label: z.string().max(60).optional().describe('Small caption under/next to the numbers, e.g. "Discuss in pairs".'),
+      x: z.number().optional().describe('Left edge within the artboard, px.'),
+      y: z.number().optional().describe('Top edge within the artboard, px.'),
+      width: z.number().min(40).max(8000).optional(),
+      height: z.number().min(20).max(8000).optional(),
+      color: z.string().max(40).optional().describe('Colour of the face. Defaults to the inherited text colour.'),
+    },
+    annotations: { destructiveHint: false },
+  }, async ({ artboardId, minutes, seconds, autostart, variant, end, chime, label, x, y, width, height, color }) => guard(async () => {
+    const doc = requireDoc(ctx);
+    const artboard = node(doc, artboardId);
+    if (artboard.type !== 'artboard') return fail(`${artboardId} is a ${artboard.type}; a timer goes on an artboard.`);
+    const total = minutes * 60 + seconds;
+    if (total < 1) return fail('A timer needs at least one second: set minutes and/or seconds.');
+    const timer = makeTimerNode(
+      { seconds: total, start: autostart, variant, end, chime, label: label ?? '' },
+      { artboard, x, y, width, height, color },
+    );
+    commit(ctx, [{ t: 'insert', nodes: [timer], parent: artboard.id, index: artboard.children.length }]);
+    return json({
+      id: timer.id, seconds: total, autostart, variant, end, chime,
+      box: { left: timer.styles.left, top: timer.styles.top, width: timer.styles.width, height: timer.styles.height },
+      next: 'It counts down in Present (click or T: start/pause, R: reset). Move or resize it with update_styles.',
+    });
+  }));
+
   server.registerTool('list_live_questions', {
     title: 'List the live questions in this document',
     description:
@@ -2398,7 +2444,8 @@ function registerWriteTools(server: McpServer, ctx: McpContext): void {
     description:
       'The main creation tool. Parses an HTML fragment into editable layers: elements become nodes, inline styles and <style> rules become node styles, :hover and @media rules become variants. Write ordinary, well-structured HTML with flexbox — read get_guide("layout") first. '
       + 'Components: a tag named after a component inserts a real instance — <Button variant="primary">Save</Button> or <component name="Tab bar / Home" /> — attributes set variant props (or text layers by name), text fills the main text layer, child elements fill data-slot(s) (slot="name" for named ones). '
-      + 'Lists: <repeat data=\'[{"name":"Ana"}]\' style="display:flex;gap:8px"><div>{{name}}</div></repeat> expands the row once per item ({{a.b}}, {{@index}}, {{@number}}); change the data later with update_repeat_data.',
+      + 'Lists: <repeat data=\'[{"name":"Ana"}]\' style="display:flex;gap:8px"><div>{{name}}</div></repeat> expands the row once per item ({{a.b}}, {{@index}}, {{@number}}); change the data later with update_repeat_data. '
+      + 'Countdown timers: <timer minutes="3" seconds="0" autostart="slide" variant="ring" end="message" label="Discuss" style="position:absolute;left:480px;top:180px;width:320px;height:320px"></timer> — autostart slide|click, variant ring|pill|bar, end message|pulse, chime (off unless present). Static on the canvas and in exports; counts down in Present (add_timer does the placing for you).',
     inputSchema: {
       html: z.string().describe('HTML fragment. May include a <style> block. <script> is stripped.'),
       targetId: z.string().describe('Node to write into or replace.'),

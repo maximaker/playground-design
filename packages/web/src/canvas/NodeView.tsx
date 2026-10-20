@@ -13,7 +13,7 @@
 
 import { createElement, memo, useCallback, useEffect, useRef } from 'react';
 import {
-  type ExpandedNode, type NodeId, LIVE_ATTR, codeComponentOf, contestedProperties, expandInstance, resolvedCodeProps, sanitizeMarkup,
+  type ExpandedNode, type NodeId, LIVE_ATTR, codeComponentOf, isTimer, contestedProperties, expandInstance, resolvedCodeProps, sanitizeMarkup,
 } from '@playground/shared';
 import { CodeFrame } from './CodeFrame.tsx';
 import { useCanvas, getDoc, getNodeById } from '../state/store.ts';
@@ -23,6 +23,8 @@ import { toReactStyle } from './styles.ts';
 const VOID_TAGS = new Set(['img', 'br', 'hr', 'input', 'source', 'track', 'wbr', 'meta', 'link', 'area', 'base', 'col', 'embed', 'param']);
 
 /** Attributes that must not reach the DOM — they would break editing or escape the canvas. */
+import { TimerView } from './TimerView.tsx';
+
 const BLOCKED_ATTRS = new Set(['style', 'class', 'contenteditable', 'onclick', 'onload', 'onerror']);
 
 interface Props { id: NodeId; isRoot?: boolean }
@@ -71,6 +73,9 @@ export const NodeView = memo(function NodeView({ id, isRoot }: Props) {
 
   if (node.type === 'vector') {
     return createElement(node.tag, { ...props, dangerouslySetInnerHTML: { __html: sanitizeMarkup(node.text ?? '') } });
+  }
+  if (isTimer(node) && node.type !== 'text' && !VOID_TAGS.has(node.tag)) {
+    return <TimerView tag={node.tag} props={props} attrs={node.attrs} />;
   }
   if (VOID_TAGS.has(node.tag)) {
     return createElement(node.tag, props);
