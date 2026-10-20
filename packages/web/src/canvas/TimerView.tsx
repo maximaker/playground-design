@@ -12,7 +12,7 @@ import {
   type ReactNode, createContext, createElement, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState,
 } from 'react';
 import {
-  IDLE, type TimerSpec, type TimerState, bigTimerTransform, isUrgent, pauseTimer, readTimer, remainingMs, resetTimer,
+  IDLE, type TimerSpec, type TimerState, bigRingBox, isUrgent, pauseTimer, readTimer, remainingMs, resetTimer,
   revealStage, startTimer, tickTimer, timerSvg, toggleTimer,
 } from '@playground/shared';
 
@@ -34,6 +34,21 @@ export interface RevealGateValue {
   /** Live results must not render now. */
   withheld: boolean;
   report: (token: object, results: boolean | null) => void;
+  /** The revealing timer's big face, drawn by the waiting panel inside the results area. */
+  ring: BigRing | null;
+  setRing: (ring: BigRing | null) => void;
+  /** A waiting panel found room for the big ring (else the timer just stays small). */
+  ringPlaced: boolean | null;
+  setRingPlaced: (placed: boolean) => void;
+}
+
+export interface BigRing {
+  /** The ring face, as SVG. */
+  svg: string;
+  /** Show it big now (else it shrinks away toward the authored timer). */
+  big: boolean;
+  /** The authored timer's box, slide px: where the ring shrinks to. */
+  box: { x: number; y: number; width: number; height: number } | null;
 }
 
 export const RevealGate = createContext<RevealGateValue | null>(null);
@@ -48,8 +63,13 @@ export function RevealScope({ gated, board, children }: { gated: boolean; board:
       return next;
     });
   }, []);
+  const [ring, setRing] = useState<BigRing | null>(null);
+  const [ringPlaced, setRingPlaced] = useState<boolean | null>(null);
   const withheld = gated && (reports.size === 0 || [...reports.values()].some((r) => !r));
-  const value = useMemo(() => ({ gated, board, withheld, report }), [gated, board.width, board.height, withheld, report]);
+  const value = useMemo(
+    () => ({ gated, board, withheld, report, ring, setRing, ringPlaced: withheld ? ringPlaced : false, setRingPlaced }),
+    [gated, board.width, board.height, withheld, report, ring, ringPlaced],
+  );
   return <RevealGate.Provider value={value}>{children}</RevealGate.Provider>;
 }
 
@@ -167,47 +187,45 @@ function LiveTimer({ tag, props, spec }: { tag: string; props: Record<string, un
   useEffect(() => { if (reveals) gate!.report(token, stage.results); }, [reveals, stage.results, gate, token]);
   useEffect(() => () => gate?.report(token, null), [gate, token]);
 
-  // The authored box, in the slide's pixels, measured without the big transform.
+  // The authored box, in the slide's pixels: where the big ring shrinks to.
   const [box, setBox] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
-  const [armed, setArmed] = useState(false);
   useLayoutEffect(() => {
     if (!reveals) return;
     const el = ref.current as HTMLElement | null;
     if (!el) return;
-    const prev = el.style.transform;
-    el.style.transform = 'none';
     const r = el.getBoundingClientRect();
-    el.style.transform = prev;
     setBox({ x: r.left, y: r.top, width: r.width, height: r.height });
-    // Animate only later changes, never the first jump to big.
-    let id = requestAnimationFrame(() => { id = requestAnimationFrame(() => setArmed(true)); });
-    return () => cancelAnimationFrame(id);
   }, [reveals]);
 
-  let style = props.style as Record<string, unknown> | undefined;
-  if (reveals && box) {
-    const t = bigTimerTransform(box, gate!.board);
-    style = {
-      ...style,
-      transformOrigin: 'center center',
-      transform: stage.big ? `translate(${t.dx}px, ${t.dy}px) scale(${t.scale})` : 'none',
-      transition: armed && !reduced.current ? 'transform 900ms cubic-bezier(.2,.7,.2,1)' : 'none',
-      zIndex: stage.big ? 1000 : undefined,
-    };
-  } else if (reveals) {
-    // Not measured yet: keep it out of sight rather than flash the small one.
-    style = { ...style, visibility: 'hidden' };
-  }
-
   const left = remainingMs(state, duration, state.status === 'running' ? now : 0);
-  const svg = timerSvg(spec, {
+  const face = {
     remainingMs: left,
     fraction: left / duration,
     done: state.status === 'done',
     urgent: isUrgent(state, duration, now),
     paused: state.status === 'paused',
     reducedMotion: reduced.current,
-  });
+  };
+  const svg = timerSvg(spec, face);
+  // The big face is always a ring, whatever the authored look.
+  const ringSvg = reveals ? timerSvg({ ...spec, variant: 'ring' }, face) : '';
+  useEffect(() => {
+    if (!reveals) return;
+    gate!.setRing(stage.results ? null : { svg: ringSvg, big: stage.big, box });
+  }, [reveals, ringSvg, stage.big, stage.results, box, gate]);
+  useEffect(() => () => gate?.setRing(null), [gate]);
+
+  // The authored timer is out of sight while the ring stands in, and fades in as it shrinks.
+  let style = props.style as Record<string, unknown> | undefined;
+  if (reveals) {
+    style = {
+      ...style,
+      // Hidden until the panel says it had no room for the ring, so the small one never flashes first.
+      opacity: stage.big && gate!.ringPlaced !== false ? 0 : 1,
+      transition: reduced.current ? 'none' : 'opacity 700ms ease 200ms',
+    };
+  }
+
   return createElement(tag, {
     ...props,
     style,
@@ -225,7 +243,7 @@ function LiveTimer({ tag, props, spec }: { tag: string; props: Record<string, un
  * not loaded at all (no iframe, so nothing can flash or leak) and a calm
  * panel stands in its place. On reveal the board fades in.
  */
-export function LiveGateView({ tag, props }: { tag: string; props: Record<string, unknown> }) {
+export function LiveGateView({ tag, props, withQr }: { tag: string; props: Record<string, unknown>; withQr?: boolean }) {
   const gate = useContext(RevealGate);
   const [shown, setShown] = useState(false);
   const withheld = !!gate?.withheld;
@@ -237,21 +255,84 @@ export function LiveGateView({ tag, props }: { tag: string; props: Record<string
   if (!gate?.gated) return createElement(tag, props);
   const base = (props.style ?? {}) as Record<string, unknown>;
   if (withheld) {
-    // The question and the way in stay up, so people can still join and answer;
-    // only the answers are kept back.
-    const src = String(props.src ?? '');
-    const join = src.replace(/\/board(\?.*)?$/, '');
-    const sans = "Inter, system-ui, -apple-system, 'Segoe UI', sans-serif";
-    return (
+    return <WaitingPanel base={base} title={String(props.title ?? '')} src={String(props.src ?? '')} withQr={!!withQr} ring={gate.ring} onPlaced={gate.setRingPlaced} />;
+  }
+  const reduced = prefersReducedMotion();
+  return createElement(tag, {
+    ...props,
+    style: { ...base, opacity: shown || reduced ? 1 : 0, transition: reduced ? 'none' : 'opacity 700ms ease' },
+  });
+}
+
+/**
+ * Stands in for withheld results: the question and a neutral line at the top
+ * left, and the big ring in the free space of the results area, never over
+ * the text. The QR lives on the scan slide before, unless the embed opts in
+ * with data-live-waiting="qr".
+ */
+function WaitingPanel({ base, title, src, withQr, ring, onPlaced }: {
+  base: Record<string, unknown>; title: string; src: string; withQr: boolean; ring: BigRing | null; onPlaced: (placed: boolean) => void;
+}) {
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  const headRef = useRef<HTMLDivElement | null>(null);
+  const textRef = useRef<HTMLDivElement | null>(null);
+  const [geo, setGeo] = useState<{ panel: DOMRect; spot: { x: number; y: number; size: number } | null } | null>(null);
+  const reduced = prefersReducedMotion();
+  useLayoutEffect(() => {
+    const panel = panelRef.current, head = headRef.current, text = textRef.current;
+    if (!panel || !head || !text) return;
+    const p = panel.getBoundingClientRect();
+    const h = head.getBoundingClientRect();
+    const t = text.getBoundingClientRect();
+    const spot = bigRingBox(
+      { width: p.width, height: p.height },
+      { width: t.right - p.left, height: h.bottom - p.top },
+      { beside: !withQr },
+    );
+    setGeo((g) => (g && g.panel.width === p.width && g.panel.height === p.height && g.panel.x === p.x && g.panel.y === p.y
+      && JSON.stringify(g.spot) === JSON.stringify(spot) ? g : { panel: p, spot }));
+  });
+  const placed = !!geo?.spot;
+  // Every render, so a remounted frame cannot leave it stale.
+  useLayoutEffect(() => { onPlaced(placed); });
+  useEffect(() => () => onPlaced(false), [onPlaced]);
+  const join = withQr ? src.replace(/\/board(\?.*)?$/, '') : '';
+  const sans = "Inter, system-ui, -apple-system, 'Segoe UI', sans-serif";
+
+  let ringEl: ReactNode = null;
+  if (ring && geo?.spot) {
+    const { spot, panel } = geo;
+    let transform = 'none';
+    if (!ring.big && ring.box) {
+      // Shrink toward the authored timer, fading as the timer fades in there.
+      const s = Math.min(ring.box.width, ring.box.height) / spot.size;
+      const dx = ring.box.x + ring.box.width / 2 - (panel.left + spot.x + spot.size / 2);
+      const dy = ring.box.y + ring.box.height / 2 - (panel.top + spot.y + spot.size / 2);
+      transform = `translate(${dx}px, ${dy}px) scale(${s})`;
+    }
+    ringEl = (
       <div
-        data-live-withheld="true"
+        data-timer-big-ring="true"
         style={{
-          ...base, boxSizing: 'border-box', padding: '3% 3.5%', pointerEvents: 'none', fontFamily: sans, color: 'inherit',
-          display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 24,
+          position: 'absolute', left: spot.x, top: spot.y, width: spot.size, height: spot.size,
+          transformOrigin: 'center center', transform, opacity: ring.big ? 1 : 0,
+          transition: reduced ? 'none' : 'transform 900ms cubic-bezier(.2,.7,.2,1), opacity 700ms ease',
+          fontFamily: sans,
         }}
-      >
-        <div>
-          <div style={{ fontSize: 30, fontWeight: 700, lineHeight: 1.2 }}>{String(props.title ?? '')}</div>
+        dangerouslySetInnerHTML={{ __html: ring.svg }}
+      />
+    );
+  }
+
+  return (
+    <div
+      ref={panelRef}
+      data-live-withheld="true"
+      style={{ ...base, boxSizing: 'border-box', pointerEvents: 'none', fontFamily: sans, color: 'inherit' }}
+    >
+      <div ref={headRef} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 24, padding: '24px 28px 0' }}>
+        <div ref={textRef} style={{ maxWidth: '60%' }}>
+          <div style={{ fontSize: 30, fontWeight: 700, lineHeight: 1.2 }}>{title}</div>
           <div style={{ fontSize: 16, marginTop: 10, opacity: 0.6 }}>Answers are coming in · results at the end</div>
         </div>
         {join && (
@@ -261,11 +342,7 @@ export function LiveGateView({ tag, props }: { tag: string; props: Record<string
           </div>
         )}
       </div>
-    );
-  }
-  const reduced = prefersReducedMotion();
-  return createElement(tag, {
-    ...props,
-    style: { ...base, opacity: shown || reduced ? 1 : 0, transition: reduced ? 'none' : 'opacity 700ms ease' },
-  });
+      {ringEl}
+    </div>
+  );
 }

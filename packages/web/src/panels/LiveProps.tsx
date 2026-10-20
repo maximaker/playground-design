@@ -4,7 +4,7 @@
  * the embed and in its board URL, which is what the board reads.
  */
 
-import { type CanvasNode, LIVE_SIZE_ATTR, parseLiveSize, withLiveSize } from '@playground/shared';
+import { type CanvasNode, LIVE_WAITING_ATTR, LIVE_SIZE_ATTR, parseLiveSize, withLiveSize } from '@playground/shared';
 import { useCanvas, getDoc } from '../state/store.ts';
 import { attrOps } from '../state/keys.ts';
 import { Field, Row, Section, SegmentedControl } from '../ui/controls.tsx';
@@ -31,6 +31,18 @@ export function LiveProps({ node, nodeKey }: { node: CanvasNode; nodeKey: string
               { value: 'xl', label: 'XL', title: 'Extra large: for a big room' },
             ]}
             onCommit={setSize}
+          />
+        </Field>
+      </Row>
+      <Row>
+        <Field label="While timed" wide>
+          <SegmentedControl
+            value={node.attrs[LIVE_WAITING_ATTR] === 'qr' ? 'qr' : 'question'}
+            options={[
+              { value: 'question', label: 'Question', title: 'While a timer withholds results: just the question (default)' },
+              { value: 'qr', label: '+ QR', title: 'Also show the QR code and join address while results are withheld' },
+            ]}
+            onCommit={(v) => dispatch(attrOps(getDoc(), nodeKey, { [LIVE_WAITING_ATTR]: v }))}
           />
         </Field>
       </Row>

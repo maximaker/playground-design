@@ -2305,6 +2305,7 @@ function registerWriteTools(server: McpServer, ctx: McpContext): void {
       + 'reveal "live" (default with autostart "slide"): when the slide also has a live results embed, Present withholds the results '
       + '(a neutral "Answers are coming in" panel; the board is not loaded) and shows the timer big and centred until its last 10%, '
       + 'when it shrinks to its own box; at zero the results fade in. Shift+R reveals early, R resets and withholds again. '
+      + 'The waiting panel shows only the question; set_attributes data-live-waiting="qr" on the live embed adds its QR and join address. '
       + 'reveal "none" (default with autostart "click") leaves results visible. The editor, thumbnails and exports always show results. '
       + 'variant: ring (large ring, default), pill (compact), bar (wide progress bar). end: message ("Time’s up", default) or pulse. chime defaults to off. '
       + 'Centred on the slide unless x/y/width/height are given. Equivalent markup for write_html: '

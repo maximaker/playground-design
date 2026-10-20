@@ -245,22 +245,34 @@ export function revealStage(state: TimerState, durationMs: number, now: number, 
   return { big: elapsedMs(state, now) < durationMs * TIMER_BIG_FRACTION, results: false };
 }
 
+/** Smallest big ring worth showing; below this the timer simply stays small. */
+export const BIG_RING_MIN = 120;
+/** A ring is "comfortably big" from here; space permitting it is never smaller. */
+export const BIG_RING_TARGET_MIN = 240;
+
 /**
- * The transform (origin: the box's centre) that takes a timer's authored box
- * to big and centred on the board: as large as fits 80% × 50% of it, never
- * smaller than authored.
+ * Where the big ring goes inside a withheld results panel: the largest square
+ * that fits below the panel's header (question and waiting line) or beside
+ * it, with clear margins, so it never covers any text. Panel coordinates.
+ * Null when there is no room for a useful ring.
  */
-export function bigTimerTransform(
-  box: { x: number; y: number; width: number; height: number },
-  board: { width: number; height: number },
-): { dx: number; dy: number; scale: number } {
-  if (box.width <= 0 || box.height <= 0) return { dx: 0, dy: 0, scale: 1 };
-  const scale = Math.max(1, Math.min((board.width * 0.8) / box.width, (board.height * 0.5) / box.height));
-  return {
-    dx: board.width / 2 - (box.x + box.width / 2),
-    dy: board.height / 2 - (box.y + box.height / 2),
-    scale,
-  };
+export function bigRingBox(
+  panel: { width: number; height: number },
+  header: { width: number; height: number },
+  opts: { beside?: boolean } = {},
+): { x: number; y: number; size: number } | null {
+  const m = Math.max(24, Math.round(Math.min(panel.width, panel.height) * 0.05));
+  const areas = [
+    { x: m, y: header.height + m, w: panel.width - 2 * m, h: panel.height - header.height - 2 * m },
+  ];
+  if (opts.beside !== false) areas.push({ x: header.width + m, y: m, w: panel.width - header.width - 2 * m, h: panel.height - 2 * m });
+  let best: { x: number; y: number; size: number } | null = null;
+  for (const a of areas) {
+    const size = Math.floor(Math.min(a.w, a.h));
+    if (size < BIG_RING_MIN || (best && best.size >= size)) continue;
+    best = { x: Math.round(a.x + (a.w - size) / 2), y: Math.round(a.y + (a.h - size) / 2), size };
+  }
+  return best;
 }
 
 /** m:ss, rounding up so 0:00 means time is up and the first second shows the full duration. */
@@ -318,7 +330,7 @@ export function timerSvg(spec: TimerSpec, face: TimerFace = staticFace(spec)): s
     const size = ended ? 40 : 52;
     return open(250, 100)
       + '<rect x="3" y="3" width="244" height="94" rx="47" fill="currentColor" fill-opacity="0.08" stroke="currentColor" stroke-opacity="0.35" stroke-width="3"/>'
-      + (fraction < 1 ? `<rect x="3" y="3" width="244" height="94" rx="47" fill="none" stroke="currentColor" stroke-width="5" pathLength="1" stroke-dasharray="${fraction.toFixed(4)} 1"/>` : '')
+      + (fraction < 1 && fraction > 0 ? `<path d="M125 3 H200 A47 47 0 0 1 200 97 H50 A47 47 0 0 1 50 3 Z" fill="none" stroke="currentColor" stroke-width="5" stroke-linecap="round" pathLength="1" stroke-dasharray="${fraction.toFixed(4)} 1"/>` : '')
       + `<text x="125" y="${label ? 56 : 52}" text-anchor="middle" dominant-baseline="middle" fill="currentColor" font-size="${size}" font-weight="600" style="${text}">${esc(clock)}</text>`
       + (label ? `<text x="125" y="84" text-anchor="middle" fill="currentColor" fill-opacity="0.7" font-size="15" style="${text}">${label}</text>` : '')
       + close;

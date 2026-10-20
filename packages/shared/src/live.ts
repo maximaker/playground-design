@@ -410,6 +410,13 @@ export function withLiveSize(src: string, size: LiveSize): string {
   return q ? `${path}?${q}` : path!;
 }
 
+/**
+ * What a live embed shows while a timer withholds its results: by default
+ * just the question and a neutral line ("qr" adds the QR code and join
+ * address, for decks without a separate scan slide).
+ */
+export const LIVE_WAITING_ATTR = 'data-live-waiting';
+
 /** Marks an embed as a live question; the value is the question's code. */
 export const LIVE_ATTR = 'data-live-question';
 

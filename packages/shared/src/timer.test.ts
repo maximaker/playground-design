@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   IDLE, formatClock, isUrgent, makeTimerNode, pauseTimer, readTimer, remainingMs, resetTimer, startTimer,
   tickTimer, timerAttrs, timerSpecFromTag, timerSvg, toggleTimer, durationFrom,
-  revealStage, bigTimerTransform, TIMER_REVEAL_ATTR,
+  revealStage, bigRingBox, TIMER_REVEAL_ATTR,
 } from './timer.ts';
 import { emitHtml, parseHtml } from './html.ts';
 import { createEmptyDocument } from './model.ts';
@@ -148,10 +148,21 @@ test('revealStage: big for 90%, small after, results only at the end or on revea
   assert.deepEqual(revealStage(resetTimer(), d, 0), { big: true, results: false });
 });
 
-test('bigTimerTransform centres and enlarges, never shrinks', () => {
-  const t = bigTimerTransform({ x: 1080, y: 20, width: 150, height: 60 }, { width: 1280, height: 720 });
-  assert.equal(t.dx, 640 - 1155);
-  assert.equal(t.dy, 360 - 50);
-  assert.ok(Math.abs(t.scale - Math.min(1024 / 150, 360 / 60)) < 1e-9);
-  assert.equal(bigTimerTransform({ x: 0, y: 0, width: 1280, height: 720 }, { width: 1280, height: 720 }).scale, 1);
+test('bigRingBox fits below or beside the header, never over it', () => {
+  // Wide results area, short header: ring goes below, centred, inside margins.
+  const below = bigRingBox({ width: 1760, height: 760 }, { width: 600, height: 100 }, { beside: false })!;
+  assert.ok(below.y >= 100 + 24 && below.y + below.size <= 760 - 24);
+  assert.ok(below.x >= 24 && below.x + below.size <= 1760 - 24);
+  // Beside wins when it is roomier.
+  const beside = bigRingBox({ width: 1760, height: 760 }, { width: 600, height: 300 })!;
+  assert.ok(beside.x >= 600 + 24);
+  assert.ok(beside.size > 760 - 300 - 2 * 38);
+  // No room: null, the timer stays small.
+  assert.equal(bigRingBox({ width: 300, height: 200 }, { width: 280, height: 120 }), null);
+});
+
+test('pill progress is one continuous path from the top centre', () => {
+  const svg = timerSvg(readTimer(timerAttrs({ variant: 'pill', seconds: 60 })), { remainingMs: 30_000, fraction: 0.5, done: false, urgent: false });
+  assert.match(svg, /<path d="M125 3 H200/);
+  assert.doesNotMatch(svg, /<rect[^>]*pathLength/);
 });
