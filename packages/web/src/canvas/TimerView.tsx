@@ -12,7 +12,7 @@ import {
   type ReactNode, createContext, createElement, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState,
 } from 'react';
 import {
-  IDLE, type TimerSpec, type TimerState, bigRingBox, isUrgent, pauseTimer, readTimer, remainingMs, resetTimer,
+  IDLE, type TimerSpec, type TimerState, bigRingBox, isUrgent, ringShrinkTransform, timerOnShow, pauseTimer, readTimer, remainingMs, resetTimer,
   revealStage, startTimer, tickTimer, timerSvg, toggleTimer,
 } from '@playground/shared';
 
@@ -49,6 +49,8 @@ export interface BigRing {
   big: boolean;
   /** The authored timer's box, slide px: where the ring shrinks to. */
   box: { x: number; y: number; width: number; height: number } | null;
+  /** The authored timer's text colour, so the ring matches it. */
+  color?: string;
 }
 
 export const RevealGate = createContext<RevealGateValue | null>(null);
@@ -136,7 +138,7 @@ function chime(): void {
 
 function LiveTimer({ tag, props, spec }: { tag: string; props: Record<string, unknown>; spec: TimerSpec }) {
   const duration = spec.seconds * 1000;
-  const [state, setState] = useState<TimerState>(() => (spec.start === 'slide' ? startTimer(IDLE, Date.now()) : IDLE));
+  const [state, setState] = useState<TimerState>(() => timerOnShow(spec, Date.now()));
   const [now, setNow] = useState(() => Date.now());
   const ref = useRef<Element | null>(null);
   const reduced = useRef(prefersReducedMotion());
@@ -184,17 +186,23 @@ function LiveTimer({ tag, props, spec }: { tag: string; props: Record<string, un
 
   // Tell the slide whether its results may show.
   const token = useRef({}).current;
-  useEffect(() => { if (reveals) gate!.report(token, stage.results); }, [reveals, stage.results, gate, token]);
-  useEffect(() => () => gate?.report(token, null), [gate, token]);
+  // Depend on the stable setters, never on the gate value itself: it changes
+  // with every ring update, and an effect keyed on it re-fires in a loop.
+  const report = gate?.report;
+  const setRing = gate?.setRing;
+  useEffect(() => { if (reveals) report!(token, stage.results); }, [reveals, stage.results, report, token]);
+  useEffect(() => () => report?.(token, null), [report, token]);
 
   // The authored box, in the slide's pixels: where the big ring shrinks to.
   const [box, setBox] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
+  const [color, setColor] = useState<string | undefined>(undefined);
   useLayoutEffect(() => {
     if (!reveals) return;
     const el = ref.current as HTMLElement | null;
     if (!el) return;
     const r = el.getBoundingClientRect();
     setBox({ x: r.left, y: r.top, width: r.width, height: r.height });
+    try { setColor(getComputedStyle(el).color); } catch { /* inherit */ }
   }, [reveals]);
 
   const left = remainingMs(state, duration, state.status === 'running' ? now : 0);
@@ -211,9 +219,9 @@ function LiveTimer({ tag, props, spec }: { tag: string; props: Record<string, un
   const ringSvg = reveals ? timerSvg({ ...spec, variant: 'ring' }, face) : '';
   useEffect(() => {
     if (!reveals) return;
-    gate!.setRing(stage.results ? null : { svg: ringSvg, big: stage.big, box });
-  }, [reveals, ringSvg, stage.big, stage.results, box, gate]);
-  useEffect(() => () => gate?.setRing(null), [gate]);
+    setRing!(stage.results ? null : { svg: ringSvg, big: stage.big, box, color });
+  }, [reveals, ringSvg, stage.big, stage.results, box, color, setRing]);
+  useEffect(() => () => setRing?.(null), [setRing]);
 
   // The authored timer is out of sight while the ring stands in, and fades in as it shrinks.
   let style = props.style as Record<string, unknown> | undefined;
@@ -276,21 +284,26 @@ function WaitingPanel({ base, title, src, withQr, ring, onPlaced }: {
   const panelRef = useRef<HTMLDivElement | null>(null);
   const headRef = useRef<HTMLDivElement | null>(null);
   const textRef = useRef<HTMLDivElement | null>(null);
-  const [geo, setGeo] = useState<{ panel: DOMRect; spot: { x: number; y: number; size: number } | null } | null>(null);
+  const [geo, setGeo] = useState<{
+    rect: { left: number; top: number }; k: number; w: number; h: number; spot: { x: number; y: number; size: number } | null;
+  } | null>(null);
   const reduced = prefersReducedMotion();
   useLayoutEffect(() => {
     const panel = panelRef.current, head = headRef.current, text = textRef.current;
     if (!panel || !head || !text) return;
-    const p = panel.getBoundingClientRect();
-    const h = head.getBoundingClientRect();
-    const t = text.getBoundingClientRect();
+    // Layout in the panel's own pixels: offset* ignore transforms, and decks
+    // often scale live embeds (transform: scale(2)). The rect is only for
+    // mapping the authored timer's slide position into those pixels.
+    const w = panel.offsetWidth, h = panel.offsetHeight;
+    const r = panel.getBoundingClientRect();
+    const k = w ? r.width / w : 1;
     const spot = bigRingBox(
-      { width: p.width, height: p.height },
-      { width: t.right - p.left, height: h.bottom - p.top },
+      { width: w, height: h },
+      { width: head.offsetLeft + text.offsetLeft + text.offsetWidth, height: head.offsetTop + head.offsetHeight },
       { beside: !withQr },
     );
-    setGeo((g) => (g && g.panel.width === p.width && g.panel.height === p.height && g.panel.x === p.x && g.panel.y === p.y
-      && JSON.stringify(g.spot) === JSON.stringify(spot) ? g : { panel: p, spot }));
+    const next = { rect: { left: r.left, top: r.top }, k, w, h, spot };
+    setGeo((g) => (g && JSON.stringify(g) === JSON.stringify(next) ? g : next));
   });
   const placed = !!geo?.spot;
   // Every render, so a remounted frame cannot leave it stale.
@@ -301,14 +314,12 @@ function WaitingPanel({ base, title, src, withQr, ring, onPlaced }: {
 
   let ringEl: ReactNode = null;
   if (ring && geo?.spot) {
-    const { spot, panel } = geo;
+    const { spot } = geo;
     let transform = 'none';
     if (!ring.big && ring.box) {
       // Shrink toward the authored timer, fading as the timer fades in there.
-      const s = Math.min(ring.box.width, ring.box.height) / spot.size;
-      const dx = ring.box.x + ring.box.width / 2 - (panel.left + spot.x + spot.size / 2);
-      const dy = ring.box.y + ring.box.height / 2 - (panel.top + spot.y + spot.size / 2);
-      transform = `translate(${dx}px, ${dy}px) scale(${s})`;
+      const t = ringShrinkTransform(spot, geo.rect, geo.k, ring.box);
+      transform = `translate(${t.dx}px, ${t.dy}px) scale(${t.scale})`;
     }
     ringEl = (
       <div
@@ -317,7 +328,7 @@ function WaitingPanel({ base, title, src, withQr, ring, onPlaced }: {
           position: 'absolute', left: spot.x, top: spot.y, width: spot.size, height: spot.size,
           transformOrigin: 'center center', transform, opacity: ring.big ? 1 : 0,
           transition: reduced ? 'none' : 'transform 900ms cubic-bezier(.2,.7,.2,1), opacity 700ms ease',
-          fontFamily: sans,
+          fontFamily: sans, color: ring.color,
         }}
         dangerouslySetInnerHTML={{ __html: ring.svg }}
       />

@@ -275,6 +275,33 @@ export function bigRingBox(
   return best;
 }
 
+/**
+ * The transform that shrinks the big ring onto the authored timer. The panel
+ * may itself be transformed (decks scale live embeds with `transform:
+ * scale(2)`), so the ring lives in the panel's own pixels while the timer box
+ * and the panel's rect are in slide pixels; `panelScale` converts between them.
+ */
+export function ringShrinkTransform(
+  spot: { x: number; y: number; size: number },
+  panelRect: { left: number; top: number },
+  panelScale: number,
+  target: { x: number; y: number; width: number; height: number },
+): { dx: number; dy: number; scale: number } {
+  const k = panelScale > 0 ? panelScale : 1;
+  const cx = (target.x + target.width / 2 - panelRect.left) / k;
+  const cy = (target.y + target.height / 2 - panelRect.top) / k;
+  return {
+    dx: cx - (spot.x + spot.size / 2),
+    dy: cy - (spot.y + spot.size / 2),
+    scale: Math.min(target.width, target.height) / k / spot.size,
+  };
+}
+
+/** The state a timer starts in when its slide is shown: slide-start timers run from that moment. */
+export function timerOnShow(spec: Pick<TimerSpec, 'start'>, shownAt: number): TimerState {
+  return spec.start === 'slide' ? startTimer(IDLE, shownAt) : IDLE;
+}
+
 /** m:ss, rounding up so 0:00 means time is up and the first second shows the full duration. */
 export function formatClock(ms: number): string {
   const total = Math.max(0, Math.ceil(ms / 1000));

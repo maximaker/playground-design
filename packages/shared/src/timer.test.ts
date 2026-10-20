@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   IDLE, formatClock, isUrgent, makeTimerNode, pauseTimer, readTimer, remainingMs, resetTimer, startTimer,
   tickTimer, timerAttrs, timerSpecFromTag, timerSvg, toggleTimer, durationFrom,
-  revealStage, bigRingBox, TIMER_REVEAL_ATTR,
+  revealStage, bigRingBox, TIMER_REVEAL_ATTR, ringShrinkTransform, timerOnShow,
 } from './timer.ts';
 import { emitHtml, parseHtml } from './html.ts';
 import { createEmptyDocument } from './model.ts';
@@ -165,4 +165,25 @@ test('pill progress is one continuous path from the top centre', () => {
   const svg = timerSvg(readTimer(timerAttrs({ variant: 'pill', seconds: 60 })), { remainingMs: 30_000, fraction: 0.5, done: false, urgent: false });
   assert.match(svg, /<path d="M125 3 H200/);
   assert.doesNotMatch(svg, /<rect[^>]*pathLength/);
+});
+
+test('a slide-start timer shown on slide N after M seconds of Present shows its full duration', () => {
+  const presentOpened = 1_000_000;
+  const shown = presentOpened + 95_000; // walked to the slide 95 s later
+  const state = timerOnShow({ start: 'slide' }, shown);
+  assert.equal(state.status, 'running');
+  assert.equal(remainingMs(state, 60_000, shown), 60_000);
+  assert.equal(formatClock(remainingMs(state, 60_000, shown + 3_000)), '0:57');
+  assert.deepEqual(revealStage(state, 60_000, shown + 3_000), { big: true, results: false });
+  assert.equal(timerOnShow({ start: 'click' }, shown).status, 'idle');
+});
+
+test('ringShrinkTransform works inside a panel scaled by 2', () => {
+  // Panel 832x310 local, drawn at 2x from (128, 340); pill at 1530,84 262x72.
+  const spot = bigRingBox({ width: 832, height: 310 }, { width: 300, height: 90 })!;
+  const t = ringShrinkTransform(spot, { left: 128, top: 340 }, 2, { x: 1530, y: 84, width: 262, height: 72 });
+  const cx = spot.x + spot.size / 2 + t.dx, cy = spot.y + spot.size / 2 + t.dy;
+  assert.ok(Math.abs(128 + cx * 2 - (1530 + 131)) < 1e-6);
+  assert.ok(Math.abs(340 + cy * 2 - (84 + 36)) < 1e-6);
+  assert.ok(Math.abs(spot.size * t.scale * 2 - 72) < 1e-6);
 });
