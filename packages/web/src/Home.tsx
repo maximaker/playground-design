@@ -29,6 +29,8 @@ interface DocSummary {
   projectId?: string;
   /** Live as a web page. */
   published?: boolean;
+  /** Live questions it holds; the card menu leads to their controls. */
+  liveQuestions?: number;
   /** The caller's own role, so a document shared with you says so. */
   role?: 'owner' | 'editor' | 'viewer';
 }
@@ -657,6 +659,11 @@ export function Home({ onOpen, appearance, onAppearance, session }: {
                           ))}
                           {d.projectId && (
                             <button role="menuitem" onClick={() => void file(d.id, null)}>Remove from project</button>
+                          )}
+                          {!!d.liveQuestions && (
+                            <button role="menuitem" onClick={() => { setMenuFor(null); window.open(`/d/${encodeURIComponent(d.id)}/live`, '_blank', 'noopener'); }}>
+                              Live questions ({d.liveQuestions})
+                            </button>
                           )}
                           <button role="menuitem" className="danger" onClick={() => { setMenuFor(null); void remove(d.id, d.name); }}>Delete</button>
                         </div>

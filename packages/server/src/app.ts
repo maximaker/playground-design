@@ -65,7 +65,7 @@ import { APP_CSP, clientIp, rateLimit, securityHeaders } from './security.ts';
 import { bodyLimit } from 'hono/body-limit';
 import {
   LiveError, answerPageHtml, boardHtml, castLiveVote, clearLiveAnswers, createLiveQuestion, deviceFor, deviceView,
-  getLiveQuestion, hideLiveAnswer, likeLiveAnswer, resetLiveForm, deleteLiveQuestion, submitLiveForm, moderatorView, liveQuestionsInOrder, answersCsv, controlPageHtml, submitLiveAnswer, updateLiveQuestion, waitForBoardState,
+  getLiveQuestion, hideLiveAnswer, likeLiveAnswer, resetLiveForm, deleteLiveQuestion, submitLiveForm, moderatorView, liveQuestionsInOrder, answersCsv, controlPageHtml, qrSvg, submitLiveAnswer, updateLiveQuestion, waitForBoardState,
 } from './live.ts';
 
 const PORT = Number(process.env.PORT ?? 4000);
@@ -444,7 +444,11 @@ api.get('/documents', async (c) => {
   const visible = (await listDocuments()).filter((d) => mine.has(d.id) || !owned.has(d.id));
   // Whether each is live as a web page, so the library can say so at a glance.
   const published = await Promise.all(visible.map((d) => store.loadPublicationFor(d.id).then(Boolean, () => false)));
-  const documents = visible.map((d, i) => ({ ...d, role: mine.get(d.id) ?? 'owner', published: published[i] }));
+  // How many live questions each holds, so the card menu can lead to their controls. Viewers cannot moderate, so they get none.
+  const live = await Promise.all(visible.map((d) => (mine.get(d.id) === 'viewer'
+    ? Promise.resolve(0)
+    : store.loadLiveQuestions(d.id).then((qs) => qs.length, () => 0))));
+  const documents = visible.map((d, i) => ({ ...d, role: mine.get(d.id) ?? 'owner', published: published[i], liveQuestions: live[i] }));
   return c.json({ documents });
 });
 
@@ -1389,7 +1393,7 @@ api.get('/documents/:id/live', async (c) => {
   await ensureLoaded(c.req.param('id'));
   const doc = getDocument(c.req.param('id'));
   if (!doc) return c.json({ error: 'not found' }, 404);
-  return c.json({ questions: await liveQuestionsInOrder(doc, PUBLIC_URL) });
+  return c.json({ name: doc.name, questions: await liveQuestionsInOrder(doc, PUBLIC_URL) });
 });
 
 /** The board's "Open controls": it knows only its code, so the server finds the page. */
@@ -1576,6 +1580,15 @@ app.get('/q/:code/board', async (c) => {
   return c.html(boardHtml(q, state!.v, PUBLIC_URL, {
     qr: c.req.query('qr'), title: c.req.query('title'), font: c.req.query('font'), ink: c.req.query('ink'), accent: c.req.query('accent'), card: c.req.query('card'),
   }), 200, { 'cache-control': 'no-store', 'x-robots-tag': 'noindex', 'content-security-policy': BOARD_CSP });
+});
+
+/** The answer page's QR code on its own, for the control page to link to and for printing. Public, like the answer page it points at. */
+app.get('/q/:code/qr', async (c) => {
+  const q = await getLiveQuestion(c.req.param('code'));
+  if (!q) return c.json({ error: 'No such question.' }, 404);
+  return c.body(qrSvg(`${PUBLIC_URL}/q/${q.code}`), 200, {
+    'content-type': 'image/svg+xml; charset=utf-8', 'cache-control': 'public, max-age=3600', 'x-robots-tag': 'noindex',
+  });
 });
 
 app.get('/q/:code/state', async (c) => {

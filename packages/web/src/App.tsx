@@ -1,6 +1,6 @@
 /** Application shell: routing, layout, panels and global interactions. */
 
-import { Fragment, useEffect, useRef, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { useCanvas } from './state/store.ts';
 import { type Source, connectDocument } from './net/socket.ts';
 import { useKeyboard } from './hooks/useKeyboard.ts';
@@ -49,6 +49,7 @@ import {
 import { Home } from './Home.tsx';
 import { SectionList } from './canvas/SectionLayer.tsx';
 import { VersionBadge, VersionPicker } from './ui/VersionPicker.tsx';
+import { LiveMenu, liveCount, openLiveControls } from './ui/LiveMenu.tsx';
 
 type LeftTab = 'layers' | 'pages' | 'components' | 'tokens';
 
@@ -367,6 +368,10 @@ function Editor({ source, onHome, appearance, onAppearance, session }: {
       .then((b: { publication?: unknown } | null) => setIsLive(!!b?.publication))
       .catch(() => setIsLive(false));
   }, [liveDocId]);
+  // Live questions on the slides: the Live button and menu items appear only when there are some.
+  const structureVersion = useCanvas((s) => s.structureVersion);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- the document is edited in place; its structure version says when.
+  const liveQuestions = useMemo(() => liveCount(doc), [doc, structureVersion]);
   const contextMenu = useCanvas((s) => s.contextMenu) as ContextMenuState | null;
   const setContextMenu = useCanvas((s) => s.openContextMenu);
   const [showSettings, setShowSettings] = useState(false);
@@ -565,6 +570,9 @@ function Editor({ source, onHome, appearance, onAppearance, session }: {
                   ...(readOnly ? [] : [
                     { group: 'Share', label: 'Share a link', icon: 'share' as IconName, run: () => setModal('share') },
                     { group: 'Share', label: 'Publish', icon: 'link' as IconName, run: () => setModal('publish') },
+                    ...(liveQuestions && liveDocId ? [
+                      { group: 'Share', label: `Live questions (${liveQuestions})`, icon: 'live' as IconName, run: () => openLiveControls(liveDocId) },
+                    ] : []),
                   ]),
                   { group: 'Share', label: 'Export', icon: 'upload' as IconName, run: () => setModal('export') },
                   ...(readOnly ? [] : [viewing
@@ -599,6 +607,9 @@ function Editor({ source, onHome, appearance, onAppearance, session }: {
                   ...(readOnly ? [] : [
                     { label: 'Import a webpage', icon: 'download' as IconName, run: () => setModal('import') },
                   ]),
+                  ...(!readOnly && liveQuestions && liveDocId ? [
+                    { label: `Live question controls (${liveQuestions})`, hint: '↗', icon: 'live' as IconName, run: () => openLiveControls(liveDocId) },
+                  ] : []),
                   { label: 'Export', hint: `${MOD}⇧E`, icon: 'upload' as IconName, run: () => setModal('export') },
                   { group: 'Help', label: 'Keyboard shortcuts', hint: '?', icon: 'keyboard' as IconName, run: () => setModal('shortcuts') },
                   // Signed in, appearance lives in the avatar menu.
@@ -619,6 +630,10 @@ function Editor({ source, onHome, appearance, onAppearance, session }: {
             <Icon name="play" size={14} />
             <span className="button-label">Present</span>
           </button>
+        )}
+
+        {!readOnly && !viewing && liveDocId && (
+          <LiveMenu docId={liveDocId} count={liveQuestions} compact={mode !== 'wide'} />
         )}
 
         {!readOnly && !viewing && (

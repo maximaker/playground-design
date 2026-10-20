@@ -23,6 +23,7 @@ import { useArtboardFrame } from './canvas/frame.ts';
 import { NodeView } from './canvas/NodeView.tsx';
 import { CommentPin, CommentComposer, authorName } from './canvas/CommentPin.tsx';
 import { Icon } from './ui/Icon.tsx';
+import { liveCount, openLiveControls } from './ui/LiveMenu.tsx';
 import { artboardSurface } from './canvas/surface.ts';
 
 type Scaling = 'fit' | 'fill' | 'actual';
@@ -39,6 +40,14 @@ const SCALING: { value: Scaling; label: string; hint: string }[] = [
 export function Present() {
   const present = useCanvas((s) => s.present);
   const setPresent = useCanvas((s) => s.setPresent);
+  // The presenter's own way to the live controls: in the bar and on L, never on the slide.
+  const liveDoc = useCanvas((s) => s.doc);
+  const liveDocId = useCanvas((s) => s.docId);
+  const canModerate = !useCanvas((s) => s.readOnly);
+  const structureVersion = useCanvas((s) => s.structureVersion);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- the document is edited in place.
+  const liveQuestions = useMemo(() => liveCount(liveDoc), [liveDoc, structureVersion]);
+  const showLive = canModerate && !!liveDocId && liveQuestions > 0;
   const doc = getDoc();
 
   // On a phone a frame is read with a finger: as wide as the screen, scrolled.
@@ -130,8 +139,9 @@ export function Present() {
     const typing = target?.tagName === 'TEXTAREA' || target?.tagName === 'INPUT';
     if (typing && e.key !== 'Escape') return;
     const keys = ['ArrowRight', 'ArrowLeft', 'ArrowDown', 'ArrowUp', ' ', 'Home', 'End',
-      'Escape', 'PageDown', 'PageUp', 'f', 'c'];
+      'Escape', 'PageDown', 'PageUp', 'f', 'c', 'l', 'L'];
     if (!keys.includes(e.key) || e.metaKey || e.ctrlKey) return;
+    if ((e.key === 'l' || e.key === 'L') && !showLive) return;
     e.preventDefault();
     e.stopPropagation();
     // Navigating is not asking for the controls; only the pointer brings them back.
@@ -146,7 +156,8 @@ export function Present() {
     else if (e.key === 'End') go(frames.length - 1);
     else if (e.key === 'f') void toggleFullscreen();
     else if (e.key === 'c') setShowComments((v) => !v);
-  }, [index, frames.length, go, setPresent, wake]);
+    else if ((e.key === 'l' || e.key === 'L') && liveDocId) openLiveControls(liveDocId);
+  }, [index, frames.length, go, setPresent, wake, showLive, liveDocId]);
 
   useEffect(() => {
     if (!present) return;
@@ -366,6 +377,15 @@ export function Present() {
           title="Comments  C"
           aria-label="Comments"
         ><Icon name="comment" size={14} /></button>
+
+        {showLive && liveDocId && (
+          <button
+            className="icon-button"
+            onClick={() => openLiveControls(liveDocId)}
+            title={`Live question controls (${liveQuestions}) — opens a new tab  L`}
+            aria-label="Open live question controls in a new tab"
+          ><Icon name="live" size={14} /></button>
+        )}
 
         <button className="icon-button" onClick={() => void toggleFullscreen()} title="Full screen  F" aria-label="Full screen">
           <Icon name="fullscreen" size={14} />

@@ -1385,7 +1385,7 @@ export function controlPageHtml(docId: string): string {
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="robots" content="noindex">
-<title>Live questions · controls</title>
+<title>Live questions</title>
 <style>
   :root { color-scheme: light dark; --bg: #e6e9ec; --plate: #fff; --ink: #13202e; --mute: #646a73; --line: #ecedef; --wash: #f4f5f6; --cta: #13202e; --cta-ink: #fff;
           --now: #e2531e; --blush: #fbe4dc; --rust: #9c3a16; --accent: #2848c8; --danger: #9c3a16; }
@@ -1451,10 +1451,24 @@ export function controlPageHtml(docId: string): string {
   .sub .kv .v span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
   .sub .kv.hidden .v span { opacity: .45; text-decoration: line-through; }
   .sub button { min-height: 32px; font-size: 13px; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .topnav { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; }
+  .topnav a.back { color: var(--mute); text-decoration: none; font-weight: 500; min-height: 40px; display: inline-flex; align-items: center; gap: 6px; }
+  .topnav a.back:hover { color: var(--ink); }
+  .summary { color: var(--mute); margin: -8px 0 18px; font-variant-numeric: tabular-nums; }
+  h2.page { font-size: 13px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--mute); margin: 24px 0 8px; }
+  h2.page:first-child { margin-top: 0; }
+  .links { display: flex; gap: 14px; flex-wrap: wrap; margin: 2px 0 10px; font-size: 13px; }
+  .links a { color: var(--accent); font-weight: 500; text-decoration: none; min-height: 28px; display: inline-flex; align-items: center; }
+  .links a:hover { text-decoration: underline; }
+  .card.tap:hover { border-color: color-mix(in srgb, var(--mute) 40%, var(--line)); }
 </style></head>
 <body><main>
   <section id="list">
-    <header><div style="flex:1"><div class="eyebrow">Presenter controls</div><h1>Live questions</h1></div></header>
+    <nav class="topnav" aria-label="Document"><a class="back" id="doc-link" href="/d/${encodeURIComponent(docId)}">← Back to the document</a>
+      <button class="danger" id="clear-all" hidden>Clear all answers</button></nav>
+    <header><div style="flex:1"><div class="eyebrow" id="doc-name">Presenter controls</div><h1>Live questions</h1></div></header>
+    <p class="summary" id="summary"></p>
     <div id="questions"><p class="note">Loading…</p></div>
   </section>
   <section id="detail" hidden>
@@ -1499,8 +1513,14 @@ function controls(q, after) {
   row.append(el('span', 'count', n + ' ' + noun[n === 1 ? 0 : 1]));
   box.append(row);
   box.append(el('div', 'url', q.shortUrl || ''));
+  const links = el('div', 'links');
+  const page = el('a', null, 'Answer page ↗'); page.href = '/q/' + q.code; page.target = '_blank'; page.rel = 'noopener';
+  const qr = el('a', null, 'QR code ↗'); qr.href = '/q/' + q.code + '/qr'; qr.target = '_blank'; qr.rel = 'noopener';
+  for (const a of [page, qr]) a.onclick = (e) => e.stopPropagation();
+  links.append(page, qr);
+  box.append(links);
   const actions = el('div', 'actions');
-  const clear = el('button', 'danger', q.kind === 'poll' ? 'Reset votes' : 'Clear all');
+  const clear = el('button', 'danger', q.kind === 'poll' ? 'Reset votes' : 'Clear answers');
   clear.onclick = async (e) => {
     e.stopPropagation();
     const ask = q.kind === 'poll' ? 'Reset every vote on “' + q.question + '” to zero?'
@@ -1538,16 +1558,27 @@ function controls(q, after) {
 
 async function loadList() {
   try {
-    questions = (await api('/documents/' + docId + '/live')).questions;
+    const data = await api('/documents/' + docId + '/live');
+    questions = data.questions;
+    if (data.name) { $('doc-name').textContent = data.name; document.title = 'Live questions · ' + data.name; }
   } catch (e) { $('questions').textContent = e.message; return; }
   const box = $('questions');
   box.textContent = '';
+  const total = questions.reduce((n, q) => n + (q.kind === 'poll' ? q.totalVotes : q.answers), 0);
+  $('summary').textContent = questions.length ? questions.length + (questions.length === 1 ? ' question · ' : ' questions · ') + total + (total === 1 ? ' answer' : ' answers') : '';
+  $('clear-all').hidden = !questions.length;
   if (!questions.length) { box.append(el('p', 'note', 'No live questions in this document yet. Add one with ⌘K → Add a live question.')); return; }
+  let group = null;
   for (const q of questions) {
+    const name = q.placement ? q.placement.pageName : 'Not on a slide';
+    if (name !== group) { group = name; box.append(el('h2', 'page', name)); }
     const card = el('div', 'card tap');
     card.onclick = () => { location.hash = q.code; };
-    card.append(el('div', 'where', q.placement ? q.placement.pageName + ' · slide ' + q.placement.slide : 'Not on a slide'));
-    card.append(el('div', 'q', q.question));
+    card.append(el('div', 'where', q.placement ? 'Slide ' + q.placement.slide : 'Not on any slide'));
+    const title = el('a', 'q', q.question);
+    title.href = '#' + q.code; title.style.display = 'block'; title.style.color = 'inherit'; title.style.textDecoration = 'none';
+    title.onclick = (e) => e.stopPropagation();
+    card.append(title);
     card.append(controls(q, loadList));
     box.append(card);
   }
@@ -1677,6 +1708,14 @@ async function route() {
   try { await loadDetail(code); follow(code, detailRun); } catch (e) { $('d-body').textContent = e.message; }
 }
 $('back').onclick = () => { location.hash = ''; };
+$('clear-all').onclick = async () => {
+  const total = questions.reduce((n, q) => n + (q.kind === 'poll' ? q.totalVotes : q.answers), 0);
+  if (!confirm('Clear all ' + total + ' answers across ' + questions.length + ' questions? Poll votes reset to zero; written answers are hidden from the slides but stay stored.')) return;
+  const b = $('clear-all'); b.disabled = true;
+  try { for (const q of questions) await api('/live/' + q.code + '/clear', 'POST'); } catch (e) { alert(e.message); }
+  b.disabled = false;
+  loadList();
+};
 addEventListener('hashchange', route);
 route();
 // Counts on the list stay roughly current without holding a request per question.

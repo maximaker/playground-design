@@ -550,3 +550,23 @@ test('deleteLiveQuestion removes the question and its answers', async () => {
   assert.deepEqual(await deleteLiveQuestion(q.code), { deleted: q.code });
   assert.equal(await getLiveQuestion(q.code), null);
 });
+
+test('discoverable controls: the list names the document, each question has a QR, the library counts them', async () => {
+  const code = await createQuestion('Found from the library?');
+  const list = await (await fetch(`${base}/api/documents/${docId}/live`, { headers: { cookie } })).json() as { name: string; questions: { code: string }[] };
+  assert.equal(list.name, getDocument(docId)!.name);
+  assert.ok(list.questions.some((q) => q.code === code));
+
+  const qr = await fetch(`${base}/q/${code}/qr`);
+  assert.equal(qr.status, 200);
+  assert.match(qr.headers.get('content-type') ?? '', /image\/svg\+xml/);
+  assert.match(await qr.text(), /^<svg /);
+  assert.equal((await fetch(`${base}/q/zzzzzzzz/qr`)).status, 404);
+
+  const page = await (await fetch(`${base}/d/${docId}/live`)).text();
+  assert.match(page, /Back to the document/);
+  assert.match(page, /Clear all answers/);
+
+  const { documents } = await (await fetch(`${base}/api/documents`, { headers: { cookie } })).json() as { documents: { id: string; liveQuestions: number }[] };
+  assert.ok((documents.find((d) => d.id === docId)?.liveQuestions ?? 0) >= 1);
+});

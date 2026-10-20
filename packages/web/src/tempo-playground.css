@@ -412,3 +412,22 @@ kbd { font-family: var(--font-sans); font-weight: 500; background: var(--wash); 
    bar is the label). Selection's blue still wins. */
 .layer-row.is-agent-touched:not(.is-selected) { background: var(--hatch); }
 .layer-row.is-agent-touched:not(.is-selected):hover { background: var(--wash); }
+
+/* Live questions: the top-bar button, its menu and the clear-all confirmation. Orange is for live activity. */
+.live-button { gap: 6px; }
+.live-badge {
+  min-width: 1.25rem; height: 1.25rem; padding: 0 0.35rem; border-radius: 99px;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 650; background: var(--blush); color: var(--rust);
+}
+:root[data-theme='dark'] .live-badge { background: color-mix(in srgb, var(--now) 22%, transparent); color: var(--now); }
+.live-button.is-active { background: var(--bg-sunken); }
+.live-menu { min-width: 16rem; }
+.live-menu-head { display: flex; flex-direction: column; gap: 2px; padding: 0.55rem 0.65rem 0.6rem; border-bottom: 1px solid var(--border); margin-bottom: 0.25rem; }
+.live-menu-head strong { font-weight: 650; }
+.live-menu-stats { font-size: 12px; color: var(--fg-muted); }
+.live-menu .live-danger:not(:disabled) { color: var(--rust); }
+:root[data-theme='dark'] .live-menu .live-danger:not(:disabled) { color: var(--now); }
+.live-confirm-text { margin: 0 0 1rem; line-height: 1.5; }
+.live-confirm-error { color: var(--rust); margin: 0 0 1rem; }
+.live-confirm-actions { display: flex; justify-content: flex-end; gap: 0.5rem; flex-wrap: wrap; }
