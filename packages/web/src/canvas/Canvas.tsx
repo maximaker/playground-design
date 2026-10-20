@@ -11,7 +11,7 @@ import {
 } from '@playground/shared';
 import { useCanvas, getDoc, currentPage, topLevelSelection, getNodeById } from '../state/store.ts';
 import { resolveKey, treeNodeId } from '../state/keys.ts';
-import { artboardOf } from '@playground/shared';
+import { artboardOf, artboardsToMove, edgeSpeed, marqueePick } from '@playground/shared';
 import { Artboard } from './Artboard.tsx';
 import { LIVE_ZOOM } from './thumbs.ts';
 import { NoteCard } from './NoteCard.tsx';
@@ -46,11 +46,11 @@ type Drag =
   | { kind: 'none' }
   | { kind: 'pan'; startX: number; startY: number; originX: number; originY: number }
   | { kind: 'marquee'; startX: number; startY: number; additive: boolean }
-  | { kind: 'maybe-move'; ids: NodeId[]; startX: number; startY: number }
+  | { kind: 'maybe-move'; ids: NodeId[]; startX: number; startY: number; clickSelect?: NodeId }
   | { kind: 'move-nodes'; ids: NodeId[]; startX: number; startY: number; batch: string }
   | { kind: 'move-artboards'; ids: NodeId[]; startX: number; startY: number; origins: Record<NodeId, { x: number; y: number }>; batch: string; restore: Op; candidates: Box[]; size: { width: number; height: number } }
   | { kind: 'move-absolute'; ids: NodeId[]; startX: number; startY: number; origins: Record<NodeId, { left: number; top: number }>; batch: string; restore: Op; candidates: Box[]; container: Box | null; size: { width: number; height: number } }
-  | { kind: 'resize'; start: ResizeStart; startX: number; startY: number; batch: string; restore: Op; candidates: Box[]; container: Box | null }
+  | { kind: 'resize'; start: ResizeStart; startX: number; startY: number; batch: string; restore: Op; candidates: Box[]; container: Box | null; started?: boolean }
   | { kind: 'draw'; startX: number; startY: number; artboardId: NodeId | null }
   | { kind: 'move-section'; id: string; startX: number; startY: number; origins: Record<NodeId, { x: number; y: number }>; batch: string; restore: Op }
   | { kind: 'move-note'; id: string; startX: number; startY: number; origin: { x: number; y: number }; batch: string; restore: Op }
@@ -62,6 +62,25 @@ type Drag =
   | { kind: 'board-end'; id: string; end: 'from' | 'to'; startX: number; startY: number; fixed: Point };
 
 const DRAG_THRESHOLD = 4;
+
+/** Below this zoom an artboard is a thumbnail: pressing it grabs the artboard. */
+const ZOOMED_OUT = 0.25;
+
+/** The top strip of a board section, in canvas units, that grabs the section. */
+const SECTION_TITLE_BAND = 64;
+
+/** Drags that carry something and so should scroll the canvas at its edge. */
+const CARRIES = new Set<Drag['kind']>([
+  'move-artboards', 'move-absolute', 'move-nodes', 'move-section', 'move-note',
+  'board-move', 'marquee', 'resize', 'board-resize', 'draw', 'board-connect', 'board-end',
+]);
+
+type PointerLike = Pick<React.PointerEvent, 'clientX' | 'clientY' | 'shiftKey' | 'altKey' | 'metaKey' | 'ctrlKey' | 'buttons'>;
+function pointerLike(e: PointerLike): PointerLike {
+  return { clientX: e.clientX, clientY: e.clientY, shiftKey: e.shiftKey, altKey: e.altKey, metaKey: e.metaKey, ctrlKey: e.ctrlKey, buttons: e.buttons };
+}
+
+
 
 interface CanvasProps {
   onContextMenu: (state: { x: number; y: number; nodeId: NodeId | null }) => void;
@@ -158,6 +177,14 @@ export function Canvas({ onContextMenu }: CanvasProps) {
     // moving the thing being banded — so it doubles as the drag-time refresh.
   }, [prefs.rulers, selection, viewport, structureVersion, styleEpoch, rulerPointer]);
   const drag = useRef<Drag>({ kind: 'none' });
+  /**
+   * Where the drag began, in canvas space. Deltas are measured from here rather
+   * than from the screen point, so the canvas can scroll, zoom or auto-pan
+   * under a drag and what is held stays under the pointer.
+   */
+  const startWorld = useRef<{ x: number; y: number } | null>(null);
+  /** The last pointer position of the drag, replayed when the view moves. */
+  const lastPointer = useRef<PointerLike | null>(null);
   const [marquee, setMarquee] = useState<{ left: number; top: number; width: number; height: number } | null>(null);
   const [dropTarget, setDropTarget] = useState<DropTarget | null>(null);
   const [drawPreview, setDrawPreview] = useState<{ left: number; top: number; width: number; height: number } | null>(null);
@@ -330,6 +357,8 @@ export function Canvas({ onContextMenu }: CanvasProps) {
     if (!doc || !page) return;
     // A second finger turns this into a pinch, handled by the gesture effect.
     if (e.pointerType === 'touch' && !e.isPrimary) { drag.current = { kind: 'none' }; return; }
+    startWorld.current = toCanvasSpace(e.clientX, e.clientY, useCanvas.getState().viewport);
+    lastPointer.current = pointerLike(e);
     try {
       // Throws if the pointer has already been released, which happens with
       // fast taps and with synthetic events; it is an optimisation, not a
@@ -349,6 +378,7 @@ export function Canvas({ onContextMenu }: CanvasProps) {
           batch: `b_${Date.now()}`,
           restore: { t: 'note', action: 'update', pageId: page.id, note: { id, x: note.x, y: note.y } },
         };
+        setDragging(true);
         return;
       }
     }
@@ -470,7 +500,20 @@ export function Canvas({ onContextMenu }: CanvasProps) {
           return;
         }
       }
-      const boardId = boardIdAt(e.target);
+      let boardId = boardIdAt(e.target);
+      // A section is a sheet things sit on. Its empty area behaves like empty
+      // canvas — a drag there draws a marquee — and only its title moves it,
+      // as in FigJam. Otherwise every marquee started inside a section picked
+      // the section up instead of selecting the slides on it.
+      if (boardId) {
+        const item = boardOf(page).find((i) => i.id === boardId);
+        if (isShape(item) && item.kind === 'section') {
+          // The title element stretches to the sheet's full height, so the
+          // band is worked out from geometry: the strip the title sits in.
+          const at = toCanvasSpace(e.clientX, e.clientY, viewport);
+          if (at.y > item.y + SECTION_TITLE_BAND) boardId = null;
+        }
+      }
       if (boardId) {
         const state = useCanvas.getState();
         const already = state.boardSelection.includes(boardId);
@@ -543,6 +586,33 @@ export function Canvas({ onContextMenu }: CanvasProps) {
       ? hit.nodeId
       : clickTarget(doc, hit, selection);
 
+    // Pressing inside an artboard that is itself selected grabs the artboard —
+    // and every other selected artboard with it — so a group picked with a
+    // marquee can be dragged by any of its frames, not only by a label. A
+    // click without a drag still goes on to select what is under the pointer.
+    //
+    // Zoomed out far enough that a slide is a thumbnail, editing inside it is
+    // not practical, so any press on an artboard takes the artboard.
+    const zoomedOut = viewport.zoom < ZOOMED_OUT;
+    const artboardId = hit.artboardId;
+    if (!(e.metaKey || e.ctrlKey) && (zoomedOut || (!e.shiftKey && selection.includes(artboardId)))) {
+      let current = selection;
+      if (e.shiftKey) {
+        useCanvas.getState().toggleSelect(artboardId);
+        current = useCanvas.getState().selection;
+        if (!current.includes(artboardId)) { drag.current = { kind: 'none' }; return; }
+      } else if (!current.includes(artboardId)) {
+        select([artboardId]);
+        current = [artboardId];
+      }
+      drag.current = {
+        kind: 'maybe-move', ids: artboardsToMove(doc, current, artboardId),
+        startX: e.clientX, startY: e.clientY,
+        clickSelect: !zoomedOut && targetId !== artboardId ? targetId : undefined,
+      };
+      return;
+    }
+
     const already = selection.includes(targetId);
     if (e.shiftKey) {
       useCanvas.getState().toggleSelect(targetId);
@@ -599,8 +669,20 @@ export function Canvas({ onContextMenu }: CanvasProps) {
       return;
     }
 
-    const dxScreen = e.clientX - d.startX!;
-    const dyScreen = e.clientY - d.startY!;
+    lastPointer.current = pointerLike(e);
+
+    // Space held, or the middle button pressed, in the middle of a drag pans
+    // the canvas; what is held keeps following the pointer.
+    if (d.kind !== 'pan' && (useCanvas.getState().spacePanning || (e.buttons & 4)) && (e.movementX || e.movementY)) {
+      setViewport({ x: vp.x + e.movementX, y: vp.y + e.movementY });
+      return;
+    }
+
+    const sw = startWorld.current;
+    const sx = d.kind === 'pan' || !sw ? d.startX! : sw.x * vp.zoom + vp.x;
+    const sy = d.kind === 'pan' || !sw ? d.startY! : sw.y * vp.zoom + vp.y;
+    const dxScreen = e.clientX - sx;
+    const dyScreen = e.clientY - sy;
     let dx = dxScreen / vp.zoom;
     const dy = dyScreen / vp.zoom;
 
@@ -611,7 +693,7 @@ export function Canvas({ onContextMenu }: CanvasProps) {
 
       case 'marquee': {
         const rect = {
-          left: Math.min(d.startX, e.clientX), top: Math.min(d.startY, e.clientY),
+          left: Math.min(sx, e.clientX), top: Math.min(sy, e.clientY),
           width: Math.abs(dxScreen), height: Math.abs(dyScreen),
         };
         setMarquee(rect);
@@ -624,11 +706,12 @@ export function Canvas({ onContextMenu }: CanvasProps) {
           // The two selections cannot be held at once, so a marquee that
           // catches design layers takes those, and one that only reaches the
           // board takes the board.
-          if (hits.length || !boardHits.length) {
-            select(hits, d.additive);
-            if (!hits.length && !d.additive) useCanvas.getState().selectBoard([]);
+          const pick = marqueePick(doc, hits, boardHits);
+          if (pick.board.length) {
+            useCanvas.getState().selectBoard(pick.board, d.additive);
           } else {
-            useCanvas.getState().selectBoard(boardHits, d.additive);
+            select(pick.nodes, d.additive);
+            if (!pick.nodes.length && !d.additive) useCanvas.getState().selectBoard([]);
           }
         }
         return;
@@ -812,6 +895,13 @@ export function Canvas({ onContextMenu }: CanvasProps) {
       }
 
       case 'resize': {
+        // A press on a handle is not a resize until the pointer really moves:
+        // zoomed out, a pixel of jitter is dozens of design pixels, enough to
+        // shrink a slide by accident.
+        if (!d.started) {
+          if (Math.abs(dxScreen) < DRAG_THRESHOLD && Math.abs(dyScreen) < DRAG_THRESHOLD) return;
+          d.started = true;
+        }
         // Resizing an artboard settles on the document's breakpoints, so the
         // widths you author at are the widths the design responds at.
         const resizingArtboard = doc.nodes[d.start.id]?.type === 'artboard';
@@ -838,6 +928,42 @@ export function Canvas({ onContextMenu }: CanvasProps) {
     }
   }, [dispatch, page, select, setHovered, setMeasureTo, setViewport]);
 
+  // --- Moving the view mid-drag -------------------------------------------
+
+  const moveRef = useRef(onPointerMove);
+  moveRef.current = onPointerMove;
+
+  // When the view moves under a drag — wheel, pinch, Ctrl-wheel zoom, Space
+  // panning or the auto-pan below — replay the last pointer position, so what
+  // is held lands under the pointer in the new view instead of staying behind.
+  useEffect(() => useCanvas.subscribe((st, prev) => {
+    if (st.viewport === prev.viewport) return;
+    const d = drag.current;
+    if (d.kind === 'none' || d.kind === 'pan' || !lastPointer.current) return;
+    moveRef.current(lastPointer.current as React.PointerEvent);
+  }), []);
+
+  // Near the edge of the canvas, a drag that carries something scrolls it,
+  // faster the closer the pointer gets — so a slide can be taken anywhere on
+  // a board bigger than the window without letting go of it.
+  useEffect(() => {
+    if (!dragging) return;
+    let raf = 0;
+    const tick = () => {
+      raf = requestAnimationFrame(tick);
+      const p = lastPointer.current;
+      const box = containerRef.current?.getBoundingClientRect();
+      if (!p || !box || !CARRIES.has(drag.current.kind)) return;
+      const vx = edgeSpeed(p.clientX, box.left, box.right);
+      const vy = edgeSpeed(p.clientY, box.top, box.bottom);
+      if (!vx && !vy) return;
+      const vp = useCanvas.getState().viewport;
+      setViewport({ x: vp.x + vx, y: vp.y + vy });
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [dragging, setViewport]);
+
   // --- Pointer up --------------------------------------------------------
 
   const onPointerUp = useCallback((e: React.PointerEvent) => {
@@ -848,6 +974,7 @@ export function Canvas({ onContextMenu }: CanvasProps) {
     setMarquee(null);
     setDrawPreview(null);
     setDropTarget(null);
+    if (d.kind === 'maybe-move' && d.clickSelect) { useCanvas.getState().select([d.clickSelect]); return; }
     setGuides(null);
 
     if (!doc || !page) return;
@@ -888,6 +1015,7 @@ export function Canvas({ onContextMenu }: CanvasProps) {
       useCanvas.getState().pushUndo([...regroupDropped(d.ids), d.restore], selection);
       return;
     }
+    if (d.kind === 'resize' && !d.started) return;
     if (d.kind === 'move-section' || d.kind === 'move-absolute' || d.kind === 'resize' || d.kind === 'move-note') {
       useCanvas.getState().pushUndo([d.restore], selection);
       return;

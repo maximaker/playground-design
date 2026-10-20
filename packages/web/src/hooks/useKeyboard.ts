@@ -105,10 +105,13 @@ export function useKeyboard(actions: KeyboardActions = {}): void {
         e.preventDefault();
         const page = currentPage();
         if (page && doc) {
-          // Select artboard contents rather than the artboards themselves: on a
-          // canvas, "everything" means the work, not the frames around it.
-          const contents = page.artboards.flatMap((a) => doc.nodes[a]?.children ?? []);
-          select(contents.length ? contents : page.artboards);
+          // First press: every artboard on the page, as in Figma, so a deck's
+          // slides can be moved or arranged together. Pressed again with all of
+          // them selected, it reaches the layers inside them.
+          const all = page.artboards.filter((a) => doc.nodes[a]);
+          const allSelected = all.length > 0 && all.every((a) => selection.includes(a)) && selection.length === all.length;
+          const contents = all.flatMap((a) => doc.nodes[a]?.children ?? []);
+          select(allSelected && contents.length ? contents : all);
         }
         return;
       }

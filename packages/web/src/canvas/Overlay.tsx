@@ -7,7 +7,7 @@
  * no width in the document at all.
  */
 
-import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { memo, useCallback, useMemo, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { NodeId, SnapGuide } from '@playground/shared';
 import { useCanvas, getNodeById, getDoc } from '../state/store.ts';
 import { allFrames, findElement, nodeRect } from './registry.ts';
@@ -114,6 +114,21 @@ export const Overlay = memo(function Overlay({ version, dropTarget, guides, live
   const single = selection.length === 1 ? selection[0]! : null;
   const singleRect = single ? rects.selection[single] : null;
   const singleNode = single ? getNodeById(single) : undefined;
+  // Several things selected: one outline around them all, and how many, so a
+  // group picked with a marquee reads as one thing that will move together.
+  const group = useMemo(() => {
+    const boxes = Object.values(rects.selection);
+    if (boxes.length < 2) return null;
+    const left = Math.min(...boxes.map((r) => r.left));
+    const top = Math.min(...boxes.map((r) => r.top));
+    const right = Math.max(...boxes.map((r) => r.right));
+    const bottom = Math.max(...boxes.map((r) => r.bottom));
+    return {
+      rect: { left, top, right, bottom, width: right - left, height: bottom - top } as DOMRect,
+      count: boxes.length,
+      frames: selection.every((id) => getNodeById(id)?.parent === null),
+    };
+  }, [rects.selection, selection]);
 
   return (
     <div className="overlay">
@@ -154,6 +169,15 @@ export const Overlay = memo(function Overlay({ version, dropTarget, guides, live
         <div key={id} className="overlay-selected" style={boxStyle(rect)} />
       ))}
 
+      {group && (
+        <>
+          <div className="overlay-group" style={boxStyle(group.rect)} />
+          <div className="overlay-tag is-selected" style={tagStyle(group.rect)}>
+            {group.count} {group.frames ? 'frames' : 'layers'} selected
+          </div>
+        </>
+      )}
+
       {singleRect && single && editingText !== single && (
         <div className="overlay-tag is-selected" style={tagStyle(singleRect)}>
           {getNodeById(single)?.name ?? 'Layer'}
@@ -162,7 +186,10 @@ export const Overlay = memo(function Overlay({ version, dropTarget, guides, live
 
       {singleRect && singleNode && editingText !== single && (
         <>
-          {HANDLES.map((h) => (
+          {/* No handles on something too small on screen to resize sensibly —
+              a zoomed-out slide — where they would only steal the drag that
+              was meant to move it. */}
+          {!(singleRect.width < 48 || singleRect.height < 48 || (singleNode.parent === null && viewport.zoom < 0.25)) && HANDLES.map((h) => (
             <div
               key={h}
               data-handle={h}
@@ -174,7 +201,9 @@ export const Overlay = memo(function Overlay({ version, dropTarget, guides, live
             className="overlay-size"
             style={{ left: singleRect.left, top: singleRect.bottom + 6 }}
           >
-            {Math.round(singleRect.width)} × {Math.round(singleRect.height)}
+            {/* Design units, not screen pixels: the rect is measured on screen,
+                so at 8% zoom a 1920 × 1080 slide read "160 × 90". */}
+            {Math.round(singleRect.width / viewport.zoom)} × {Math.round(singleRect.height / viewport.zoom)}
           </div>
         </>
       )}

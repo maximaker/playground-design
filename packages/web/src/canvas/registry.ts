@@ -82,7 +82,12 @@ export function nodeRect(nodeId: NodeId): DOMRect | null {
       inner.height * scale,
     );
   }
-  return null;
+  // Zoomed out, artboards are drawn as thumbnails with no live frame to look
+  // inside. The artboard itself still has a box on screen; without this a
+  // marquee could not catch it, nor its selection be outlined, at the zoom
+  // where a whole deck fits on screen.
+  const card = document.querySelector<HTMLElement>(`.artboard[data-artboard-id="${CSS.escape(nodeId)}"] > .artboard-frame`);
+  return card ? card.getBoundingClientRect() : null;
 }
 
 /**

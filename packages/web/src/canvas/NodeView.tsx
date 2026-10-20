@@ -172,6 +172,24 @@ function domProps(
  * edit whenever focus moves without a focusout on this element, which is exactly
  * what happens when the user clicks elsewhere on the canvas.
  */
+/**
+ * Hands the keyboard back to the editor when a text edit ends.
+ *
+ * Editing focuses the artboard's iframe, and the iframe kept focus after
+ * Enter or Escape. Keystrokes then went to the iframe's document, which the
+ * editor's shortcuts do not listen to, so Ctrl/Cmd-Z, Delete and the tool keys
+ * silently stopped working until something in the editor was clicked.
+ */
+function returnFocus(el: HTMLElement): void {
+  const frameDoc = el.ownerDocument;
+  if (frameDoc === document) return;
+  if (frameDoc.activeElement === el || frameDoc.hasFocus()) {
+    el.blur();
+    window.focus();
+    (document.activeElement as HTMLElement | null)?.blur?.();
+  }
+}
+
 function EditableText({ nodeKey, tag, text, attrs }: {
   nodeKey: string; tag: string; text: string; attrs: Record<string, unknown>;
 }) {
@@ -211,7 +229,10 @@ function EditableText({ nodeKey, tag, text, attrs }: {
       selection.addRange(range);
     }
 
-    return () => { commit(); };
+    return () => {
+      commit();
+      returnFocus(el);
+    };
   }, [commit]);
 
   const onBlur = useCallback(() => {
