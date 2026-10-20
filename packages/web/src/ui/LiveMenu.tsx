@@ -6,6 +6,10 @@
  * document holds a live question, says how many and how much has been
  * answered, and goes to the controls. Clearing everything is here too, behind
  * a confirmation; clearing one question stays on the control page.
+ *
+ * Clearing starts a new round on the server: what was answered is archived
+ * (downloadable and deletable from the control page) and no longer counted,
+ * so the counts here drop to zero straight away.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -39,7 +43,7 @@ export async function fetchLive(docId: string): Promise<LiveSummary[]> {
   return ((await r.json()) as { questions: LiveSummary[] }).questions;
 }
 
-/** Clears every question: text answers hidden, poll votes reset, form text answers hidden. */
+/** Clears every question by starting a new round; what was answered moves to each question's archive. */
 export async function clearAllLive(questions: LiveSummary[]): Promise<void> {
   for (const q of questions) {
     const r = await fetch(`/api/live/${encodeURIComponent(q.code)}/clear`, { method: 'POST' });
@@ -57,8 +61,9 @@ export function ClearAllLiveDialog({ questions, onClose, onDone }: {
     <Modal title="Clear all answers?" onClose={onClose}>
       <p className="live-confirm-text">
         This clears {total} {total === 1 ? 'answer' : 'answers'} across {questions.length} live{' '}
-        {questions.length === 1 ? 'question' : 'questions'}. Poll votes are reset to zero; written answers are taken off
-        the slides (they stay stored and can be shown again from the control page).
+        {questions.length === 1 ? 'question' : 'questions'} and starts a new round: answers, votes and responses leave
+        the slides and every count, and the same phones can answer again. They stay in each question’s archive on the
+        control page, where you can download or delete them for good.
       </p>
       {error && <p className="live-confirm-error" role="alert">{error}</p>}
       <div className="live-confirm-actions">
@@ -82,6 +87,8 @@ export function LiveMenu({ docId, count, compact }: { docId: string; count: numb
   const [questions, setQuestions] = useState<LiveSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
+  /** Set right after Clear all, so the menu says so until the next answer comes in. */
+  const [cleared, setCleared] = useState(false);
   const ref = useRef<HTMLSpanElement | null>(null);
   const firstItem = useRef<HTMLButtonElement | null>(null);
 
@@ -103,6 +110,7 @@ export function LiveMenu({ docId, count, compact }: { docId: string; count: numb
 
   if (count === 0) return null;
   const total = questions?.reduce((n, q) => n + answered(q), 0) ?? null;
+  const showCleared = cleared && total === 0;
 
   return (
     <span className="overflow-anchor" ref={ref}>
@@ -126,7 +134,7 @@ export function LiveMenu({ docId, count, compact }: { docId: string; count: numb
               <span className="live-menu-stats tabular">
                 {count} {count === 1 ? 'question' : 'questions'}
                 {' · '}
-                {error ? '—' : total === null ? '…' : `${total} ${total === 1 ? 'answer' : 'answers'}`}
+                {error ? '—' : total === null ? '…' : `${showCleared ? 'Cleared · ' : ''}${total} ${total === 1 ? 'answer' : 'answers'}`}
               </span>
             </div>
             <button ref={firstItem} role="menuitem" className="context-item" onClick={() => { openLiveControls(docId); setOpen(false); }}>
@@ -145,7 +153,17 @@ export function LiveMenu({ docId, count, compact }: { docId: string; count: numb
         </>
       )}
       {confirming && questions && (
-        <ClearAllLiveDialog questions={questions} onClose={() => setConfirming(false)} onDone={load} />
+        <ClearAllLiveDialog
+          questions={questions}
+          onClose={() => setConfirming(false)}
+          onDone={() => {
+            // Zero the counts at once, then confirm them with the server, and show the menu with the result.
+            setQuestions((qs) => qs?.map((q) => ({ ...q, answers: 0, totalVotes: q.kind === 'poll' ? 0 : q.totalVotes })) ?? qs);
+            setCleared(true);
+            setOpen(true); // opening reloads them from the server
+
+          }}
+        />
       )}
     </span>
   );

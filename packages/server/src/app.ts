@@ -64,7 +64,7 @@ import { dirname } from 'node:path';
 import { APP_CSP, clientIp, rateLimit, securityHeaders } from './security.ts';
 import { bodyLimit } from 'hono/body-limit';
 import {
-  LiveError, answerPageHtml, boardHtml, castLiveVote, clearLiveAnswers, createLiveQuestion, deviceFor, deviceView,
+  LiveError, answerPageHtml, boardHtml, castLiveVote, clearLiveAnswers, deleteLivePastRounds, createLiveQuestion, deviceFor, deviceView,
   getLiveQuestion, hideLiveAnswer, likeLiveAnswer, resetLiveForm, deleteLiveQuestion, submitLiveForm, moderatorView, liveQuestionsInOrder, answersCsv, controlPageHtml, qrSvg, submitLiveAnswer, updateLiveQuestion, waitForBoardState,
 } from './live.ts';
 
@@ -1406,9 +1406,12 @@ api.get('/live/:code/controls', async (c) => {
 api.get('/live/:code/csv', async (c) => {
   const q = await getLiveQuestion(c.req.param('code'));
   if (!q || !atLeast(c.get('role'), 'editor')) return c.json({ error: 'No such question.' }, 404);
-  return c.body(answersCsv(q), 200, {
+  // ?rounds=all adds the cleared rounds (the archive); the default is the current round only.
+  const all = c.req.query('rounds') === 'all';
+  return c.body(answersCsv(q, all ? 'all' : 'current'), 200, {
     'content-type': 'text/csv; charset=utf-8',
-    'content-disposition': `attachment; filename="live-${q.code}.csv"`,
+    'cache-control': 'no-store',
+    'content-disposition': `attachment; filename="live-${q.code}${all ? '-all-rounds' : ''}.csv"`,
   });
 });
 
@@ -1452,6 +1455,14 @@ api.post('/live/:code/delete', async (c) => {
   } catch (err) { return liveFailure(c, err); }
 });
 
+/** Deletes a question's cleared rounds for good; the current round stays. */
+api.post('/live/:code/rounds/delete', async (c) => {
+  try {
+    return c.json(await deleteLivePastRounds(c.req.param('code')));
+  } catch (err) { return liveFailure(c, err); }
+});
+
+/** Starts a new round: everything so far is archived, uncounted, and phones may answer again. */
 api.post('/live/:code/clear', async (c) => {
   try {
     return c.json(await clearLiveAnswers(c.req.param('code')));

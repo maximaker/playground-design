@@ -36,7 +36,7 @@ import {
   decisionsOf, addDecisionOps, resolveWithOutcomeOps, describeDecision, decisionsMarkdown,
   sectionOfArtboard, normaliseFlowCard, sectionHeading, findVersionTarget, versionOps, describeVersion, versionOf, targetTitle, VERSION_KINDS,
   GOOGLE_FONT_WEIGHTS, artboardTheme, REPEAT_DATA_ATTR, REPEAT_TEMPLATE_ATTR, REPEAT_STYLE_ATTR, expandRepeat,
-  makeLiveQuestionNode, visibleAnswers,
+  makeLiveQuestionNode, visibleAnswers, type LiveQuestion,
   makeTimerNode,
 } from '@playground/shared';
 import {
@@ -45,7 +45,7 @@ import {
 } from './store.ts';
 import { persistence } from './persistence.ts';
 import {
-  LiveError, clearLiveAnswers, createLiveQuestion, resetLiveForm, deleteLiveQuestion, getLiveQuestion, hideLiveAnswer, liveQuestionsFor, liveQuestionsInOrder, moderatorView,
+  LiveError, clearLiveAnswers, deleteLivePastRounds, roundAsQuestion, createLiveQuestion, resetLiveForm, deleteLiveQuestion, getLiveQuestion, hideLiveAnswer, liveQuestionsFor, liveQuestionsInOrder, moderatorView,
   updateLiveQuestion,
 } from './live.ts';
 import { pageArtboard, slugify } from './publish.ts';
@@ -2355,16 +2355,25 @@ function registerWriteTools(server: McpServer, ctx: McpContext): void {
       'Every live question in this document with its answers, oldest first — hidden ones included and marked; '
       + 'for a poll, each option’s votes and percentage; on a votable question, each answer’s likes. '
       + 'For a form: fields (per field: rating average and distribution, choice counts and percentages, text answers with ids for hide_live_answer) '
-      + 'and submissions (raw, oldest first, choices as labels). Pass code for one question.',
+      + 'and submissions (raw, oldest first, choices as labels). Pass code for one question. '
+      + 'Only the current round by default: clearing a question archives its answers as a past round. '
+      + 'round: "all" adds pastRounds (each cleared round in full); a number reads that one round.',
     inputSchema: {
       code: z.string().optional().describe('One question’s code (the part after /q/). Omit for all of them.'),
       includeHidden: z.boolean().optional().default(true),
+      round: z.union([z.literal('current'), z.literal('all'), z.number().int().min(1)]).optional().default('current')
+        .describe('"current" (default), "all" for every cleared round too, or one round number.'),
     },
     annotations: { readOnlyHint: true },
-  }, async ({ code, includeHidden }) => liveGuard(async () => {
+  }, async ({ code, includeHidden, round }) => liveGuard(async () => {
     const doc = requireDoc(ctx);
     const all = code ? [await ownLiveQuestion(code)] : await liveQuestionsFor(doc.id);
-    return json(all.map((q) => {
+    const pick = (q: LiveQuestion): LiveQuestion | null => {
+      if (typeof round !== 'number' || round === (q.round ?? 1)) return q;
+      const past = q.pastRounds?.find((r) => r.round === round);
+      return past ? roundAsQuestion(q, past) : null;
+    };
+    const one = (q: LiveQuestion) => {
       const view = moderatorView(q);
       return {
         ...view,
@@ -2378,6 +2387,17 @@ function registerWriteTools(server: McpServer, ctx: McpContext): void {
         answers: view.answers.filter((a) => includeHidden || !a.hidden)
           .map(({ createdAt, ...a }) => ({ ...a, at: new Date(createdAt).toISOString() })),
       };
+    };
+    return json(all.flatMap((q): unknown[] => {
+      const chosen = pick(q);
+      if (!chosen) return [];
+      const view = one(chosen);
+      if (typeof round === 'number') return [{ ...view, pastRounds: undefined, roundStartedAt: undefined }];
+      if (round !== 'all') return [view];
+      return [{
+        ...view,
+        pastRounds: (q.pastRounds ?? []).map((r) => ({ ...one(roundAsQuestion(q, r)), pastRounds: undefined, clearedAt: new Date(r.clearedAt).toISOString() })),
+      }];
     }));
   }));
 
@@ -2409,10 +2429,11 @@ function registerWriteTools(server: McpServer, ctx: McpContext): void {
     title: 'Open, close, reword, reset or reconfigure a live question',
     description:
       'open: false stops new answers (the slide says closed); open: true reopens. question rewords it. '
-      + 'clear: true hides every text answer on the slide (they stay stored) or resets a poll’s votes to zero. '
+      + 'clear: true starts a new round: every answer, vote or response so far is archived (off the slide and out of every count; '
+      + 'the same phones can answer again). list_live_answers with round: "all" still reads the archive; deletePastRounds: true deletes it for good. '
       + 'options replaces a poll’s choices — only while it has no votes. onePerPerson and votable switch those settings. '
       + 'qr: false hides the QR code and short URL on the board; true shows them again. '
-      + 'For a form, clear: true hides every written answer (ratings and choices stay); resetResponses: true deletes every response; '
+      + 'For a form, resetResponses: true deletes the current round’s responses; '
       + 'fields replaces the fields — only while it has no responses, except that changing just onBoard is always allowed.',
     inputSchema: {
       code: z.string(),
@@ -2425,17 +2446,19 @@ function registerWriteTools(server: McpServer, ctx: McpContext): void {
       qr: z.boolean().optional(),
       fields: z.array(liveField).min(1).max(8).optional(),
       resetResponses: z.boolean().optional().describe('Form only: delete every response. Not undoable.'),
+      deletePastRounds: z.boolean().optional().describe('Delete every cleared round for good. Not undoable.'),
     },
-  }, async ({ code, open, question, clear, options, fields, resetResponses, onePerPerson, votable, qr }) => liveGuard(async () => {
+  }, async ({ code, open, question, clear, options, fields, resetResponses, deletePastRounds, onePerPerson, votable, qr }) => liveGuard(async () => {
     const q = await ownLiveQuestion(code);
     const reset = resetResponses ? await resetLiveForm(q.code) : null;
     // Clearing first lets one call reset a poll and then relabel it.
     const cleared = clear ? await clearLiveAnswers(q.code) : null;
+    const deleted = deletePastRounds ? await deleteLivePastRounds(q.code) : null;
     const updated = await updateLiveQuestion(q.code, { open, question, options, fields, onePerPerson, votable, qr });
     const view = moderatorView(updated);
     return json({
       ...view, answers: undefined, submissions: undefined,
-      answerCount: updated.kind === 'form' ? (updated.submissions?.length ?? 0) : updated.answers.length, cleared, ...(reset ? { reset } : {}),
+      answerCount: updated.kind === 'form' ? (updated.submissions?.length ?? 0) : updated.answers.length, cleared, ...(reset ? { reset } : {}), ...(deleted ? { deleted } : {}),
     });
   }));
 

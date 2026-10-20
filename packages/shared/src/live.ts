@@ -72,6 +72,23 @@ export interface LiveSubmission {
   hidden?: string[];
 }
 
+/**
+ * A round the presenter cleared: what was answered before "Clear", kept as an
+ * archive. Nothing reads a past round for the slide, the answer page or the
+ * counts; only the CSV ("all rounds") and list_live_answers ask for it.
+ * Options and fields are copied so a later relabel cannot change its meaning.
+ */
+export interface LiveRound {
+  round: number;
+  startedAt: number;
+  clearedAt: number;
+  answers: LiveAnswer[];
+  votes?: LiveVote[];
+  submissions?: LiveSubmission[];
+  options?: string[];
+  fields?: LiveFormField[];
+}
+
 export interface LiveQuestion {
   /** The public code: `/q/<code>` answers it. */
   code: string;
@@ -100,6 +117,16 @@ export interface LiveQuestion {
   fields?: LiveFormField[];
   /** A form's responses, oldest first. */
   submissions?: LiveSubmission[];
+  /**
+   * The current round, from 1. Clearing archives everything answered so far
+   * into `pastRounds` and starts the next, so `answers`, `votes` and
+   * `submissions` only ever hold the current round. Absent means 1.
+   */
+  round?: number;
+  /** When the current round began; absent means `createdAt`. */
+  roundStartedAt?: number;
+  /** Cleared rounds, oldest first. Stored, never counted. */
+  pastRounds?: LiveRound[];
 }
 
 export const LIVE_TEXT_MAX = 280;

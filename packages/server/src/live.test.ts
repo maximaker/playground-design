@@ -154,7 +154,7 @@ test('hiding needs an account; hidden answers stay stored but leave the board', 
   assert.equal(full.answers.length, 2);
 
   const cleared = await fetch(`${base}/api/live/${code}/clear`, { method: 'POST', headers: { cookie } });
-  assert.deepEqual(await cleared.json(), { hidden: 1 });
+  assert.deepEqual(await cleared.json(), { round: 2, archived: 2 });
   assert.equal((await state(code)).total, 0);
 });
 
@@ -269,7 +269,7 @@ test('poll: one vote per phone that can be changed, percentages, close, reset, o
   await patch({ open: false });
   assert.equal((await vote(code, 0)).status, 409);
   const reset = await fetch(`${base}/api/live/${code}/clear`, { method: 'POST', headers: { cookie } });
-  assert.deepEqual(await reset.json(), { votesReset: 2 });
+  assert.deepEqual(await reset.json(), { round: 2, archived: 2 });
   assert.equal((await patch({ options: ['A', 'B', 'C'], open: true })).status, 200);
   assert.equal((await vote(code, 2)).status, 201);
 
@@ -325,9 +325,9 @@ test('MCP: a poll through add_live_question, counted by list_live_answers', asyn
   assert.equal((refused as { isError?: boolean }).isError, true);
   const relabelled = JSON.parse(text(await client.callTool({
     name: 'set_live_question', arguments: { code: added.code, clear: true, options: ['Y', 'N'] },
-  }))) as { options: { label: string }[]; cleared: { votesReset: number } };
+  }))) as { options: { label: string }[]; cleared: { archived: number } };
   assert.deepEqual(relabelled.options.map((o) => o.label), ['Y', 'N']);
-  assert.equal(relabelled.cleared.votesReset, 3);
+  assert.equal(relabelled.cleared.archived, 3);
 });
 
 test('presenter controls: slide order, editors only, CSV, the board link, and the list tool', async () => {
@@ -452,7 +452,7 @@ test('form: validated on create, required enforced, one submission per phone tha
   assert.equal((await submit(code, { useful: 3 })).status, 409);
 });
 
-test('form: moderation hides single written answers, clear hides all, reset deletes, CSV has a column per field', async () => {
+test('form: moderation hides single written answers, clear starts a new round, reset deletes, CSV has a column per field', async () => {
   const code = await createQuestion('Feedback two', { kind: 'form', fields: FORM_FIELDS });
   await submit(code, { useful: 3, recommend: 2, change: '=cmd()', email: 'a@example.com' });
   await submit(code, { useful: 5, change: 'Nothing' });
@@ -478,19 +478,21 @@ test('form: moderation hides single written answers, clear hides all, reset dele
   assert.match(lines[1]!, /,3,No,'=cmd\(\),a@example.com,$/);
   assert.match(lines[2]!, /,5,,Nothing,,One thing to change\?$/);
 
-  const cleared = await (await fetch(`${base}/api/live/${code}/clear`, { method: 'POST', headers: { cookie } })).json() as { hidden: number };
-  assert.ok(cleared.hidden >= 1);
-  s = await (await fetch(`${base}/q/${code}/state`)).json() as FormState;
-  assert.equal(s.fields[2]!.shown, 0);
-  assert.equal(s.total, 2);
-
   const list = await (await fetch(`${base}/api/documents/${docId}/live`, { headers: { cookie } })).json() as { questions: { code: string; answers: number; totalResponses: number }[] };
   const listed = list.questions.find((q) => q.code === code)!;
   assert.equal(listed.answers, 2);
   assert.ok(!JSON.stringify(listed).includes('Nothing'), 'the list carries counts, not what people wrote');
 
+  const cleared = await (await fetch(`${base}/api/live/${code}/clear`, { method: 'POST', headers: { cookie } })).json() as { archived: number };
+  assert.equal(cleared.archived, 2);
+  s = await (await fetch(`${base}/q/${code}/state`)).json() as FormState;
+  assert.equal(s.fields[2]!.shown, 0);
+  assert.equal(s.total, 0);
+  assert.equal(s.fields[0]!.average, null, 'a new round starts the ratings over too');
+
+  await submit(code, { useful: 2 });
   const reset = await (await fetch(`${base}/api/live/${code}/reset`, { method: 'POST', headers: { cookie } })).json() as { submissionsReset: number };
-  assert.equal(reset.submissionsReset, 2);
+  assert.equal(reset.submissionsReset, 1);
   assert.equal(((await (await fetch(`${base}/q/${code}/state`)).json()) as FormState).total, 0);
 });
 
@@ -569,4 +571,78 @@ test('discoverable controls: the list names the document, each question has a QR
 
   const { documents } = await (await fetch(`${base}/api/documents`, { headers: { cookie } })).json() as { documents: { id: string; liveQuestions: number }[] };
   assert.ok((documents.find((d) => d.id === docId)?.liveQuestions ?? 0) >= 1);
+});
+
+test('clearing starts a new round: zero everywhere, the same phone answers again, the archive downloads, delete removes it', async () => {
+  const text = (res: unknown) => (res as { content: { text: string }[] }).content[0]!.text;
+  const code = await createQuestion('Same phones on Friday?');
+  const me = await phone(code);
+  assert.equal((await answer(code, { text: 'Tuesday answer' }, me)).status, 201);
+  assert.equal((await answer(code, { text: 'twice' }, me)).status, 409, 'once per person within a round');
+  await answer(code, { text: 'another phone' });
+
+  const cleared = await (await fetch(`${base}/api/live/${code}/clear`, { method: 'POST', headers: { cookie } })).json();
+  assert.deepEqual(cleared, { round: 2, archived: 2 });
+
+  // Counted nowhere: the slide, the moderator view, the control list, the CSV, the phone, MCP.
+  assert.equal((await state(code)).total, 0);
+  const view = await (await fetch(`${base}/api/live/${code}`, { headers: { cookie } })).json() as
+    { round: number; answers: unknown[]; pastRounds: { round: number; count: number }[] };
+  assert.equal(view.round, 2);
+  assert.equal(view.answers.length, 0);
+  assert.deepEqual(view.pastRounds.map((r) => [r.round, r.count]), [[1, 2]]);
+  const list = await (await fetch(`${base}/api/documents/${docId}/live`, { headers: { cookie } })).json() as { questions: { code: string; answers: number; shown: number }[] };
+  const listed = list.questions.find((q) => q.code === code)!;
+  assert.deepEqual([listed.answers, listed.shown], [0, 0]);
+  assert.ok(!JSON.stringify(list).includes('Tuesday answer'));
+  const csv = await (await fetch(`${base}/api/live/${code}/csv`, { headers: { cookie } })).text();
+  assert.equal(csv.trim().split('\r\n').length, 1, 'current-round CSV is just the header');
+  const mine = await (await fetch(`${base}/q/${code}/me`, { headers: { 'x-live-device': me } })).json() as { answered: boolean };
+  assert.equal(mine.answered, false);
+  const mcpNow = JSON.parse(text(await client.callTool({ name: 'list_live_answers', arguments: { code } }))) as { total: number; answers: unknown[] }[];
+  assert.deepEqual([mcpNow[0]!.total, mcpNow[0]!.answers.length], [0, 0]);
+
+  // The same phone answers again.
+  assert.equal((await answer(code, { text: 'Friday answer' }, me)).status, 201);
+  assert.deepEqual((await state(code)).answers.map((a) => a.text), ['Friday answer']);
+
+  // The archive: every round in the CSV and through MCP.
+  const all = await (await fetch(`${base}/api/live/${code}/csv?rounds=all`, { headers: { cookie } })).text();
+  const rows = all.trim().split('\r\n');
+  assert.match(rows[0]!, /^round,time,name,answer/);
+  assert.equal(rows.length, 4);
+  assert.ok(rows.some((r) => r.startsWith('1,') && r.includes('Tuesday answer')));
+  assert.ok(rows.some((r) => r.startsWith('2,') && r.includes('Friday answer')));
+  const mcpAll = JSON.parse(text(await client.callTool({ name: 'list_live_answers', arguments: { code, round: 'all' } }))) as
+    { answers: { text: string }[]; pastRounds: { round: number; answers: { text: string }[] }[] }[];
+  assert.deepEqual(mcpAll[0]!.answers.map((a) => a.text), ['Friday answer']);
+  assert.equal(mcpAll[0]!.pastRounds[0]!.round, 1);
+  assert.equal(mcpAll[0]!.pastRounds[0]!.answers.length, 2);
+  const mcpOne = JSON.parse(text(await client.callTool({ name: 'list_live_answers', arguments: { code, round: 1 } }))) as { answers: unknown[] }[];
+  assert.equal(mcpOne[0]!.answers.length, 2);
+
+  // Delete permanently: editors only, and the archive is gone, the current round stays.
+  assert.equal((await fetch(`${base}/api/live/${code}/rounds/delete`, { method: 'POST' })).status, 401);
+  const deleted = await (await fetch(`${base}/api/live/${code}/rounds/delete`, { method: 'POST', headers: { cookie } })).json();
+  assert.deepEqual(deleted, { deletedRounds: 1, deletedAnswers: 2 });
+  const after = await (await fetch(`${base}/api/live/${code}/csv?rounds=all`, { headers: { cookie } })).text();
+  assert.ok(!after.includes('Tuesday answer') && !after.includes('another phone'));
+  const { getLiveQuestion } = await import('./live.ts');
+  const stored = await getLiveQuestion(code);
+  assert.equal(stored!.pastRounds, undefined);
+  assert.equal(stored!.answers.length, 1);
+});
+
+test('a poll cleared into a new round: votes zero, the same phone votes again, old labels kept in the archive', async () => {
+  const code = await createQuestion('Pick one', { kind: 'poll', options: ['Red', 'Blue'] });
+  const me = await phone(code);
+  assert.equal((await vote(code, 0, me)).status, 201);
+  await fetch(`${base}/api/live/${code}/clear`, { method: 'POST', headers: { cookie } });
+  assert.equal((await state(code)).total, 0);
+  assert.equal((await fetch(`${base}/api/live/${code}`, { method: 'PATCH', headers: jsonHeaders({ cookie }), body: JSON.stringify({ options: ['Green', 'Gold'] }) })).status, 200);
+  assert.equal((await vote(code, 1, me)).status, 201);
+  const me2 = await (await fetch(`${base}/q/${code}/me`, { headers: { 'x-live-device': me } })).json() as { vote: number };
+  assert.equal(me2.vote, 1);
+  const rows = (await (await fetch(`${base}/api/live/${code}/csv?rounds=all`, { headers: { cookie } })).text()).trim().split('\r\n');
+  assert.deepEqual(rows, ['round,option,votes,percent', '1,Red,1,100', '1,Blue,0,0', '2,Green,0,0', '2,Gold,1,100']);
 });

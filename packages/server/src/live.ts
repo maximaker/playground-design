@@ -24,7 +24,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import QRCode from 'qrcode';
 import {
-  type CanvasDocument, type LiveAnswer, type LiveFieldSummary, type LiveKind, type LiveQuestion, livePlacements,
+  type CanvasDocument, type LiveAnswer, type LiveRound, type LiveFieldSummary, type LiveKind, type LiveQuestion, livePlacements,
   LIVE_NAME_MAX, LIVE_QUESTION_MAX, LIVE_TEXT_MAX, cleanFormFields, cleanFormValues, cleanLiveText, cleanPollOptions, formSummary,
   liveBoardFit, pollCounts, pollPercentages, visibleAnswers,
 } from '@playground/shared';
@@ -203,36 +203,66 @@ export async function hideLiveAnswer(code: string, answerId: string, hidden = tr
   return answer;
 }
 
+/** How many things were answered in the current round: votes, responses or answers. */
+export function currentCount(q: LiveQuestion): number {
+  return q.kind === 'poll' ? (q.votes?.length ?? 0) : q.kind === 'form' ? (q.submissions?.length ?? 0) : q.answers.length;
+}
+
+function roundCount(r: LiveRound): number {
+  return (r.votes?.length ?? 0) + (r.submissions?.length ?? 0) + r.answers.length;
+}
+
 /**
- * Clears the slide. Text answers are hidden, not deleted: clearing the slide
- * is not erasing what people said. A poll's votes are reset, because a hidden
- * vote has no meaning — the point of resetting a poll is to ask again.
+ * Clears a question by starting a new round. Everything answered so far moves
+ * into `pastRounds`: off the slide, the answer page, every count and the
+ * current-round CSV, and out of the once-per-person check, so the same phones
+ * can answer again. It stays stored until deleted with deleteLivePastRounds.
  */
-export async function clearLiveAnswers(code: string): Promise<{ hidden: number } | { votesReset: number }> {
+export async function clearLiveAnswers(code: string): Promise<{ round: number; archived: number }> {
   const h = await mustHold(code);
-  if (h.q.kind === 'form') {
-    // A form's ratings and choices stay: clearing takes the written answers off the slide, as for a question.
-    let n = 0;
-    for (const sub of h.q.submissions ?? []) {
-      for (const f of h.q.fields ?? []) {
-        if (f.type !== 'text' || sub.values[f.id] === undefined || sub.hidden?.includes(f.id)) continue;
-        (sub.hidden ??= []).push(f.id);
-        n++;
-      }
-    }
-    await changed(h);
-    return { hidden: n };
-  }
-  if (h.q.kind === 'poll') {
-    const votesReset = h.q.votes?.length ?? 0;
-    h.q.votes = [];
-    await changed(h);
-    return { votesReset };
-  }
-  let n = 0;
-  for (const a of h.q.answers) if (!a.hidden) { a.hidden = true; n++; }
+  const q = h.q;
+  const archived = currentCount(q);
+  if (archived === 0) return { round: q.round ?? 1, archived: 0 };
+  const now = Date.now();
+  const past: LiveRound = {
+    round: q.round ?? 1, startedAt: q.roundStartedAt ?? q.createdAt, clearedAt: now, answers: q.answers,
+    ...(q.votes ? { votes: q.votes, options: q.options } : {}),
+    ...(q.submissions ? { submissions: q.submissions, fields: q.fields } : {}),
+  };
+  (q.pastRounds ??= []).push(past);
+  q.answers = [];
+  if (q.votes) q.votes = [];
+  if (q.submissions) q.submissions = [];
+  q.round = past.round + 1;
+  q.roundStartedAt = now;
+  // A fresh round is a fresh start for the per-phone pacing too.
+  for (const key of [...clientHits.keys()]) if (key.startsWith(`${q.code}|`)) clientHits.delete(key);
   await changed(h);
-  return { hidden: n };
+  return { round: q.round, archived };
+}
+
+/** Deletes a question's cleared rounds for good. The current round is untouched. */
+export async function deleteLivePastRounds(code: string): Promise<{ deletedRounds: number; deletedAnswers: number }> {
+  const h = await mustHold(code);
+  const past = h.q.pastRounds ?? [];
+  const deletedAnswers = past.reduce((n, r) => n + roundCount(r), 0);
+  delete h.q.pastRounds;
+  await changed(h);
+  return { deletedRounds: past.length, deletedAnswers };
+}
+
+/** A past round dressed as a question, so the views and the CSV read it the same way. */
+export function roundAsQuestion(q: LiveQuestion, r: LiveRound): LiveQuestion {
+  return {
+    ...q, answers: r.answers, round: r.round, roundStartedAt: r.startedAt, pastRounds: undefined,
+    ...(q.kind === 'poll' ? { votes: r.votes ?? [], options: r.options ?? q.options } : {}),
+    ...(q.kind === 'form' ? { submissions: r.submissions ?? [], fields: r.fields ?? q.fields } : {}),
+  };
+}
+
+/** The cleared rounds as a moderator sees them: when, and how much. */
+export function pastRoundsSummary(q: LiveQuestion) {
+  return (q.pastRounds ?? []).map((r) => ({ round: r.round, startedAt: r.startedAt, clearedAt: r.clearedAt, count: roundCount(r) }));
 }
 
 /**
@@ -590,6 +620,9 @@ export function moderatorView(q: LiveQuestion) {
     votable: !!q.votable,
     qr: q.qr !== false,
     createdAt: q.createdAt,
+    round: q.round ?? 1,
+    roundStartedAt: q.roundStartedAt ?? q.createdAt,
+    pastRounds: pastRoundsSummary(q),
     ...(q.kind === 'poll'
       ? {
         options: (q.options ?? []).map((label, i) => ({ label, votes: counts[i]!, percent: pollPercentages(counts)[i]! })),
@@ -1002,9 +1035,7 @@ document.getElementById('toggle').onclick = () => moderate('', { open: !state.op
 // The board never knows its document; the server resolves it for someone allowed to see it.
 document.getElementById('controls').onclick = () => window.open('/api/live/' + code + '/controls', '_blank');
 document.getElementById('clear').onclick = () => {
-  const ask = state.kind === 'poll' ? 'Reset every vote to zero?'
-    : state.kind === 'form' ? 'Hide every written answer? They stay stored; ratings and choices stay counted.' : 'Hide every answer? They stay stored.';
-  if (confirm(ask)) moderate('/clear');
+  if (confirm('Clear and start a new round? Everything so far leaves the slide and the counts, and phones can answer again. It stays in the archive on the control page.')) moderate('/clear');
 };
 
 async function poll(wait) {
@@ -1349,14 +1380,8 @@ export async function liveQuestionsInOrder(doc: CanvasDocument, publicUrl: strin
     });
 }
 
-/** Everything said, for after the session: one row per answer, or per option for a poll. */
-export function answersCsv(q: LiveQuestion): string {
-  const cell = (v: unknown) => {
-    const s = String(v ?? '');
-    // A leading = + - @ makes a spreadsheet run the cell as a formula.
-    const safe = /^[=+\-@]/.test(s) ? `'${s}` : s;
-    return /[",\n]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
-  };
+/** One round's rows, header first. */
+function roundCsvRows(q: LiveQuestion): unknown[][] {
   if (q.kind === 'form') {
     const fields = q.fields ?? [];
     const rows: unknown[][] = [
@@ -1371,12 +1396,40 @@ export function answersCsv(q: LiveQuestion): string {
         fields.filter((f) => s.hidden?.includes(f.id)).map((f) => f.label).join('; '),
       ]),
     ];
-    return rows.map((r) => r.map(cell).join(',')).join('\r\n') + '\r\n';
+    return rows;
   }
   const rows: unknown[][] = q.kind === 'poll'
     ? [['option', 'votes', 'percent'], ...(q.options ?? []).map((o, i) => [o, pollCounts(q)[i], pollPercentages(pollCounts(q))[i]])]
     : [['time', 'name', 'answer', 'hidden', ...(q.votable ? ['likes'] : [])],
       ...q.answers.map((a) => [new Date(a.createdAt).toISOString(), a.name, a.text, a.hidden ? 'yes' : 'no', ...(q.votable ? [a.likes?.length ?? 0] : [])])];
+  return rows;
+}
+
+/**
+ * Everything said, for after the session: one row per answer, or per option
+ * for a poll. The current round by default; `all` adds every cleared round
+ * before it, with a round column first.
+ */
+export function answersCsv(q: LiveQuestion, rounds: 'current' | 'all' = 'current'): string {
+  const cell = (v: unknown) => {
+    const s = String(v ?? '');
+    // A leading = + - @ makes a spreadsheet run the cell as a formula.
+    const safe = /^[=+\-@]/.test(s) ? `'${s}` : s;
+    return /[",\n]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
+  };
+  let rows: unknown[][];
+  if (rounds === 'all') {
+    const each = [...(q.pastRounds ?? []).map((r) => roundAsQuestion(q, r)), q];
+    rows = [];
+    let lastHead = '';
+    for (const rq of each) {
+      const [head, ...body] = roundCsvRows(rq);
+      // A form whose fields changed between rounds gets its own header row.
+      const key = JSON.stringify(head);
+      if (key !== lastHead) { rows.push(['round', ...head!]); lastHead = key; }
+      for (const r of body) rows.push([rq.round ?? 1, ...r]);
+    }
+  } else rows = roundCsvRows(q);
   return rows.map((r) => r.map(cell).join(',')).join('\r\n') + '\r\n';
 }
 
@@ -1461,6 +1514,9 @@ export function controlPageHtml(docId: string): string {
   .links { display: flex; gap: 14px; flex-wrap: wrap; margin: 2px 0 10px; font-size: 13px; }
   .links a { color: var(--accent); font-weight: 500; text-decoration: none; min-height: 28px; display: inline-flex; align-items: center; }
   .links a:hover { text-decoration: underline; }
+  .archive { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); font-size: 13px; color: var(--mute); }
+  .archive a { color: var(--accent); font-weight: 500; text-decoration: none; }
+  .archive a:hover { text-decoration: underline; }
   .card.tap:hover { border-color: color-mix(in srgb, var(--mute) 40%, var(--line)); }
 </style></head>
 <body><main>
@@ -1483,6 +1539,8 @@ const $ = (id) => document.getElementById(id);
 let questions = [];
 let current = null;
 let detailRun = 0;
+/** Questions cleared from this page, so a zero reads "Cleared · 0 answers" until the next answer arrives. */
+const justCleared = new Set();
 
 function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
 
@@ -1510,7 +1568,9 @@ function controls(q, after) {
   row.append(sw);
   const n = q.kind === 'poll' ? q.totalVotes : q.kind === 'form' ? q.totalResponses : (typeof q.answers === 'number' ? q.shown : q.answers.filter((a) => !a.hidden).length);
   const noun = q.kind === 'poll' ? ['vote', 'votes'] : q.kind === 'form' ? ['response', 'responses'] : ['answer', 'answers'];
-  row.append(el('span', 'count', n + ' ' + noun[n === 1 ? 0 : 1]));
+  if (n > 0) justCleared.delete(q.code);
+  row.append(el('span', 'count', (justCleared.has(q.code) ? 'Cleared · ' : '') + n + ' ' + noun[n === 1 ? 0 : 1]));
+  if ((q.round || 1) > 1) row.append(el('span', 'chip', 'Round ' + q.round));
   box.append(row);
   box.append(el('div', 'url', q.shortUrl || ''));
   const links = el('div', 'links');
@@ -1520,14 +1580,16 @@ function controls(q, after) {
   links.append(page, qr);
   box.append(links);
   const actions = el('div', 'actions');
-  const clear = el('button', 'danger', q.kind === 'poll' ? 'Reset votes' : 'Clear answers');
+  const clear = el('button', 'danger', q.kind === 'poll' ? 'Reset votes' : q.kind === 'form' ? 'Clear responses' : 'Clear answers');
+  // Hidden answers still belong to the round, so they count as something to clear.
+  const stored = q.kind === 'poll' ? q.totalVotes : q.kind === 'form' ? q.totalResponses : (typeof q.answers === 'number' ? q.answers : q.answers.length);
+  clear.disabled = stored === 0;
   clear.onclick = async (e) => {
     e.stopPropagation();
-    const ask = q.kind === 'poll' ? 'Reset every vote on “' + q.question + '” to zero?'
-      : q.kind === 'form' ? 'Hide every written answer to “' + q.question + '”? They stay stored; ratings and choices stay counted.'
-      : 'Hide every answer to “' + q.question + '”? They stay stored.';
-    if (!confirm(ask)) return;
-    try { await api('/live/' + q.code + '/clear', 'POST'); after(); } catch (err) { alert(err.message); }
+    if (!confirm('Clear “' + q.question + '” and start a new round? Everything answered so far leaves the slide and every count, '
+      + 'and the same phones can answer again. It stays in the archive (Download all rounds) until you delete it.')) return;
+    clear.disabled = true;
+    try { await api('/live/' + q.code + '/clear', 'POST'); justCleared.add(q.code); await after(); } catch (err) { alert(err.message); clear.disabled = false; }
   };
   const csv = el('a', 'btn', 'Download CSV');
   csv.href = '/api/live/' + q.code + '/csv';
@@ -1543,6 +1605,25 @@ function controls(q, after) {
     actions.append(reset);
   }
   actions.append(csv);
+  const past = q.pastRounds || [];
+  let arch = null;
+  if (past.length) {
+    const kept = past.reduce((m, r) => m + r.count, 0);
+    arch = el('div', 'archive');
+    arch.append(el('span', null, 'Archive: ' + past.length + (past.length === 1 ? ' past round · ' : ' past rounds · ') + kept + ' ' + noun[kept === 1 ? 0 : 1] + ', not counted'));
+    const all = el('a', null, 'Download all rounds');
+    all.href = '/api/live/' + q.code + '/csv?rounds=all';
+    all.onclick = (e) => e.stopPropagation();
+    const wipe = el('button', 'danger', 'Delete permanently');
+    wipe.onclick = async (e) => {
+      e.stopPropagation();
+      if (!confirm('Permanently delete ' + kept + ' archived ' + noun[kept === 1 ? 0 : 1] + ' from ' + past.length
+        + (past.length === 1 ? ' past round' : ' past rounds') + ' of “' + q.question + '”? The current round stays. This cannot be undone.')) return;
+      wipe.disabled = true;
+      try { await api('/live/' + q.code + '/rounds/delete', 'POST'); await after(); } catch (err) { alert(err.message); wipe.disabled = false; }
+    };
+    arch.append(all, wipe);
+  }
   if (!q.placement) {
     const del = el('button', 'danger', 'Delete question');
     del.onclick = async (e) => {
@@ -1553,6 +1634,7 @@ function controls(q, after) {
     actions.append(del);
   }
   box.append(actions);
+  if (arch) box.append(arch);
   return box;
 }
 
@@ -1565,7 +1647,9 @@ async function loadList() {
   const box = $('questions');
   box.textContent = '';
   const total = questions.reduce((n, q) => n + (q.kind === 'poll' ? q.totalVotes : q.answers), 0);
-  $('summary').textContent = questions.length ? questions.length + (questions.length === 1 ? ' question · ' : ' questions · ') + total + (total === 1 ? ' answer' : ' answers') : '';
+  const allCleared = total === 0 && questions.length && questions.every((q) => justCleared.has(q.code));
+  $('summary').textContent = questions.length ? questions.length + (questions.length === 1 ? ' question · ' : ' questions · ') + (allCleared ? 'Cleared · ' : '') + total + (total === 1 ? ' answer' : ' answers') : '';
+  $('clear-all').disabled = total === 0;
   $('clear-all').hidden = !questions.length;
   if (!questions.length) { box.append(el('p', 'note', 'No live questions in this document yet. Add one with ⌘K → Add a live question.')); return; }
   let group = null;
@@ -1710,11 +1794,11 @@ async function route() {
 $('back').onclick = () => { location.hash = ''; };
 $('clear-all').onclick = async () => {
   const total = questions.reduce((n, q) => n + (q.kind === 'poll' ? q.totalVotes : q.answers), 0);
-  if (!confirm('Clear all ' + total + ' answers across ' + questions.length + ' questions? Poll votes reset to zero; written answers are hidden from the slides but stay stored.')) return;
+  if (!confirm('Clear all ' + total + ' answers across ' + questions.length + ' questions and start a new round? They leave the slides and every count, '
+    + 'and the same phones can answer again. They stay in each question’s archive until you delete them.')) return;
   const b = $('clear-all'); b.disabled = true;
-  try { for (const q of questions) await api('/live/' + q.code + '/clear', 'POST'); } catch (e) { alert(e.message); }
-  b.disabled = false;
-  loadList();
+  try { for (const q of questions) { await api('/live/' + q.code + '/clear', 'POST'); justCleared.add(q.code); } } catch (e) { alert(e.message); }
+  await loadList();
 };
 addEventListener('hashchange', route);
 route();
