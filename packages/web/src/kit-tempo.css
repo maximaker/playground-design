@@ -1,0 +1,339 @@
+/*
+ * Tempo — the shared layer for Studio, Notes and Artifactory (docs/tempo.md).
+ *
+ * Calm control: a fog desk, one white window, navy as the one dark surface and
+ * the interactive colour, orange only for "now", hatch for attention. Each
+ * app's family colour (Studio lime, Notes yellow, Artifactory orange) is a
+ * mark only, through one slot: --family. Never text, never a fill behind text.
+ *
+ * Load it after tokens.css (and after the app's own base CSS), unlayered.
+ * The class contract and the knobs (--tempo-*) are in docs/tempo.md; an app
+ * tunes a knob on :root[data-app='<app>'] in its own CSS, after this file.
+ * Framework-free: plain classes, plus the optional tempo.js for the side nav.
+ */
+
+/* ------------------------------------------------------------ tokens */
+:root[data-app] {
+  /* Surfaces */
+  --fog: #e6e9ec;                      /* the desk */
+  --side: #fbfbfb;                     /* the side nav column */
+  --paper: var(--surface);             /* the window and sheets */
+  --wash: #f4f5f6;                     /* tab tracks, hover, current, wells */
+  --wash-2: #eceef0;
+  --hair: #ecedef;                     /* hairlines */
+  --hair-2: #dfe2e6;
+  --hatch: repeating-linear-gradient(-55deg, #f2f3f4 0 14px, #fafafa 14px 28px);
+
+  /* Navy: primary fills, current states, focus. */
+  --action: #13202e;
+  --action-hover: #22344a;
+  --action-text: #ffffff;
+  --focus: 0 0 0 2px color-mix(in srgb, #13202e 40%, transparent);
+
+  /* Now (today, due) and stop (late): dots, fills, numerals, pills; always with words. */
+  --now: #e2531e;
+  --now-text: #c2410c;                 /* 4.6:1 on white */
+  --stop: #b5441c;
+  --stop-bg: #fbe4dc;
+
+  /* The dusk band behind share and public pages (always light). */
+  --tempo-dusk-from: #1b2836;
+  --tempo-dusk-to: #4a5560;
+
+  --menu-shadow: 0 24px 48px -12px rgb(19 32 46 / 0.18), 0 2px 6px rgb(19 32 46 / 0.06);
+  --window-shadow: 0 1px 2px rgb(19 32 46 / 0.04), 0 40px 80px -40px rgb(19 32 46 / 0.3);
+  --tempo-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+
+  /* The family slot: the app's mark colour. */
+  --family: var(--accent-500, #13202e);
+  --family-soft: color-mix(in srgb, var(--family) 14%, var(--paper));
+
+  /* Knobs (docs/tempo.md § Knobs). */
+  --tempo-desk-pad: 16px;
+  --tempo-window-radius: 28px;
+  --tempo-side-w: 264px;
+  --tempo-side-pad: 20px 14px 14px;
+  --tempo-side-gap: 18px;
+  --tempo-rail-w: 72px;
+  --tempo-rail-nav: 44px;
+  --tempo-nav-h: 40px;
+  --tempo-nav-fs: 14.5px;
+  --tempo-nav-icon: 18px;
+  --tempo-nav-ink: var(--ink-mute);
+  --tempo-bar-h: 64px;
+  --tempo-bar-pad: 0 20px 0 28px;
+  --tempo-bar-h-sm: 56px;
+  --tempo-bar-pad-sm: 0 10px;
+  --tempo-tab-h: 36px;
+  --tempo-tab-fs: 14px;
+  --tempo-tab-gap: 8px;
+  --tempo-h1-sm: 28px;
+  --tempo-sub-sm: 15px;
+  --tempo-date-gap: 18px;
+  --tempo-date-w: 56px;
+  --tempo-date-size: 34px;
+  --tempo-date-day-mt: 2px;
+  --tempo-date-lh: 1;
+  --tempo-date-dow-fs: 13px;
+  --tempo-date-dow: var(--ink-mute);
+  --tempo-date-rule: 48px;
+  --tempo-day-pad: 14px 18px;
+  --tempo-sheet-max: 1180px;
+  --tempo-sheet-inset: 24px;
+  --tempo-sheet-pad: 40px 48px 48px;
+  --tempo-sheet-lift: 84px;
+  --tempo-dusk-pad: 24px 0 112px;
+  --tempo-sheet-pad-sm: 24px 16px 32px;
+  --tempo-sheet-lift-sm: 56px;
+  --tempo-sheet-radius-sm: 22px;
+  --tempo-dusk-pb-sm: 80px;
+  --tempo-band-h: 260px;
+}
+:root[data-app='studio'] { --family: var(--lime-400); }
+:root[data-app='notes'] { --family: var(--yellow-500); }
+:root[data-app='artifactory'] { --family: var(--orange-500); }
+
+/* Light: the neutrals lean navy. */
+:root[data-app]:not([data-theme='dark']) {
+  --ink: #13202e;
+  --ink-soft: #3c4450;
+  --ink-mute: #646a73;                 /* 5.2:1 on white, 4.8:1 on the wash */
+  --line: #ecedef;
+  --line-strong: #dfe2e6;
+  --ground: #f4f5f6;
+  --surface: #ffffff;
+  --shade: #13202e;
+}
+:root[data-app][data-theme='dark'] {
+  --fog: #0d131a;
+  --side: #1a1d23;
+  --wash: #262931;
+  --wash-2: #2c3038;
+  --hair: #2e3138;
+  --hair-2: #3a3e46;
+  --hatch: repeating-linear-gradient(-55deg, #24272e 0 14px, #1e2026 14px 28px);
+  --action: #dfe6ee;
+  --action-hover: #ffffff;
+  --action-text: #13202e;
+  --focus: 0 0 0 2px color-mix(in srgb, #dfe6ee 55%, transparent);
+  --now-text: #f08a5d;
+  --stop: #f08a5d;
+  --stop-bg: #3a2219;
+  --tempo-dusk-from: #0d131a;
+  --tempo-dusk-to: #1a232d;
+  --menu-shadow: 0 24px 48px -12px rgb(0 0 0 / 0.55), 0 2px 6px rgb(0 0 0 / 0.35);
+  --window-shadow: 0 1px 2px rgb(0 0 0 / 0.3), 0 40px 80px -40px rgb(0 0 0 / 0.6);
+}
+
+/* ------------------------------------------------------------ desk and window */
+body:has(.tempo-window) { background: var(--fog); }
+.tempo-stage { min-height: 100dvh; padding: var(--tempo-desk-pad); display: flex; background: var(--fog); }
+/* The dusk band painted behind the top of the desk (or a share page). */
+.tempo-band {
+  background: linear-gradient(180deg, var(--tempo-dusk-from) 0, var(--tempo-dusk-to) var(--tempo-band-h), var(--fog) var(--tempo-band-h));
+  background-color: var(--fog);
+}
+.tempo-window {
+  flex: 1; min-width: 0; display: flex; overflow: clip;
+  background: var(--paper); border-radius: var(--tempo-window-radius); box-shadow: var(--window-shadow);
+}
+@media (max-width: 767px) {
+  .tempo-stage { padding: 0; }
+  .tempo-window { border-radius: 0; box-shadow: none; }
+}
+
+/* The window bar: one row along the top of the content column. */
+.tempo-bar {
+  position: sticky; top: 0; z-index: 30; display: flex; align-items: center; gap: 10px;
+  height: var(--tempo-bar-h); padding: var(--tempo-bar-pad);
+  background: var(--paper); border-bottom: 1px solid var(--hair);
+}
+@media (max-width: 767px) { .tempo-bar { height: var(--tempo-bar-h-sm); padding: var(--tempo-bar-pad-sm); } }
+
+/* ------------------------------------------------------------ side nav */
+.tempo-side {
+  width: var(--tempo-side-w); flex: none; display: flex; flex-direction: column; gap: var(--tempo-side-gap);
+  padding: var(--tempo-side-pad); background: var(--side); border-right: 1px solid var(--hair);
+  overflow-y: auto; scrollbar-width: none;
+}
+.tempo-side::-webkit-scrollbar { display: none; }
+@media (min-width: 768px) { .tempo-side { position: sticky; top: 0; max-height: calc(100dvh - 2 * var(--tempo-desk-pad)); } }
+
+.tempo-brand { position: relative; display: flex; align-items: center; gap: 10px; padding: 0 6px; font-size: 16px; font-weight: 600; color: var(--ink); }
+.tempo-brand > a { display: flex; align-items: center; gap: 10px; color: inherit; }
+/* The mark: a navy tile with one family-coloured dot. */
+.tempo-mark { display: grid; place-items: center; width: 30px; height: 30px; flex: none; border-radius: 9px; background: #13202e; }
+.tempo-mark i { width: 10px; height: 10px; border-radius: 99px; background: var(--family); }
+:root[data-theme='dark'] .tempo-mark { background: #2a3644; }
+
+.tempo-navgroup { display: flex; flex-direction: column; gap: 2px; }
+.tempo-label { padding: 0 12px 6px; font-size: 12px; font-weight: 500; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink-mute); }
+.tempo-nav {
+  display: flex; align-items: center; gap: 12px; height: var(--tempo-nav-h); padding: 0 12px; width: 100%;
+  border-radius: 12px; color: var(--tempo-nav-ink); font-size: var(--tempo-nav-fs); text-align: left;
+  transition: background 160ms var(--tempo-ease), color 160ms var(--tempo-ease);
+}
+.tempo-nav svg { width: var(--tempo-nav-icon); height: var(--tempo-nav-icon); flex: none; }
+.tempo-nav:hover { background: var(--wash); color: var(--ink); }
+.tempo-nav[aria-current='page'] { background: var(--wash); color: var(--ink); font-weight: 500; }
+.tempo-nav em { margin-left: auto; flex: none; font-style: normal; font-size: 12px; color: var(--ink-mute); font-variant-numeric: tabular-nums; }
+.tempo-nav em.is-now { color: var(--stop); background: var(--stop-bg); border-radius: 99px; padding: 1px 8px; font-weight: 600; }
+.tempo-nav:focus-visible { outline: none; box-shadow: var(--focus); }
+
+/* The one deep list (Studio's Projects, Artifactory's artifacts). */
+.tempo-list { display: flex; flex-direction: column; gap: 8px; flex: none; min-height: 0; }
+.tempo-list__head {
+  display: flex; align-items: center; justify-content: space-between; padding: 0 12px; height: 24px;
+  font-size: 12px; font-weight: 500; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink-mute);
+}
+.tempo-list__head:hover { color: var(--ink); }
+.tempo-list__head:focus-visible { outline: none; box-shadow: var(--focus); border-radius: 8px; }
+.tempo-list__head span { font-size: 16px; transition: transform 180ms var(--tempo-ease); }
+.tempo-list__head span.is-open, .tempo-list__head[aria-expanded='true'] span { transform: rotate(90deg); }
+.tempo-list__filter {
+  margin: 0 4px; height: 36px; padding: 0 12px; border-radius: 10px; border: 1.5px solid var(--hair);
+  background: var(--paper); color: var(--ink); font-size: 13px; outline: none;
+}
+.tempo-list__filter::placeholder { color: var(--ink-mute); }
+.tempo-list__filter:focus { border-color: var(--action); }
+.tempo-list__groups { display: flex; flex-direction: column; gap: 12px; max-height: 42vh; overflow-y: auto; padding: 0 4px; }
+.tempo-list__group { padding: 0 8px 4px; font-size: 12px; color: var(--ink-mute); }
+.tempo-list__row { display: block; padding: 6px 8px; border-radius: 10px; color: var(--ink-soft); font-size: 13.5px; transition: background 180ms var(--tempo-ease); }
+.tempo-list__row:hover { background: var(--wash); }
+.tempo-list__row[aria-current='page'] { background: var(--wash); color: var(--ink); font-weight: 500; box-shadow: inset 2px 0 0 var(--action); }
+.tempo-list__row:focus-visible { outline: none; box-shadow: var(--focus); }
+.tempo-list__row span, .tempo-list__row small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tempo-list__row small { font-size: 12px; color: var(--ink-mute); font-weight: 400; }
+.tempo-list__empty { padding: 4px 8px; font-size: 12.5px; color: var(--ink-mute); }
+
+/* Drawer pieces: the scrim and the bar's menu button (phones only). */
+.tempo-scrim { position: fixed; inset: 0; z-index: 55; background: color-mix(in srgb, #13202e 35%, transparent); }
+.tempo-menu-btn { display: none; }
+
+/* The rail, 768–1199px: icons only, so the page keeps its measure. */
+@media (min-width: 768px) and (max-width: 1199px) {
+  .tempo-side { width: var(--tempo-rail-w); padding-inline: 12px; align-items: center; }
+  .tempo-side :is(.tempo-text, .tempo-label, .tempo-list, .tempo-rail-hide, .hm-switcher),
+  .tempo-side .tempo-nav em { display: none; }
+  .tempo-side .tempo-nav { justify-content: center; padding: 0; width: var(--tempo-rail-nav); }
+  .tempo-side .tempo-brand { padding: 0; }
+}
+/* The drawer, below 768px: opened from .tempo-menu-btn, .is-open while shown. */
+@media (max-width: 767px) {
+  .tempo-side {
+    position: fixed; inset: 0 auto 0 0; z-index: 60; width: 288px; max-height: none;
+    transform: translateX(-100%); visibility: hidden;
+    transition: transform 200ms var(--tempo-ease), visibility 0s 200ms;
+  }
+  .tempo-side.is-open { transform: none; visibility: visible; transition: transform 200ms var(--tempo-ease); box-shadow: var(--menu-shadow); }
+  .tempo-menu-btn { display: inline-flex; }
+}
+@media (min-width: 768px) { .tempo-scrim { display: none; } }
+
+/* ------------------------------------------------------------ headings */
+.tempo-eyebrow { font-size: 13px; font-weight: 500; color: var(--ink-mute); margin-bottom: 6px; }
+.tempo-h1 { font-size: 34px; line-height: 1.1; font-weight: 700; letter-spacing: -0.02em; color: var(--ink); }
+.tempo-sub { font-size: 17px; line-height: 1.5; color: var(--ink-mute); text-wrap: pretty; }
+.tempo-h2 { font-size: 18px; font-weight: 600; color: var(--ink); letter-spacing: -0.01em; }
+@media (max-width: 767px) {
+  .tempo-h1 { font-size: var(--tempo-h1-sm); }
+  .tempo-sub { font-size: var(--tempo-sub-sm); }
+}
+
+/* ------------------------------------------------------------ segmented tabs */
+/* A wash track; the active segment is paper with a small lift. Active =
+   aria-current, aria-pressed, aria-checked, aria-selected or .is-on. On a phone
+   the track scrolls sideways instead of wrapping. */
+.tempo-tabs {
+  display: inline-flex; max-width: 100%; gap: 2px; padding: 4px; border-radius: 14px; background: var(--wash);
+  overflow-x: auto; scrollbar-width: none; vertical-align: middle;
+}
+.tempo-tabs::-webkit-scrollbar { display: none; }
+.tempo-tab {
+  display: inline-flex; flex-shrink: 0; align-items: center; gap: var(--tempo-tab-gap); height: var(--tempo-tab-h); padding: 0 14px;
+  border-radius: 10px; font-size: var(--tempo-tab-fs); color: var(--ink-mute); white-space: nowrap; cursor: pointer;
+  transition: background 160ms var(--tempo-ease), color 160ms var(--tempo-ease), box-shadow 160ms var(--tempo-ease);
+}
+.tempo-tab:hover { color: var(--ink); }
+.tempo-tab:is([aria-current]:not([aria-current='false']), [aria-pressed='true'], [aria-checked='true'], [aria-selected='true'], .is-on) {
+  background: var(--paper); color: var(--ink); font-weight: 500; box-shadow: 0 1px 3px rgb(19 32 46 / 0.1);
+}
+.tempo-tab :is(i, .tempo-tab__count) { font-style: normal; font-size: 12px; font-weight: 400; color: var(--ink-mute); font-variant-numeric: tabular-nums; }
+.tempo-tab:focus-visible { outline: none; box-shadow: var(--focus); }
+.tempo-tabs--sm .tempo-tab { height: 30px; padding: 0 10px; font-size: 12.5px; }
+
+/* ------------------------------------------------------------ hatch */
+/* Attention: hatch plus a label, never hatch alone. */
+.tempo-hatch { background: var(--hatch) !important; border-color: transparent !important; }
+
+/* ------------------------------------------------------------ date block */
+/* Weekday over a big light numeral (month under it, optional), a hairline rule. */
+.tempo-date { display: flex; align-items: center; gap: var(--tempo-date-gap); flex: none; }
+.tempo-date__num { display: block; width: var(--tempo-date-w); text-align: center; color: var(--ink-soft); }
+.tempo-date__dow { display: block; font-size: var(--tempo-date-dow-fs); color: var(--tempo-date-dow); }
+.tempo-date__day {
+  display: block; margin-top: var(--tempo-date-day-mt); font-size: var(--tempo-date-size); line-height: var(--tempo-date-lh); font-weight: 400;
+  letter-spacing: -0.01em; font-variant-numeric: tabular-nums;
+}
+.tempo-date__mon { display: block; margin-top: var(--tempo-date-day-mt); font-size: 12px; color: var(--ink-mute); }
+.tempo-date.is-now :is(.tempo-date__num, .tempo-date__dow, .tempo-date__mon) { color: var(--now-text); }
+.tempo-date__rule { width: 1px; height: var(--tempo-date-rule); background: var(--line); }
+.tempo-date--lg { --tempo-date-size: 56px; --tempo-date-rule: 64px; --tempo-date-day-mt: 4px; }
+.tempo-date--lg .tempo-date__num { width: auto; min-width: 64px; text-align: left; }
+.tempo-date--lg .tempo-date__day { font-weight: 300; letter-spacing: -0.03em; }
+/* A day row: the date block and its text in one hairline card. */
+.tempo-day {
+  display: flex; align-items: center; gap: var(--tempo-date-gap); width: 100%; padding: var(--tempo-day-pad);
+  border: 1.5px solid var(--hair); border-radius: 18px; background: var(--paper); text-align: left; color: var(--ink);
+  transition: background 160ms var(--tempo-ease), border-color 160ms var(--tempo-ease);
+}
+.tempo-day:hover { background: var(--wash); border-color: transparent; }
+.tempo-day:focus-visible { outline: none; box-shadow: var(--focus); }
+.tempo-day--sm { --tempo-date-size: 28px; --tempo-date-rule: 40px; padding: 10px 16px; }
+
+/* ------------------------------------------------------------ empty state */
+.tempo-empty { border: 1.5px dashed var(--hair-2); border-radius: 18px; padding: 48px 24px; text-align: center; }
+.tempo-empty__tile { width: 56px; height: 56px; margin: 0 auto 14px; border-radius: 14px; background: var(--hatch); display: grid; place-items: center; color: var(--ink-mute); }
+
+/* ------------------------------------------------------------ sheet (share / public pages) */
+/* A dusk header band, one white sheet lifted over it, a readable measure.
+   Always light: the page sets data-theme='light' or forces it. */
+.tempo-public { min-height: 100dvh; background: var(--fog); }
+.tempo-dusk {
+  background: linear-gradient(180deg, var(--tempo-dusk-from), var(--tempo-dusk-to));
+  color: #fff; padding: var(--tempo-dusk-pad);
+}
+.tempo-sheet-w { width: 100%; max-width: var(--tempo-sheet-max); margin-inline: auto; padding-inline: var(--tempo-sheet-inset); }
+.tempo-dusk .tempo-sheet-w { padding-inline: 24px; }
+.tempo-sheet {
+  margin-top: calc(-1 * var(--tempo-sheet-lift)); background: #fff; border-radius: 28px; padding: var(--tempo-sheet-pad);
+  box-shadow: var(--window-shadow);
+}
+/* A cover image on top of the sheet: the cover takes the lift and the top corners. */
+.tempo-sheet-cover { margin-top: calc(-1 * var(--tempo-sheet-lift)); height: 220px; border-radius: 28px 28px 0 0; overflow: hidden; background: #fff; }
+.tempo-sheet-cover + .tempo-sheet { margin-top: 0; border-radius: 0 0 28px 28px; }
+.tempo-sheet p, .tempo-sheet li { text-wrap: pretty; }
+/* Text on the dusk band. */
+.tempo-on-dusk { color: #fff; }
+.tempo-on-dusk__sub { color: rgb(255 255 255 / 0.78); }  /* 7:1+ on the band */
+@media (max-width: 640px) {
+  .tempo-sheet-w { padding-inline: 0; }
+  .tempo-dusk { padding-bottom: var(--tempo-dusk-pb-sm); }
+  .tempo-dusk .tempo-sheet-w { padding-inline: 20px; }
+  .tempo-sheet { margin-top: calc(-1 * var(--tempo-sheet-lift-sm)); border-radius: var(--tempo-sheet-radius-sm); padding: var(--tempo-sheet-pad-sm); }
+  .tempo-sheet-cover { margin-top: calc(-1 * var(--tempo-sheet-lift-sm)); height: 160px; border-radius: var(--tempo-sheet-radius-sm) var(--tempo-sheet-radius-sm) 0 0; }
+  .tempo-sheet-cover + .tempo-sheet { margin-top: 0; border-radius: 0 0 var(--tempo-sheet-radius-sm) var(--tempo-sheet-radius-sm); }
+}
+
+/* ------------------------------------------------------------ motion and print */
+@media (prefers-reduced-motion: reduce) {
+  .tempo-side, .tempo-nav, .tempo-tab, .tempo-day, .tempo-list__row, .tempo-list__head span { transition: none; }
+}
+@media print {
+  .tempo-stage { padding: 0 !important; background: #fff !important; }
+  .tempo-window { border-radius: 0 !important; box-shadow: none !important; }
+  .tempo-side, .tempo-bar, .tempo-scrim { display: none !important; }
+  .tempo-public, .tempo-band { background: none; }
+  .tempo-dusk { background: none; color: inherit; padding-bottom: 24px; }
+  .tempo-sheet { margin-top: 0; box-shadow: none; padding: 0; border-radius: 0; }
+}

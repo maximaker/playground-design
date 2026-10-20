@@ -18,6 +18,7 @@ import { ConnectSearch, LinkedWork } from './connect.tsx';
 import { useLayoutMode } from './hooks/useLayout.ts';
 import { Icon } from './ui/Icon.tsx';
 import { Settings } from './ui/Settings.tsx';
+import { SettingsPage } from './ui/SettingsPage.tsx';
 import type { Appearance } from './state/appearance.ts';
 import type { useSession } from './state/session.ts';
 import { AccountMenu, initials } from './ui/AccountMenu.tsx';
@@ -55,7 +56,9 @@ export function Home({ onOpen, appearance, onAppearance, session }: {
 }) {
   const layout = useLayoutMode();
   const [showSettings, setShowSettings] = useState(false);
-  useEffect(() => { document.title = 'Playground'; }, []);
+  // /settings is a page in the library, beside the documents.
+  const [page, setPage] = useState<'library' | 'settings'>(() => (location.pathname === '/settings' ? 'settings' : 'library'));
+  useEffect(() => { document.title = page === 'settings' ? 'Settings · Playground' : 'Playground'; }, [page]);
   const [docs, setDocs] = useState<DocSummary[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [templates, setTemplates] = useState<TemplateSummary[]>([]);
@@ -81,7 +84,10 @@ export function Home({ onOpen, appearance, onAppearance, session }: {
 
   // The dial and Back change ?project= under us; follow it.
   useEffect(() => {
-    const onPop = () => setFilter(new URLSearchParams(location.search).get('project'));
+    const onPop = () => {
+      setFilter(new URLSearchParams(location.search).get('project'));
+      setPage(location.pathname === '/settings' ? 'settings' : 'library');
+    };
     window.addEventListener('popstate', onPop);
     return () => window.removeEventListener('popstate', onPop);
   }, []);
@@ -267,6 +273,7 @@ export function Home({ onOpen, appearance, onAppearance, session }: {
   const setScope = (next: Filter) => {
     navigate(typeof next === 'string' && next !== 'unfiled' ? `/?project=${encodeURIComponent(next)}` : '/');
     setFilter(next);
+    setPage('library');
   };
   const activeProject = typeof filter === 'string' && filter !== 'unfiled' ? projects.find((p) => p.id === filter) : undefined;
 
@@ -287,10 +294,10 @@ export function Home({ onOpen, appearance, onAppearance, session }: {
       </div>
       <nav className="tempo-navgroup" aria-label="Documents">
         <div className="tempo-label">Library</div>
-        <button className="tempo-nav" aria-current={filter === null ? 'page' : undefined} onClick={() => setScope(null)}>
+        <button className="tempo-nav" aria-current={filter === null && page === 'library' ? 'page' : undefined} onClick={() => setScope(null)}>
           <Icon name="folder" size={18} /> All documents <em>{loading ? '' : docs.length}</em>
         </button>
-        <button className="tempo-nav" aria-current={filter === 'unfiled' ? 'page' : undefined} onClick={() => setScope('unfiled')}>
+        <button className="tempo-nav" aria-current={filter === 'unfiled' && page === 'library' ? 'page' : undefined} onClick={() => setScope('unfiled')}>
           <Icon name="page" size={18} /> Unfiled <em>{loading ? '' : unfiled}</em>
         </button>
       </nav>
@@ -300,7 +307,7 @@ export function Home({ onOpen, appearance, onAppearance, session }: {
           <button
             key={p.id}
             className="tempo-nav"
-            aria-current={filter === p.id ? 'page' : undefined}
+            aria-current={filter === p.id && page === 'library' ? 'page' : undefined}
             onClick={() => setScope(p.id)}
             onDragOver={(e) => { if (e.dataTransfer.types.includes('text/x-playground-doc')) { e.preventDefault(); e.currentTarget.classList.add('is-drop'); } }}
             onDragLeave={(e) => e.currentTarget.classList.remove('is-drop')}
@@ -322,7 +329,12 @@ export function Home({ onOpen, appearance, onAppearance, session }: {
         <button className="tempo-nav" onClick={() => importRef.current?.click()}><Icon name="upload" size={18} /> Import a bundle</button>
       </nav>
       {session.user && (
-        <button className="tempo-me" onClick={() => setShowSettings(true)} title="Settings">
+        <button
+          className="tempo-me"
+          aria-current={page === 'settings' ? 'page' : undefined}
+          onClick={() => { navigate('/settings'); setPage('settings'); }}
+          title="Settings"
+        >
           <span className="tempo-initials" aria-hidden>{initials(session.user.name)}</span>
           <div><b>{session.user.name}</b><span>Settings</span></div>
         </button>
@@ -358,6 +370,11 @@ export function Home({ onOpen, appearance, onAppearance, session }: {
           )}
         </div>
     </header>
+    {page === 'settings' && session.user ? (
+    <div className="home tempo-content">
+      <SettingsPage user={session.user} idUrl={session.idUrl} appearance={appearance} onAppearance={onAppearance} onSignedOut={() => { void session.refresh(); }} />
+    </div>
+    ) : (
     <div className="home tempo-content">
       <div className="home-head">
         <div className="library-title">
@@ -665,6 +682,7 @@ export function Home({ onOpen, appearance, onAppearance, session }: {
         </div>
       )}
     </div>
+    )}
     </div>
     </div>
     </div>

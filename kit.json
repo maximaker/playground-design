@@ -20,7 +20,8 @@
     "packages/web/public/favicon.svg": "icons/playground/favicon.svg",
     "packages/web/public/icon-192.png": "icons/playground/icon-192.png",
     "packages/web/public/icon-512.png": "icons/playground/icon-512.png",
-    "packages/web/public/icon-maskable-512.png": "icons/playground/icon-maskable-512.png"
+    "packages/web/public/icon-maskable-512.png": "icons/playground/icon-maskable-512.png",
+    "packages/web/src/kit-tempo.css": "tempo/tempo.css"
   },
-  "kit": "337c016"
+  "kit": "f4b7238"
 }

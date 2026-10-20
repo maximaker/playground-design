@@ -1,57 +1,37 @@
 /* ------------------------------------------------------------------
- * Tempo — docs/design/TEMPO.md
- * Fog desk, white rounded panels, navy (#13202E) as the one dark surface
- * and the interactive colour. Playground blue keeps the family slots
- * (brand dot, "Live/fine") and does real work as SELECTION on the canvas.
- * Orange is only for live / agent activity. Hatch marks attention.
+ * Tempo, Playground's own layer — docs/design/TEMPO.md
+ * The shared rules and tokens come from kit-tempo.css (synced from
+ * ../kit/tempo/tempo.css, docs in ../kit/docs/tempo.md). This file only
+ * holds what is Playground's: blue as the family mark and the canvas
+ * SELECTION, the editor panels, the canvas fog and dot grid, the settings
+ * page, and the app's own classes (.button, .input, menus …) re-mapped
+ * onto the Tempo tokens. Orange is only for live / agent activity.
  *
- * Same token and class names as Studio, Notes and Artifactory
- * (--fog, --paper, --wash, --hair, --action, .tempo-side, .tempo-nav …),
- * so this file can later be swapped for the shared kit layer.
- * Kit files are untouched; this layer re-maps them. Imported after
- * styles.css, so equal-specificity rules here win.
- *
+ * Load order: kit-tokens.css, styles.css, kit-tempo.css, then this file,
+ * so equal-specificity rules here win.
  * Artboards render in iframes: nothing here can reach a user's design.
  * ------------------------------------------------------------------ */
 
 :root[data-app='playground'] {
-  --fog: #e6e9ec;
   --paper: #ffffff;
-  --wash: #f4f5f6;
-  --wash-2: #eceef0;
-  --hair: #ecedef;
-  --hair-2: #dfe2e6;
-  --side: #fbfbfb;
   --canvas-fog: #eef0f2;
   --canvas-dot: #cdd2d8;
   --family: var(--blue-500);           /* the mark and selection */
   --family-soft: #e7edff;
   --family-ink: #2848c8;               /* blue text on white, 6.6:1 */
-  --now: #e2531e;                      /* live / agent activity: dots, pulses */
   --now-text: #b5441c;                 /* 5.6:1 on white */
   --blush: #fbe4dc;
   --rust: #9c3a16;                     /* text on blush, 6.4:1 */
-  --action: #13202e;                   /* primary fills, active states, focus */
-  --action-hover: #22344a;
-  --action-text: #ffffff;
-  --hatch: repeating-linear-gradient(-55deg, #f2f3f4 0 14px, #fafafa 14px 28px);
-  --menu-shadow: 0 24px 48px -12px rgb(19 32 46 / 0.18), 0 2px 6px rgb(19 32 46 / 0.06);
-  --window-shadow: 0 1px 2px rgb(19 32 46 / 0.04), 0 40px 80px -40px rgb(19 32 46 / 0.3);
-  --focus: 0 0 0 2px color-mix(in srgb, #13202e 40%, transparent);
-  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease: var(--tempo-ease);
   --gap: 10px;
   --panel-r: 18px;
+  /* Kit knobs */
+  --tempo-side-pad: 22px 14px 14px;
 }
 
 :root[data-app='playground']:not([data-theme='dark']) {
-  --ink: #13202e;
-  --ink-soft: #3c4450;
-  --ink-mute: #646a73;                 /* 5.2:1 on white, 4.8:1 on the wash */
   --ink-raised: #22344a;
-  --line: #ecedef;
-  --line-strong: #dfe2e6;
-  --surface: #ffffff;
-  --shade: #13202e;
+  --ground: #f5f5f3;                   /* the kit-topbar ground, as before */
 
   --bg: var(--fog);
   --bg-sunken: var(--canvas-fog);
@@ -72,13 +52,7 @@
 }
 
 :root[data-app='playground'][data-theme='dark'] {
-  --fog: #0d131a;
   --paper: #1e2026;
-  --wash: #262931;
-  --wash-2: #2c3038;
-  --hair: #2e3138;
-  --hair-2: #3a3e46;
-  --side: #1a1d23;
   --canvas-fog: #161a20;
   --canvas-dot: #2c3139;
   --family-soft: #1d2a52;
@@ -87,13 +61,6 @@
   --now-text: #f4a27d;
   --blush: #3a2219;
   --rust: #f4a27d;
-  --action: #dfe6ee;
-  --action-hover: #ffffff;
-  --action-text: #13202e;
-  --hatch: repeating-linear-gradient(-55deg, #24272e 0 14px, #1e2026 14px 28px);
-  --menu-shadow: 0 24px 48px -12px rgb(0 0 0 / 0.55), 0 2px 6px rgb(0 0 0 / 0.35);
-  --window-shadow: 0 1px 2px rgb(0 0 0 / 0.3), 0 40px 80px -40px rgb(0 0 0 / 0.6);
-  --focus: 0 0 0 2px color-mix(in srgb, #dfe6ee 55%, transparent);
 
   --bg: var(--fog);
   --bg-sunken: var(--canvas-fog);
@@ -118,12 +85,6 @@ body { background: var(--fog); }
 .tempo-h1, .home-page-title {
   margin: 0; font-size: 34px; line-height: 1.1; font-weight: 700; letter-spacing: -0.02em; color: var(--ink);
 }
-.tempo-sub { font-size: 17px; line-height: 1.5; color: var(--ink-mute); }
-.tempo-label {
-  padding: 0 12px 6px; font-size: 12px; font-weight: 500; letter-spacing: 0.04em;
-  text-transform: uppercase; color: var(--ink-mute);
-}
-.tempo-hatch { background: var(--hatch) !important; border-color: transparent !important; }
 
 /* ---------------------------------------------------------------- controls */
 .button {
@@ -216,16 +177,9 @@ kbd { font-family: var(--font-sans); font-weight: 500; background: var(--wash); 
 .toast.is-error { background: var(--blush); color: var(--rust); }
 
 /* ---------------------------------------------------------------- home shell */
-.tempo-stage { min-height: 100dvh; padding: 16px; display: flex; background: var(--fog); }
-.tempo-window {
-  flex: 1; min-width: 0; display: flex; background: var(--paper); border-radius: 28px;
-  box-shadow: var(--window-shadow); overflow: clip;
-}
+/* Desk, window, bar, side nav and mark come from kit-tempo.css; these are the
+   library's own pieces. */
 .tempo-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-.tempo-bar {
-  position: sticky; top: 0; z-index: 30; display: flex; align-items: center; gap: 10px;
-  height: 64px; padding: 0 20px 0 28px; background: var(--paper); border-bottom: 1px solid var(--hair);
-}
 .tempo-search {
   display: flex; align-items: center; gap: 10px; height: 40px; flex: 1; max-width: 460px;
   padding: 0 12px 0 14px; border-radius: 12px; background: var(--wash); color: var(--ink-mute);
@@ -236,37 +190,19 @@ kbd { font-family: var(--font-sans); font-weight: 500; background: var(--wash); 
 .tempo-bar .hm-dots { margin-right: 6px; }
 .tempo-bar .home-account { display: flex; align-items: center; gap: 6px; position: relative; }
 
-.tempo-side {
-  width: 264px; flex: none; display: flex; flex-direction: column; gap: 18px;
-  padding: 22px 14px 14px; background: var(--side); border-right: 1px solid var(--hair);
-  position: sticky; top: 0; max-height: calc(100dvh - 32px); overflow-y: auto;
-}
-.tempo-brand { display: flex; align-items: center; gap: 10px; padding: 0 6px; font-size: 16px; font-weight: 600; color: var(--ink); }
-.tempo-brand > a { display: flex; align-items: center; gap: 10px; color: inherit; text-decoration: none; }
-.tempo-mark { display: grid; place-items: center; width: 30px; height: 30px; flex: none; border-radius: 9px; background: #13202e; }
-.tempo-mark i { width: 10px; height: 10px; border-radius: 99px; background: var(--family); }
-:root[data-theme='dark'] .tempo-mark { background: #2a3644; }
+.tempo-brand > a { text-decoration: none; }
 .tempo-brand .hm-switcher { margin-left: auto; }
-.tempo-navgroup { display: flex; flex-direction: column; gap: 2px; }
-.tempo-nav {
-  display: flex; align-items: center; gap: 12px; height: 40px; padding: 0 12px; width: 100%;
-  border: 0; background: none; border-radius: 12px; color: var(--ink-mute); font-size: 14.5px; text-align: left;
-  transition: background 180ms var(--ease), color 180ms var(--ease);
-}
-.tempo-nav svg { flex: none; }
+.tempo-nav { border: 0; background: none; }
 .tempo-nav .hm-dot { width: 10px; height: 10px; margin: 0 4px; border-radius: 99px; flex: none; background: color-mix(in srgb, hsl(var(--tint, 220) 55% 55%) 70%, var(--paper)); }
 .tempo-nav-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tempo-nav:hover { background: var(--wash); color: var(--ink); }
-.tempo-nav[aria-current='page'] { background: var(--wash); color: var(--ink); font-weight: 500; }
 .tempo-nav.is-drop { background: var(--family-soft); color: var(--family-ink); box-shadow: inset 0 0 0 1.5px var(--family); }
 .tempo-nav.is-quiet { color: var(--ink-mute); font-size: 13.5px; }
-.tempo-nav em { margin-left: auto; font-style: normal; font-size: 12px; color: var(--ink-mute); font-variant-numeric: tabular-nums; }
-.tempo-nav:focus-visible { outline: none; box-shadow: var(--focus); }
 .tempo-me {
   margin-top: auto; display: flex; align-items: center; gap: 10px; padding: 10px; border-radius: 14px;
   border: 1.5px solid var(--hair); background: var(--paper); text-align: left; color: inherit;
 }
-.tempo-me:hover { background: var(--wash); border-color: transparent; }
+.tempo-me:hover, .tempo-me[aria-current='page'] { background: var(--wash); border-color: transparent; }
+.tempo-me:focus-visible { outline: none; box-shadow: var(--focus); }
 .tempo-initials {
   display: grid; place-items: center; width: 34px; height: 34px; flex: none; border-radius: 99px;
   background: var(--action); color: var(--action-text); font-size: 13px; font-weight: 600;
@@ -274,6 +210,16 @@ kbd { font-family: var(--font-sans); font-weight: 500; background: var(--wash); 
 .tempo-me div { min-width: 0; }
 .tempo-me div b { display: block; font-size: 14px; font-weight: 600; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tempo-me div span { display: block; font-size: 12px; color: var(--ink-mute); }
+
+/* Playground keeps the full side nav down to 900px (220px wide below 1200)
+   and hides it below that, instead of the kit's icon rail and drawer. */
+@media (min-width: 768px) and (max-width: 1199px) {
+  .tempo-side { padding-inline: 14px; align-items: stretch; }
+  .tempo-side .tempo-label, .tempo-side .hm-switcher { display: block; }
+  .tempo-side .tempo-nav em { display: inline; }
+  .tempo-side .tempo-nav { justify-content: flex-start; padding: 0 12px; width: 100%; }
+  .tempo-side .tempo-brand { padding: 0 6px; }
+}
 
 /* The library: left-aligned, not centred in a max-width column. */
 .home.tempo-content { max-width: 1240px; margin: 0; padding: 40px 48px 64px; }
@@ -411,3 +357,58 @@ kbd { font-family: var(--font-sans); font-weight: 500; background: var(--wash); 
 .settings-popover { padding: 18px; border-radius: 18px; }
 .settings-group > span { font-size: 12px; font-weight: 500; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink-mute); }
 .settings-scale input[type='range'] { accent-color: var(--action); }
+
+/* ---------------------------------------------------------------- editor logo */
+/* The kit's mark (navy tile, blue dot) at the family bar's 28px, beside the name. */
+.topbar .tempo-logo { gap: 10px; }
+.topbar .tempo-logo .tempo-mark { width: 28px; height: 28px; border-radius: 8px; }
+.topbar .tempo-logo .tempo-mark i { width: 9px; height: 9px; }
+.topbar .logo { border-radius: 10px; padding: 4px; }
+.topbar .logo:has(.logotype-word) { padding-right: 10px; }
+.topbar .tempo-logo .logotype-word { color: var(--ink); }
+
+/* ---------------------------------------------------------------- hatch */
+/* An artboard still drawing: Tempo's hatch over the board's own fill. A
+   neutral grey at low alpha, so it reads on light and dark fills alike. */
+.artboard-placeholder {
+  background-image: repeating-linear-gradient(-55deg, rgb(128 128 128 / 0.12) 0 14px, transparent 14px 28px);
+}
+
+/* ---------------------------------------------------------------- settings page */
+/* /settings in the library: hairline cards on paper, one per topic. */
+.settings-page { display: flex; flex-direction: column; gap: 20px; max-width: 720px; }
+.settings-page-head { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+.settings-card {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 14px;
+  padding: 22px 24px; border: 1.5px solid var(--hair); border-radius: 18px; background: var(--paper);
+}
+.settings-card > * { max-width: 100%; }
+.settings-card .tempo-h2 { margin: 0; }
+.settings-profile { display: flex; align-items: center; gap: 16px; }
+.settings-profile .tempo-initials { width: 48px; height: 48px; font-size: 16px; color: #fff; }
+.settings-profile dl { margin: 0; display: grid; gap: 6px; }
+.settings-profile dl > div { display: flex; gap: 12px; align-items: baseline; }
+.settings-profile dt { width: 52px; flex: none; font-size: 13px; color: var(--ink-mute); }
+.settings-profile dd { margin: 0; font-size: 15px; color: var(--ink); overflow-wrap: anywhere; }
+.settings-tag { white-space: nowrap; margin-left: 8px; font-style: normal; font-size: 12px; padding: 1px 8px; border-radius: 99px; background: var(--wash); color: var(--ink-mute); }
+.settings-note { margin: 0; font-size: 13.5px; line-height: 1.5; color: var(--ink-mute); }
+.settings-note a { color: var(--ink); text-decoration: underline; text-underline-offset: 2px; }
+.settings-card .tempo-tab { border: 0; background: none; }
+.settings-card .tempo-tab:is([aria-checked='true']) { background: var(--paper); }
+:root[data-theme='dark'] .settings-card .tempo-tab[aria-checked='true'] { background: var(--hair-2); }
+/* The agent links reuse the popover's block; the card's heading replaces its own. */
+.settings-card .agent-links { width: 100%; padding: 0; border: 0; gap: 12px; }
+.settings-card .agent-links > span:first-child { display: none; }
+.settings-card .agent-links-hint { font-size: 13.5px; color: var(--ink-mute); }
+.settings-card .agent-links-list li { font-size: 14px; padding: 8px 0; border-bottom: 1px solid var(--hair); }
+.settings-card .agent-links-options { font-size: 13px; color: var(--ink-soft); gap: 16px; }
+.settings-card .agent-links-options select { margin-left: 6px; height: 32px; padding: 0 8px; border: 0; border-radius: 9px; background: var(--wash); color: var(--ink); }
+.settings-card .agent-links > .button.full { width: auto; align-self: flex-start; background: var(--action); color: var(--action-text); }
+.settings-card .agent-links > .button.full:hover { background: var(--action-hover); }
+@media (max-width: 899px) {
+  .settings-card { padding: 18px 16px; }
+}
+/* Layers the agent's last change set touched, while its review bar is up (the
+   bar is the label). Selection's blue still wins. */
+.layer-row.is-agent-touched:not(.is-selected) { background: var(--hatch); }
+.layer-row.is-agent-touched:not(.is-selected):hover { background: var(--wash); }

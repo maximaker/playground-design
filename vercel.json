@@ -28,6 +28,10 @@
     {
       "source": "/s/(.*)",
       "destination": "/index.html"
+    },
+    {
+      "source": "/settings",
+      "destination": "/index.html"
     }
   ],
   "functions": {

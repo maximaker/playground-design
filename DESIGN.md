@@ -1,6 +1,6 @@
 # Playground — visual system
 
-> The live chrome now follows the Tempo style: see docs/design/TEMPO.md and packages/web/src/tempo.css, which override the chrome rules below where they differ.
+> The live chrome now follows the Tempo style: see docs/design/TEMPO.md and packages/web/src/kit-tempo.css (shared) and packages/web/src/tempo-playground.css, which override the chrome rules below where they differ.
 
 A reference derived from three sources, then reconciled into one system. It is
 written to be *used*: every section ends in the tokens or the rule that carries

@@ -220,6 +220,7 @@ function StaticFrame({ id, width, height, fallback }: { id: NodeId; width: numbe
       style={{ position: 'absolute', inset: 0, width, height, display: 'block' }}
     />
   ) : (
-    <div className="artboard-placeholder" style={{ position: 'absolute', inset: 0, width, height, background: fallback }} />
+    // backgroundColor, not background: the shorthand would wipe the hatch.
+    <div className="artboard-placeholder" style={{ position: 'absolute', inset: 0, width, height, backgroundColor: fallback }} />
   );
 }

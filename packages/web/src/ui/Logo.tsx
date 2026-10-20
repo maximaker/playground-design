@@ -44,3 +44,17 @@ export function LogoMark({ size = 18 }: { size?: number }) {
     </svg>
   );
 }
+
+/**
+ * The Tempo brand: the navy tile with one Playground-blue dot (the family
+ * mark, the same as the library's side nav), then the name in Inter 600.
+ * Used in the editor's top bar so the editor and the library carry one mark.
+ */
+export function TempoLogo({ variant = 'full' }: { variant?: 'full' | 'mark' }) {
+  return (
+    <span className="logotype tempo-logo" aria-label="Playground">
+      <span className="tempo-mark" aria-hidden><i /></span>
+      {variant === 'full' && <span className="logotype-word">Playground</span>}
+    </span>
+  );
+}

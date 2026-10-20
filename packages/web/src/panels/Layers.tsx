@@ -189,6 +189,8 @@ const LayerRow = memo(function LayerRow({
   const isSelected = useCanvas(
     (s) => s.selection.includes(id) || s.selection.some((k) => k.startsWith(`${id}::`)),
   );
+  // Hatched while the agent's last change set is up for review (the review bar is its label).
+  const agentTouched = useCanvas((s) => !!s.agentChange?.nodeIds.includes(id));
   const select = useCanvas((s) => s.select);
   const dispatch = useCanvas((s) => s.dispatch);
   const setHovered = useCanvas((s) => s.setHovered);
@@ -246,6 +248,7 @@ const LayerRow = memo(function LayerRow({
           'layer-row',
           isSelected ? 'is-selected' : '',
           !node.visible ? 'is-hidden' : '',
+          agentTouched ? 'is-agent-touched' : '',
           dropHint?.id === id ? `drop-${dropHint.where}` : '',
         ].filter(Boolean).join(' ')}
         // Addressable, so selecting on the canvas can scroll this row into view.
@@ -314,7 +317,7 @@ const LayerRow = memo(function LayerRow({
             }}
           />
         ) : (
-          <span className="layer-name" title={node.name}>{componentName ?? node.name}</span>
+          <span className="layer-name" title={node.name}>{componentName ?? node.name}{agentTouched && <span className="sr-only"> (changed by the agent)</span>}</span>
         )}
 
         <button

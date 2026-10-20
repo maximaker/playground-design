@@ -31,7 +31,7 @@ import { Shortcuts } from './ui/Shortcuts.tsx';
 import { Icon, type IconName } from './ui/Icon.tsx';
 import { MOD } from './ui/tools.ts';
 import { zoomToFit } from './hooks/commands.ts';
-import { Logo } from './ui/Logo.tsx';
+import { Logo, TempoLogo } from './ui/Logo.tsx';
 import { AppSwitcher } from './ui/FamilyTopBar.tsx';
 import { Settings } from './ui/Settings.tsx';
 import { Landing } from './Landing.tsx';
@@ -469,11 +469,11 @@ function Editor({ source, onHome, appearance, onAppearance, session }: {
       <header className="topbar">
         {onHome ? (
           <button className="logo" onClick={onHome} title="All documents" aria-label="All documents">
-            <Logo size={17} variant={mode === 'narrow' ? 'mark' : 'full'} />
+            <TempoLogo variant={mode === 'narrow' ? 'mark' : 'full'} />
           </button>
         ) : (
           <span className="logo">
-            <Logo size={17} variant={mode === 'narrow' ? 'mark' : 'full'} />
+            <TempoLogo variant={mode === 'narrow' ? 'mark' : 'full'} />
           </span>
         )}
 

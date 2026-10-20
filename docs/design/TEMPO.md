@@ -5,7 +5,9 @@ Reference: `../tempo-bookings/STYLE-GUIDE.md`. Family precedent (all live): Stud
 (`../ux-artifact-studio/docs/design/TEMPO.md`). Approved sample: `../playground-tempo-sample/`
 (https://heymax-tempo-samples.vercel.app/playground/index.html).
 
-Implementation: `packages/web/src/tempo.css` (tokens and shape layer, imported after `styles.css`),
+Implementation: `packages/web/src/kit-tempo.css` (the shared kit layer, synced from `../kit/tempo/tempo.css` via kit.json),
+`packages/web/src/tempo-playground.css` (Playground's own tokens and overrides, imported after it),
+`packages/web/src/ui/SettingsPage.tsx` (/settings),
 `packages/web/src/Home.tsx` (side nav shell), `packages/web/src/App.tsx` (editor dial removed),
 `packages/web/src/ui/CommandPalette.tsx` (the dial's jobs), `packages/server/src/live.ts` (control and
 answer pages, restyled in place). Kit files and `kit.json` are untouched: the layer re-maps kit tokens
@@ -171,5 +173,5 @@ synced, the dial is just not mounted).
    present bar, comments, settings popover, live control and answer pages, dark mode.
 2. *Next*: a settings page with its own side nav (Appearance, Agents & links, Account); hatch on layer
    rows an agent touched in the last change set; the navy tile + blue dot as the editor logo.
-3. *Later*: move `tempo.css` into `../kit` as the shared Tempo layer once the kit carries it, and delete
-   the Playground copy (names already match).
+3. *Done*: the shared layer comes from the kit (`kit-tempo.css`); the settings page (/settings), the
+   navy tile + blue dot editor logo, and hatched layer rows for the agent's last change set have landed.
