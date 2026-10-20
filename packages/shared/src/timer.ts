@@ -19,10 +19,13 @@ export const TIMER_STYLE_ATTR = 'data-timer-style';
 export const TIMER_END_ATTR = 'data-timer-end';
 export const TIMER_CHIME_ATTR = 'data-timer-chime';
 export const TIMER_LABEL_ATTR = 'data-timer-label';
+/** "live": live results embeds on the same slide stay hidden until the timer ends. */
+export const TIMER_REVEAL_ATTR = 'data-timer-reveal';
 
 export type TimerStart = 'slide' | 'click';
 export type TimerVariant = 'ring' | 'pill' | 'bar';
 export type TimerEnd = 'message' | 'pulse';
+export type TimerReveal = 'live' | 'none';
 
 export interface TimerSpec {
   /** Whole seconds, 1..5999 (99:59). */
@@ -32,6 +35,12 @@ export interface TimerSpec {
   end: TimerEnd;
   chime: boolean;
   label: string;
+  /**
+   * "live": in Present, live results on the same slide are withheld until the
+   * timer ends, and the timer shows big until its last 10%. Defaults to "live"
+   * for a timer that starts with the slide, "none" for one started by click.
+   */
+  reveal: TimerReveal;
 }
 
 export const TIMER_MAX_SECONDS = 99 * 60 + 59;
@@ -41,7 +50,7 @@ export const TIMER_URGENT_MS = 30_000;
 /** Tempo's "now" orange; slides do not carry the app's tokens, so it is literal. */
 export const TIMER_NOW_COLOR = '#e2531e';
 
-export const DEFAULT_TIMER: TimerSpec = { seconds: 180, start: 'slide', variant: 'ring', end: 'message', chime: false, label: '' };
+export const DEFAULT_TIMER: TimerSpec = { seconds: 180, start: 'slide', variant: 'ring', end: 'message', chime: false, label: '', reveal: 'live' };
 
 export function clampSeconds(raw: unknown): number {
   const n = Math.round(Number(raw));
@@ -71,7 +80,13 @@ export function readTimer(attrs: Record<string, string | undefined>): TimerSpec 
     start, variant, end,
     chime: attrs[TIMER_CHIME_ATTR] === 'true',
     label: (attrs[TIMER_LABEL_ATTR] ?? '').slice(0, TIMER_LABEL_MAX),
+    reveal: readReveal(attrs[TIMER_REVEAL_ATTR], start),
   };
+}
+
+function readReveal(raw: string | undefined, start: TimerStart): TimerReveal {
+  if (raw === 'live' || raw === 'none') return raw;
+  return start === 'slide' ? 'live' : 'none';
 }
 
 export function timerAttrs(spec: Partial<TimerSpec>): Record<string, string> {
@@ -81,6 +96,7 @@ export function timerAttrs(spec: Partial<TimerSpec>): Record<string, string> {
     [TIMER_START_ATTR]: s.start,
     [TIMER_STYLE_ATTR]: s.variant,
     [TIMER_END_ATTR]: s.end,
+    [TIMER_REVEAL_ATTR]: spec.reveal ?? (s.start === 'slide' ? 'live' : 'none'),
   };
   if (s.chime) out[TIMER_CHIME_ATTR] = 'true';
   if (s.label) out[TIMER_LABEL_ATTR] = s.label.slice(0, TIMER_LABEL_MAX);
@@ -95,6 +111,7 @@ export function timerSpecFromTag(attrs: Record<string, string>): { spec: TimerSp
   if (!['slide', 'click', 'true', 'false'].includes(auto)) warnings.push(`<timer autostart="${auto}">: use "slide" or "click"; used "slide".`);
   const variant = (a.variant ?? a.look ?? 'ring').toLowerCase();
   if (!['ring', 'pill', 'bar'].includes(variant)) warnings.push(`<timer variant="${variant}">: use ring, pill or bar; used ring.`);
+  if (a.reveal !== undefined && a.reveal !== 'live' && a.reveal !== 'none') warnings.push(`<timer reveal="${a.reveal}">: use live or none.`);
   const end = (a.end ?? 'message').toLowerCase();
   if (!['message', 'pulse'].includes(end)) warnings.push(`<timer end="${end}">: use message or pulse; used message.`);
   const total = (Number(a.minutes ?? 0) || 0) * 60 + (Number(a.seconds ?? 0) || 0);
@@ -108,6 +125,7 @@ export function timerSpecFromTag(attrs: Record<string, string>): { spec: TimerSp
       [TIMER_END_ATTR]: end,
       [TIMER_CHIME_ATTR]: a.chime === '' || a.chime === 'true' ? 'true' : 'false',
       [TIMER_LABEL_ATTR]: a.label ?? '',
+      ...(a.reveal === 'live' || a.reveal === 'none' ? { [TIMER_REVEAL_ATTR]: a.reveal } : {}),
     }),
     warnings,
   };
@@ -131,7 +149,7 @@ export function makeTimerNode(spec: Partial<TimerSpec>, opts: {
     type: 'frame',
     tag: 'div',
     name: `Timer ${formatClock(s.seconds * 1000)}`,
-    attrs: timerAttrs(s),
+    attrs: timerAttrs(spec.reveal ? s : { ...s, reveal: s.start === 'slide' ? 'live' : 'none' }),
     styles: {
       position: 'absolute', left: `${x}px`, top: `${y}px`, width: `${width}px`, height: `${height}px`,
       // Tempo's face: a clean sans with tabular figures reads across a room.
@@ -200,6 +218,49 @@ export function tickTimer(state: TimerState, durationMs: number, now: number): T
 export function isUrgent(state: TimerState, durationMs: number, now: number): boolean {
   if (state.status === 'idle') return false;
   return remainingMs(state, durationMs, now) <= TIMER_URGENT_MS;
+}
+
+// ---------------------------------------------------------------------------
+// Reveal: results withheld until time is up
+// ---------------------------------------------------------------------------
+
+/** The timer shows big, centred, for this share of its duration; then it shrinks to its place. */
+export const TIMER_BIG_FRACTION = 0.9;
+
+export interface RevealStage {
+  /** Draw the timer big and centred on the slide (else at its authored box). */
+  big: boolean;
+  /** Live results on the slide may be shown. */
+  results: boolean;
+}
+
+/**
+ * Where a revealing timer is in its run. Results stay withheld until the timer
+ * is done or the presenter reveals early; the timer is big while it waits or
+ * runs through its first 90%, then sits small in its authored place.
+ */
+export function revealStage(state: TimerState, durationMs: number, now: number, revealedEarly = false): RevealStage {
+  if (revealedEarly || state.status === 'done') return { big: false, results: true };
+  if (state.status === 'idle') return { big: true, results: false };
+  return { big: elapsedMs(state, now) < durationMs * TIMER_BIG_FRACTION, results: false };
+}
+
+/**
+ * The transform (origin: the box's centre) that takes a timer's authored box
+ * to big and centred on the board: as large as fits 80% × 50% of it, never
+ * smaller than authored.
+ */
+export function bigTimerTransform(
+  box: { x: number; y: number; width: number; height: number },
+  board: { width: number; height: number },
+): { dx: number; dy: number; scale: number } {
+  if (box.width <= 0 || box.height <= 0) return { dx: 0, dy: 0, scale: 1 };
+  const scale = Math.max(1, Math.min((board.width * 0.8) / box.width, (board.height * 0.5) / box.height));
+  return {
+    dx: board.width / 2 - (box.x + box.width / 2),
+    dy: board.height / 2 - (box.y + box.height / 2),
+    scale,
+  };
 }
 
 /** m:ss, rounding up so 0:00 means time is up and the first second shows the full duration. */

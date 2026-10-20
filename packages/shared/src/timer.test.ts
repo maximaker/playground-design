@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   IDLE, formatClock, isUrgent, makeTimerNode, pauseTimer, readTimer, remainingMs, resetTimer, startTimer,
   tickTimer, timerAttrs, timerSpecFromTag, timerSvg, toggleTimer, durationFrom,
+  revealStage, bigTimerTransform, TIMER_REVEAL_ATTR,
 } from './timer.ts';
 import { emitHtml, parseHtml } from './html.ts';
 import { createEmptyDocument } from './model.ts';
@@ -61,7 +62,7 @@ test('urgent in the last 30 seconds, only once started', () => {
 
 test('attributes round-trip and clamp', () => {
   const spec = readTimer(timerAttrs({ seconds: 95, start: 'click', variant: 'bar', end: 'pulse', chime: true, label: 'Break' }));
-  assert.deepEqual(spec, { seconds: 95, start: 'click', variant: 'bar', end: 'pulse', chime: true, label: 'Break' });
+  assert.deepEqual(spec, { seconds: 95, start: 'click', variant: 'bar', end: 'pulse', chime: true, label: 'Break', reveal: 'none' });
   assert.equal(readTimer({ 'data-timer': '999999' }).seconds, 5999);
   assert.equal(readTimer({ 'data-timer': 'x' }).seconds, 1);
   assert.equal(readTimer({ 'data-timer': '60', 'data-timer-style': 'nope' }).variant, 'ring');
@@ -117,4 +118,40 @@ test('export emits the static face; parsing <timer> and the export both make a t
 
   const placed = makeTimerNode({ seconds: 60 }, { artboard: { ...node, styles: { width: '1000px', height: '500px' } } });
   assert.equal(placed.styles.left, `${Math.round((1000 - 225) / 2)}px`);
+});
+
+test('reveal defaults to live for slide-start timers and is settable', () => {
+  assert.equal(readTimer({ 'data-timer': '60' }).reveal, 'live');
+  assert.equal(readTimer({ 'data-timer': '60', 'data-timer-start': 'click' }).reveal, 'none');
+  assert.equal(readTimer({ 'data-timer': '60', [TIMER_REVEAL_ATTR]: 'none' }).reveal, 'none');
+  assert.equal(readTimer({ 'data-timer': '60', 'data-timer-start': 'click', [TIMER_REVEAL_ATTR]: 'live' }).reveal, 'live');
+  assert.equal(timerAttrs({ seconds: 60 })[TIMER_REVEAL_ATTR], 'live');
+  assert.equal(timerAttrs({ seconds: 60, start: 'click' })[TIMER_REVEAL_ATTR], 'none');
+  assert.equal(timerSpecFromTag({ minutes: '1', reveal: 'none' }).spec.reveal, 'none');
+  assert.equal(timerSpecFromTag({ minutes: '1', reveal: 'maybe' }).warnings.length, 1);
+});
+
+test('revealStage: big for 90%, small after, results only at the end or on reveal', () => {
+  const d = 100_000;
+  const run = startTimer(IDLE, 0);
+  assert.deepEqual(revealStage(IDLE, d, 0), { big: true, results: false });
+  assert.deepEqual(revealStage(run, d, 0), { big: true, results: false });
+  assert.deepEqual(revealStage(run, d, 89_999), { big: true, results: false });
+  assert.deepEqual(revealStage(run, d, 90_000), { big: false, results: false });
+  assert.deepEqual(revealStage(run, d, 99_000), { big: false, results: false });
+  const done = tickTimer(run, d, 100_000);
+  assert.deepEqual(revealStage(done, d, 100_000), { big: false, results: true });
+  assert.deepEqual(revealStage(run, d, 10, true), { big: false, results: true });
+  const paused = pauseTimer(run, 95_000);
+  assert.deepEqual(revealStage(paused, d, 200_000), { big: false, results: false });
+  // R: reset hides results again.
+  assert.deepEqual(revealStage(resetTimer(), d, 0), { big: true, results: false });
+});
+
+test('bigTimerTransform centres and enlarges, never shrinks', () => {
+  const t = bigTimerTransform({ x: 1080, y: 20, width: 150, height: 60 }, { width: 1280, height: 720 });
+  assert.equal(t.dx, 640 - 1155);
+  assert.equal(t.dy, 360 - 50);
+  assert.ok(Math.abs(t.scale - Math.min(1024 / 150, 360 / 60)) < 1e-9);
+  assert.equal(bigTimerTransform({ x: 0, y: 0, width: 1280, height: 720 }, { width: 1280, height: 720 }).scale, 1);
 });

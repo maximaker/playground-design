@@ -2302,10 +2302,14 @@ function registerWriteTools(server: McpServer, ctx: McpContext): void {
       + 'in presentation mode it counts down live — from when the slide is shown (autostart "slide") or on a click / the T key (autostart "click"). '
       + 'The presenter clicks it or presses T to pause/resume and R to reset; returning to the slide restarts it. '
       + 'It takes the text colour around it (or `color`) and turns orange in the last 30 seconds. '
+      + 'reveal "live" (default with autostart "slide"): when the slide also has a live results embed, Present withholds the results '
+      + '(a neutral "Answers are coming in" panel; the board is not loaded) and shows the timer big and centred until its last 10%, '
+      + 'when it shrinks to its own box; at zero the results fade in. Shift+R reveals early, R resets and withholds again. '
+      + 'reveal "none" (default with autostart "click") leaves results visible. The editor, thumbnails and exports always show results. '
       + 'variant: ring (large ring, default), pill (compact), bar (wide progress bar). end: message ("Time’s up", default) or pulse. chime defaults to off. '
       + 'Centred on the slide unless x/y/width/height are given. Equivalent markup for write_html: '
-      + '<timer minutes="3" seconds="0" autostart="slide" variant="ring" label=""></timer>. To change one later, set_attributes on '
-      + 'data-timer (seconds), data-timer-start, data-timer-style, data-timer-end, data-timer-chime, data-timer-label.',
+      + '<timer minutes="3" seconds="0" autostart="slide" variant="ring" reveal="live" label=""></timer>. To change one later, set_attributes on '
+      + 'data-timer (seconds), data-timer-start, data-timer-style, data-timer-end, data-timer-chime, data-timer-label, data-timer-reveal (live|none).',
     inputSchema: {
       artboardId: z.string().describe('The slide (artboard) to put it on.'),
       minutes: z.number().int().min(0).max(99).optional().default(3),
@@ -2314,6 +2318,7 @@ function registerWriteTools(server: McpServer, ctx: McpContext): void {
       variant: z.enum(['ring', 'pill', 'bar']).optional().default('ring'),
       end: z.enum(['message', 'pulse']).optional().default('message').describe('At zero: show "Time’s up", or pulse 0:00.'),
       chime: z.boolean().optional().default(false).describe('A soft two-note chime at zero.'),
+      reveal: z.enum(['live', 'none']).optional().describe('live: withhold live results on this slide until zero (default with autostart "slide"). none: results always visible (default with autostart "click").'),
       label: z.string().max(60).optional().describe('Small caption under/next to the numbers, e.g. "Discuss in pairs".'),
       x: z.number().optional().describe('Left edge within the artboard, px.'),
       y: z.number().optional().describe('Top edge within the artboard, px.'),
@@ -2322,19 +2327,19 @@ function registerWriteTools(server: McpServer, ctx: McpContext): void {
       color: z.string().max(40).optional().describe('Colour of the face. Defaults to the inherited text colour.'),
     },
     annotations: { destructiveHint: false },
-  }, async ({ artboardId, minutes, seconds, autostart, variant, end, chime, label, x, y, width, height, color }) => guard(async () => {
+  }, async ({ artboardId, minutes, seconds, autostart, variant, end, chime, reveal, label, x, y, width, height, color }) => guard(async () => {
     const doc = requireDoc(ctx);
     const artboard = node(doc, artboardId);
     if (artboard.type !== 'artboard') return fail(`${artboardId} is a ${artboard.type}; a timer goes on an artboard.`);
     const total = minutes * 60 + seconds;
     if (total < 1) return fail('A timer needs at least one second: set minutes and/or seconds.');
     const timer = makeTimerNode(
-      { seconds: total, start: autostart, variant, end, chime, label: label ?? '' },
+      { seconds: total, start: autostart, variant, end, chime, label: label ?? '', ...(reveal ? { reveal } : {}) },
       { artboard, x, y, width, height, color },
     );
     commit(ctx, [{ t: 'insert', nodes: [timer], parent: artboard.id, index: artboard.children.length }]);
     return json({
-      id: timer.id, seconds: total, autostart, variant, end, chime,
+      id: timer.id, seconds: total, autostart, variant, end, chime, reveal: timer.attrs['data-timer-reveal'],
       box: { left: timer.styles.left, top: timer.styles.top, width: timer.styles.width, height: timer.styles.height },
       next: 'It counts down in Present (click or T: start/pause, R: reset). Move or resize it with update_styles.',
     });

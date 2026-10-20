@@ -8,16 +8,50 @@
  * starts its timer over.
  */
 
-import { createContext, createElement, useContext, useEffect, useRef, useState } from 'react';
 import {
-  IDLE, type TimerSpec, type TimerState, isUrgent, pauseTimer, readTimer, remainingMs, resetTimer, startTimer,
-  tickTimer, timerSvg, toggleTimer,
+  type ReactNode, createContext, createElement, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState,
+} from 'react';
+import {
+  IDLE, type TimerSpec, type TimerState, bigTimerTransform, isUrgent, pauseTimer, readTimer, remainingMs, resetTimer,
+  revealStage, startTimer, tickTimer, timerSvg, toggleTimer,
 } from '@playground/shared';
 
 /** True inside the presented frame. */
 export const PresentingTimers = createContext(false);
 
-export type TimerAction = 'toggle' | 'reset' | 'start' | 'pause';
+export type TimerAction = 'toggle' | 'reset' | 'start' | 'pause' | 'reveal';
+
+/**
+ * Results withheld until time is up. Present wraps a slide that has both a
+ * live results embed and a revealing timer in a RevealScope: the embeds start
+ * withheld (so nothing flashes before a timer reports) and are shown once
+ * every revealing timer says so: at zero, or on Shift+R.
+ */
+export interface RevealGateValue {
+  /** The slide has live results and a timer that withholds them. */
+  gated: boolean;
+  board: { width: number; height: number };
+  /** Live results must not render now. */
+  withheld: boolean;
+  report: (token: object, results: boolean | null) => void;
+}
+
+export const RevealGate = createContext<RevealGateValue | null>(null);
+
+export function RevealScope({ gated, board, children }: { gated: boolean; board: { width: number; height: number }; children: ReactNode }) {
+  const [reports, setReports] = useState<Map<object, boolean>>(() => new Map());
+  const report = useCallback((token: object, results: boolean | null) => {
+    setReports((m) => {
+      if (results === null ? !m.has(token) : m.get(token) === results) return m;
+      const next = new Map(m);
+      if (results === null) next.delete(token); else next.set(token, results);
+      return next;
+    });
+  }, []);
+  const withheld = gated && (reports.size === 0 || [...reports.values()].some((r) => !r));
+  const value = useMemo(() => ({ gated, board, withheld, report }), [gated, board.width, board.height, withheld, report]);
+  return <RevealGate.Provider value={value}>{children}</RevealGate.Provider>;
+}
 
 /** Present's keys and clicks reach the timers through this. `el` targets one; absent means all. */
 const bus = new EventTarget();
@@ -86,6 +120,9 @@ function LiveTimer({ tag, props, spec }: { tag: string; props: Record<string, un
   const [now, setNow] = useState(() => Date.now());
   const ref = useRef<Element | null>(null);
   const reduced = useRef(prefersReducedMotion());
+  const gate = useContext(RevealGate);
+  const reveals = !!gate?.gated && spec.reveal === 'live';
+  const [revealedEarly, setRevealedEarly] = useState(false);
 
   useEffect(() => {
     const on = (e: Event) => {
@@ -93,6 +130,8 @@ function LiveTimer({ tag, props, spec }: { tag: string; props: Record<string, un
       if (el && el !== ref.current) return;
       const t = Date.now();
       setNow(t);
+      if (action === 'reveal') { setRevealedEarly(true); return; }
+      if (action === 'reset') setRevealedEarly(false);
       setState((s) => {
         const now = tickTimer(s, duration, t);
         if (action === 'reset') return resetTimer();
@@ -121,6 +160,45 @@ function LiveTimer({ tag, props, spec }: { tag: string; props: Record<string, un
     return () => { window.clearInterval(id); running.delete(token); };
   }, [state.status, duration, spec.chime]);
 
+  const stage = reveals ? revealStage(state, duration, now, revealedEarly) : { big: false, results: true };
+
+  // Tell the slide whether its results may show.
+  const token = useRef({}).current;
+  useEffect(() => { if (reveals) gate!.report(token, stage.results); }, [reveals, stage.results, gate, token]);
+  useEffect(() => () => gate?.report(token, null), [gate, token]);
+
+  // The authored box, in the slide's pixels, measured without the big transform.
+  const [box, setBox] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
+  const [armed, setArmed] = useState(false);
+  useLayoutEffect(() => {
+    if (!reveals) return;
+    const el = ref.current as HTMLElement | null;
+    if (!el) return;
+    const prev = el.style.transform;
+    el.style.transform = 'none';
+    const r = el.getBoundingClientRect();
+    el.style.transform = prev;
+    setBox({ x: r.left, y: r.top, width: r.width, height: r.height });
+    // Animate only later changes, never the first jump to big.
+    let id = requestAnimationFrame(() => { id = requestAnimationFrame(() => setArmed(true)); });
+    return () => cancelAnimationFrame(id);
+  }, [reveals]);
+
+  let style = props.style as Record<string, unknown> | undefined;
+  if (reveals && box) {
+    const t = bigTimerTransform(box, gate!.board);
+    style = {
+      ...style,
+      transformOrigin: 'center center',
+      transform: stage.big ? `translate(${t.dx}px, ${t.dy}px) scale(${t.scale})` : 'none',
+      transition: armed && !reduced.current ? 'transform 900ms cubic-bezier(.2,.7,.2,1)' : 'none',
+      zIndex: stage.big ? 1000 : undefined,
+    };
+  } else if (reveals) {
+    // Not measured yet: keep it out of sight rather than flash the small one.
+    style = { ...style, visibility: 'hidden' };
+  }
+
   const left = remainingMs(state, duration, state.status === 'running' ? now : 0);
   const svg = timerSvg(spec, {
     remainingMs: left,
@@ -132,9 +210,62 @@ function LiveTimer({ tag, props, spec }: { tag: string; props: Record<string, un
   });
   return createElement(tag, {
     ...props,
+    style,
     ref,
     'data-timer-status': state.status,
-    title: state.status === 'running' ? 'Click or T to pause, R to reset' : 'Click or T to start, R to reset',
+    ...(reveals ? { 'data-timer-stage': stage.results ? 'revealed' : stage.big ? 'big' : 'small' } : {}),
+    title: (state.status === 'running' ? 'Click or T to pause, R to reset' : 'Click or T to start, R to reset')
+      + (reveals ? ', Shift+R to reveal results now' : ''),
     dangerouslySetInnerHTML: { __html: svg },
+  });
+}
+
+/**
+ * A live results embed under a revealing timer. While withheld the board is
+ * not loaded at all (no iframe, so nothing can flash or leak) and a calm
+ * panel stands in its place. On reveal the board fades in.
+ */
+export function LiveGateView({ tag, props }: { tag: string; props: Record<string, unknown> }) {
+  const gate = useContext(RevealGate);
+  const [shown, setShown] = useState(false);
+  const withheld = !!gate?.withheld;
+  useEffect(() => {
+    if (withheld) { setShown(false); return; }
+    let id = requestAnimationFrame(() => { id = requestAnimationFrame(() => setShown(true)); });
+    return () => cancelAnimationFrame(id);
+  }, [withheld]);
+  if (!gate?.gated) return createElement(tag, props);
+  const base = (props.style ?? {}) as Record<string, unknown>;
+  if (withheld) {
+    // The question and the way in stay up, so people can still join and answer;
+    // only the answers are kept back.
+    const src = String(props.src ?? '');
+    const join = src.replace(/\/board(\?.*)?$/, '');
+    const sans = "Inter, system-ui, -apple-system, 'Segoe UI', sans-serif";
+    return (
+      <div
+        data-live-withheld="true"
+        style={{
+          ...base, boxSizing: 'border-box', padding: '3% 3.5%', pointerEvents: 'none', fontFamily: sans, color: 'inherit',
+          display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 24,
+        }}
+      >
+        <div>
+          <div style={{ fontSize: 30, fontWeight: 700, lineHeight: 1.2 }}>{String(props.title ?? '')}</div>
+          <div style={{ fontSize: 16, marginTop: 10, opacity: 0.6 }}>Answers are coming in · results at the end</div>
+        </div>
+        {join && (
+          <div style={{ textAlign: 'center', flex: 'none' }}>
+            <img src={`${join}/qr`} alt="" style={{ width: 110, height: 110, display: 'block', margin: '0 auto' }} />
+            <div style={{ fontSize: 11, marginTop: 6, opacity: 0.6 }}>{join.replace(/^https?:\/\//, '')}</div>
+          </div>
+        )}
+      </div>
+    );
+  }
+  const reduced = prefersReducedMotion();
+  return createElement(tag, {
+    ...props,
+    style: { ...base, opacity: shown || reduced ? 1 : 0, transition: reduced ? 'none' : 'opacity 700ms ease' },
   });
 }

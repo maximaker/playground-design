@@ -23,7 +23,7 @@ import { toReactStyle } from './styles.ts';
 const VOID_TAGS = new Set(['img', 'br', 'hr', 'input', 'source', 'track', 'wbr', 'meta', 'link', 'area', 'base', 'col', 'embed', 'param']);
 
 /** Attributes that must not reach the DOM — they would break editing or escape the canvas. */
-import { TimerView } from './TimerView.tsx';
+import { LiveGateView, TimerView } from './TimerView.tsx';
 
 const BLOCKED_ATTRS = new Set(['style', 'class', 'contenteditable', 'onclick', 'onload', 'onerror']);
 
@@ -73,6 +73,9 @@ export const NodeView = memo(function NodeView({ id, isRoot }: Props) {
 
   if (node.type === 'vector') {
     return createElement(node.tag, { ...props, dangerouslySetInnerHTML: { __html: sanitizeMarkup(node.text ?? '') } });
+  }
+  if (node.attrs[LIVE_ATTR] && node.type !== 'text' && !VOID_TAGS.has(node.tag)) {
+    return <LiveGateView tag={node.tag} props={props} />;
   }
   if (isTimer(node) && node.type !== 'text' && !VOID_TAGS.has(node.tag)) {
     return <TimerView tag={node.tag} props={props} attrs={node.attrs} />;

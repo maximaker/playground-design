@@ -6,7 +6,7 @@
 
 import {
   type CanvasNode, TIMER_ATTR, TIMER_CHIME_ATTR, TIMER_END_ATTR, TIMER_LABEL_ATTR, TIMER_START_ATTR,
-  TIMER_STYLE_ATTR, clampSeconds, readTimer,
+  TIMER_REVEAL_ATTR, TIMER_STYLE_ATTR, clampSeconds, readTimer,
 } from '@playground/shared';
 import { useCanvas, getDoc } from '../state/store.ts';
 import { attrOps } from '../state/keys.ts';
@@ -61,6 +61,18 @@ export function TimerProps({ node, nodeKey }: { node: CanvasNode; nodeKey: strin
         </Field>
       </Row>
       <Row>
+        <Field label="Live results" wide>
+          <SegmentedControl
+            value={spec.reveal}
+            options={[
+              { value: 'live', label: 'At zero', title: 'In Present, live results on this slide stay hidden until the timer ends; the timer shows big until its last 10%' },
+              { value: 'none', label: 'Always', title: 'Live results show from the start' },
+            ]}
+            onCommit={(v) => set({ [TIMER_REVEAL_ATTR]: v })}
+          />
+        </Field>
+      </Row>
+      <Row>
         <Field label="Chime" wide>
           <SegmentedControl
             value={spec.chime ? 'true' : 'false'}
@@ -74,7 +86,7 @@ export function TimerProps({ node, nodeKey }: { node: CanvasNode; nodeKey: strin
           <TextInput value={spec.label} placeholder="Optional, e.g. Discuss in pairs" maxLength={60} onCommit={(v) => set({ [TIMER_LABEL_ATTR]: v.trim() })} />
         </Field>
       </Row>
-      <p className="panel-hint">Counts down in Present. Click it or press T to start and pause, R to reset.</p>
+      <p className="panel-hint">Counts down in Present. Click it or press T to start and pause, R to reset. With live results at zero, Shift+R reveals them early.</p>
     </Section>
   );
 }

@@ -17,7 +17,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { BoardSide, CanvasDocument, NodeId, Page } from '@playground/shared';
-import { boardOf, getArtboardPosition, getArtboardSize, makeComment } from '@playground/shared';
+import { LIVE_ATTR, boardOf, getArtboardPosition, getArtboardSize, isTimer, makeComment, readTimer } from '@playground/shared';
 import { useCanvas, getDoc, getNodeById } from './state/store.ts';
 import { useArtboardFrame } from './canvas/frame.ts';
 import { NodeView } from './canvas/NodeView.tsx';
@@ -25,7 +25,7 @@ import { CommentPin, CommentComposer, authorName } from './canvas/CommentPin.tsx
 import { Icon } from './ui/Icon.tsx';
 import { liveCount, openLiveControls } from './ui/LiveMenu.tsx';
 import { artboardSurface } from './canvas/surface.ts';
-import { PresentingTimers, sendTimer, timerAt } from './canvas/TimerView.tsx';
+import { PresentingTimers, RevealScope, sendTimer, timerAt } from './canvas/TimerView.tsx';
 
 type Scaling = 'fit' | 'fill' | 'actual';
 
@@ -160,6 +160,8 @@ export function Present() {
     else if ((e.key === 'l' || e.key === 'L') && liveDocId) openLiveControls(liveDocId);
     // Countdown timers on this slide: T starts, pauses and resumes; R resets.
     else if (e.key === 't' || e.key === 'T') sendTimer('toggle');
+    // Shift+R shows withheld live results now; R alone resets (and withholds them again).
+    else if (e.key === 'R' && e.shiftKey) sendTimer('reveal');
     else if (e.key === 'r' || e.key === 'R') sendTimer('reset');
   }, [index, frames.length, go, setPresent, wake, showLive, liveDocId]);
 
@@ -420,6 +422,9 @@ function PresentFrame({ id, width, height, scale, scaling, comments, links, onLi
   const node = getNodeById(id);
   const surface = artboardSurface(node);
   const doc = getDoc();
+  // A slide with live results and a timer that withholds them until zero.
+  const gated = useMemo(() => slideWithholdsResults(doc, id), [doc, id]);
+  const board = useMemo(() => ({ width, height }), [width, height]);
   // Not `s.doc?.comments ?? []`: that returns a fresh array every time the
   // selector runs, which the store reads as a change, which re-renders, which
   // runs the selector — the loop React reports as "maximum update depth".
@@ -492,7 +497,12 @@ function PresentFrame({ id, width, height, scale, scaling, comments, links, onLi
             pointerEvents: 'none',
           }}
         />
-        {body && createPortal(<PresentingTimers.Provider value><NodeView id={id} isRoot /></PresentingTimers.Provider>, body)}
+        {body && createPortal(
+          <PresentingTimers.Provider value>
+            <RevealScope gated={gated} board={board}><NodeView id={id} isRoot /></RevealScope>
+          </PresentingTimers.Provider>,
+          body,
+        )}
       </div>
 
       {links.length > 0 && (
@@ -590,4 +600,19 @@ function facing(a: Parameters<typeof getArtboardSize>[0], b: Parameters<typeof g
   const ca = { x: pa.x + sa.width / 2, y: pa.y + sa.height / 2 };
   const cb = { x: pb.x + sb.width / 2, y: pb.y + sb.height / 2 };
   return gapX >= gapY ? (cb.x >= ca.x ? 'right' : 'left') : (cb.y >= ca.y ? 'bottom' : 'top');
+}
+
+/** True when a slide has a live results embed and a timer set to reveal them at zero. */
+function slideWithholdsResults(doc: CanvasDocument | null, id: NodeId): boolean {
+  if (!doc) return false;
+  let live = false, timer = false;
+  const stack = [...(doc.nodes[id]?.children ?? [])];
+  while (stack.length && !(live && timer)) {
+    const n = doc.nodes[stack.pop()!];
+    if (!n || !n.visible) continue;
+    if (n.attrs[LIVE_ATTR]) live = true;
+    if (isTimer(n) && readTimer(n.attrs).reveal === 'live') timer = true;
+    stack.push(...n.children);
+  }
+  return live && timer;
 }
