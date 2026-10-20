@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  LIVE_ATTR, cleanFormFields, cleanFormValues, cleanLiveText, formSummary, cleanPollOptions, pollCounts, pollPercentages, liveBoardFit, liveBoardUrl, liveLookFrom, makeLiveQuestionNode, visibleAnswers,
+  LIVE_ATTR, LIVE_SIZE_ATTR, parseLiveSize, liveSizeScale, withLiveSize, cleanFormFields, cleanFormValues, cleanLiveText, formSummary, cleanPollOptions, pollCounts, pollPercentages, liveBoardFit, liveBoardUrl, liveLookFrom, makeLiveQuestionNode, visibleAnswers,
 } from './live.ts';
 import { makeNode } from './model.ts';
 import type { LiveSubmission } from './live.ts';
@@ -126,4 +126,49 @@ test('formSummary: averages, distributions, choice counts, text newest first wit
   assert.deepEqual(choice!.options!.map((o) => [o.label, o.count, o.percent]), [['Yes', 2, 67], ['Maybe', 0, 0], ['No', 1, 33]]);
   assert.deepEqual(text!.answers!.map((a) => [a.id, a.text, a.hidden]), [['s3:change', 'new', true], ['s1:change', 'old', false]]);
   assert.equal(formSummary({ fields, submissions: [] })[0]!.average, null);
+});
+
+test('parseLiveSize accepts s/m/l/xl and names, defaults to m', () => {
+  assert.equal(parseLiveSize('l'), 'l');
+  assert.equal(parseLiveSize(' XL '), 'xl');
+  assert.equal(parseLiveSize('large'), 'l');
+  assert.equal(parseLiveSize('small'), 's');
+  assert.equal(parseLiveSize('huge'), 'm');
+  assert.equal(parseLiveSize(undefined), 'm');
+  assert.equal(parseLiveSize(3), 'm');
+});
+
+test('liveSizeScale grows with size and l/xl meet the room floors', () => {
+  assert.equal(liveSizeScale('m').scale, 1);
+  assert.ok(liveSizeScale('s').scale < 1);
+  const l = liveSizeScale('l'), xl = liveSizeScale('xl');
+  assert.ok(l.minPx >= 32 && l.answerPx >= 36 && l.labelPx >= 36);
+  assert.ok(xl.minPx >= 40 && xl.answerPx >= 40 && xl.labelPx >= 40);
+  assert.ok(xl.scale > l.scale);
+});
+
+test('withLiveSize sets and clears the size parameter, keeping the look', () => {
+  const src = 'https://pg.example/q/abcd2345/board?font=Inter&ink=%23fff';
+  assert.equal(withLiveSize(src, 'xl'), 'https://pg.example/q/abcd2345/board?font=Inter&ink=%23fff&size=xl');
+  assert.equal(withLiveSize(withLiveSize(src, 'l'), 'm'), src);
+  assert.equal(withLiveSize('https://pg.example/q/x/board', 'm'), 'https://pg.example/q/x/board');
+});
+
+test('liveBoardFit at a larger size keeps the floor and uses fewer columns', () => {
+  const m = liveBoardFit(40, 1700, 640);
+  const l = liveBoardFit(40, 1700, 640, 1.6, 36);
+  assert.ok(l.fontPx >= 36);
+  assert.ok(l.minCardPx > m.minCardPx);
+  assert.ok(l.shown < m.shown);
+});
+
+test('makeLiveQuestionNode carries a non-default size on the embed and in its URL', () => {
+  const artboard = makeNode({ type: 'artboard', styles: { width: '1920px', height: '1080px' } });
+  const doc = { nodes: { [artboard.id]: artboard } } as never;
+  const node = makeLiveQuestionNode({ baseUrl: 'https://pg.example', code: 'abcd2345', question: 'Q?', artboard, doc, look: { size: 'l' } });
+  assert.equal(node.attrs[LIVE_SIZE_ATTR], 'l');
+  assert.match(node.attrs.src!, /size=l/);
+  const plain = makeLiveQuestionNode({ baseUrl: 'https://pg.example', code: 'abcd2345', question: 'Q?', artboard, doc, look: { size: 'm' } });
+  assert.equal(plain.attrs[LIVE_SIZE_ATTR], undefined);
+  assert.doesNotMatch(plain.attrs.src!, /size=/);
 });

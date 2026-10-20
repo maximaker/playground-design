@@ -26,7 +26,7 @@ import QRCode from 'qrcode';
 import {
   type CanvasDocument, type LiveAnswer, type LiveRound, type LiveFieldSummary, type LiveKind, type LiveQuestion, livePlacements,
   LIVE_NAME_MAX, LIVE_QUESTION_MAX, LIVE_TEXT_MAX, cleanFormFields, cleanFormValues, cleanLiveText, cleanPollOptions, formSummary,
-  liveBoardFit, pollCounts, pollPercentages, visibleAnswers,
+  liveBoardFit, liveSizeScale, parseLiveSize, pollCounts, pollPercentages, visibleAnswers,
 } from '@playground/shared';
 import { persistence } from './persistence.ts';
 
@@ -711,6 +711,8 @@ export interface BoardLook {
   ink?: string;
   accent?: string;
   card?: string;
+  /** s | m | l | xl: how big the results draw. Default m. */
+  size?: string;
 }
 
 /** Look settings arrive in the query string, so each is checked before it reaches CSS. */
@@ -725,6 +727,7 @@ function safeLook(look: BoardLook): Required<BoardLook> {
     card: color(look.card, ''),
     qr: look.qr === '0' || look.qr === 'false' ? '0' : '1',
     title: look.title === '0' || look.title === 'false' ? '0' : '1',
+    size: parseLiveSize(look.size),
   };
 }
 
@@ -745,6 +748,7 @@ export function boardHtml(q: LiveQuestion, version: number, publicUrl: string, l
   const l = safeLook(look);
   const url = `${publicUrl}/q/${q.code}`;
   const h: Held = { q, version };
+  const sz = liveSizeScale(parseLiveSize(l.size));
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -752,38 +756,40 @@ export function boardHtml(q: LiveQuestion, version: number, publicUrl: string, l
 <title>${esc(q.question)}</title>
 ${fontHead(l.font)}
 <style>
-  :root { --ink: ${l.ink}; --accent: ${l.accent}; --card: ${l.card || 'color-mix(in srgb, var(--ink) 6%, transparent)'}; }
+  :root { --ink: ${l.ink}; --accent: ${l.accent}; --card: ${l.card || 'color-mix(in srgb, var(--ink) 6%, transparent)'};
+          /* Size: --k scales type and spacing, --min is the smallest text (set from the board's size by the script). */
+          --k: ${sz.scale}; --min: 0px; }
   * { box-sizing: border-box; }
   [hidden] { display: none !important; }
   html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; }
   body { font-family: ${fontStack(l.font)}; color: var(--ink); -webkit-font-smoothing: antialiased; }
-  .board { position: absolute; inset: 0; display: flex; flex-direction: column; gap: 3.2vmin; padding: 0; }
-  .head { display: flex; gap: 4vmin; align-items: flex-start; justify-content: space-between; }
-  .q { margin: 0; font-size: clamp(18px, 5.4vmin, 120px); line-height: 1.12; font-weight: 700; letter-spacing: -0.02em; text-wrap: balance; }
-  .meta { margin-top: 1.6vmin; font-size: clamp(11px, 2.1vmin, 40px); opacity: .6; font-weight: 500; }
+  .board { position: absolute; inset: 0; display: flex; flex-direction: column; gap: calc(3.2vmin * var(--k)); padding: 0; }
+  .head { display: flex; gap: calc(4vmin * var(--k)); align-items: flex-start; justify-content: space-between; }
+  .q { margin: 0; font-size: clamp(18px, calc(5.4vmin * min(var(--k), 1.45)), 200px); line-height: 1.12; font-weight: 700; letter-spacing: -0.02em; text-wrap: balance; }
+  .meta { margin-top: calc(1.6vmin * var(--k)); font-size: max(var(--min), clamp(11px, calc(2.1vmin * var(--k)), 80px)); opacity: .6; font-weight: 500; }
   .meta b { color: var(--accent); opacity: 1; font-weight: 700; }
   .scan { flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 1vmin; }
   .scan svg { width: 22vmin; height: 22vmin; display: block; border-radius: 1.2vmin; }
-  .scan span { font-size: clamp(9px, 1.7vmin, 32px); font-weight: 600; white-space: nowrap; letter-spacing: .01em; }
+  .scan span { font-size: max(var(--min), clamp(9px, calc(1.7vmin * var(--k)), 64px)); font-weight: 600; white-space: nowrap; letter-spacing: .01em; }
   .closed .scan svg { opacity: .25; }
   .grid { flex: 1; min-height: 0; display: grid; align-content: start; overflow: hidden; }
   .card { position: relative; background: var(--card); border-radius: .7em; padding: .7em .9em .8em; min-width: 0;
           animation: in .4s cubic-bezier(.2,.8,.2,1); }
-  .card .who { font-size: .6em; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: var(--accent); margin-bottom: .35em;
+  .card .who { font-size: max(.6em, var(--min)); font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: var(--accent); margin-bottom: .35em;
                white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .card .text { line-height: 1.3; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
-  .card .likes { margin-top: .45em; font-size: .62em; font-weight: 700; color: var(--accent); font-variant-numeric: tabular-nums; }
+  .card .text { line-height: 1.3; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: var(--lines, 4); -webkit-box-orient: vertical; overflow: hidden; }
+  .card .likes { margin-top: .45em; font-size: max(.62em, var(--min)); font-weight: 700; color: var(--accent); font-variant-numeric: tabular-nums; }
   .card .x { display: none; position: absolute; top: .3em; right: .3em; border: 0; border-radius: 99px; width: 1.4em; height: 1.4em;
              font: inherit; font-size: .7em; line-height: 1; cursor: pointer; background: var(--ink); color: #fff; }
   .mod .card:hover .x { display: block; }
-  .empty { grid-column: 1 / -1; font-size: clamp(12px, 2.6vmin, 48px); opacity: .45; padding-top: 2vmin; }
-  .more { grid-column: 1 / -1; font-size: .7em; opacity: .55; font-weight: 600; }
-  .poll { flex: 1; min-height: 0; display: flex; flex-direction: column; justify-content: center; gap: 1.1em; }
+  .empty { grid-column: 1 / -1; font-size: max(calc(var(--min) * 1.2), clamp(12px, calc(2.6vmin * var(--k)), 96px)); opacity: .5; padding-top: 2vmin; font-weight: 500; }
+  .more { grid-column: 1 / -1; font-size: max(.7em, var(--min)); opacity: .55; font-weight: 600; }
+  .poll { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; justify-content: center; gap: calc(1.1em / min(var(--k), 1.6)); }
   .opt { display: grid; grid-template-columns: 1fr auto; align-items: baseline; row-gap: .35em; column-gap: 1em; }
   .opt .label { font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .opt .num { font-weight: 700; font-variant-numeric: tabular-nums; }
-  .opt .num small { font-size: .62em; font-weight: 600; opacity: .55; margin-left: .5em; }
-  .opt .track { grid-column: 1 / -1; height: .9em; border-radius: 99px; background: var(--card); overflow: hidden; }
+  .opt .num small { font-size: max(.62em, var(--min)); font-weight: 600; opacity: .55; margin-left: .5em; }
+  .opt .track { grid-column: 1 / -1; height: max(.4em, calc(.9em / var(--k))); border-radius: 99px; background: var(--card); overflow: hidden; }
   .opt .bar { height: 100%; width: 0; border-radius: 99px; background: var(--accent); transition: width .7s cubic-bezier(.2,.8,.2,1); }
   .opt.lead .bar { box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 40%, transparent); }
   .form { flex: 1; min-height: 0; display: flex; gap: 2.2em; }
@@ -793,19 +799,23 @@ ${fontHead(l.font)}
   .form.only-sums .sums > .fld { flex: 1 1 0; }
   .form .texts { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 1.2em; }
   .fld { min-width: 0; }
-  .fld .lbl { font-size: .72em; font-weight: 600; line-height: 1.25; opacity: .7; margin-bottom: .55em; text-wrap: balance; }
+  .fld .lbl { font-size: max(.72em, var(--min)); font-weight: 600; line-height: 1.25; opacity: .7; margin-bottom: .55em; text-wrap: balance; }
   .fld .avg { font-weight: 700; line-height: .95; font-variant-numeric: tabular-nums; letter-spacing: -0.03em; white-space: nowrap; }
   .fld .avg b { font-size: 3.2em; color: var(--accent); }
   .fld .avg span { font-size: 1.3em; opacity: .45; margin-left: .15em; }
-  .fld .avg small { display: block; margin-top: .55em; font-size: .55em; font-weight: 600; opacity: .55; letter-spacing: 0; }
+  .fld .avg small { display: block; margin-top: .55em; font-size: max(.55em, var(--min)); font-weight: 600; opacity: .55; letter-spacing: 0; }
   .dist { display: flex; gap: .25em; align-items: flex-end; height: 2.2em; margin-top: .7em; }
   .dist i { flex: 1; min-height: 3px; height: 0; border-radius: .18em .18em .06em .06em; background: var(--accent); transition: height .7s cubic-bezier(.2,.8,.2,1); }
   .dist i.zero { background: var(--card); }
-  .nums { display: flex; gap: .25em; margin-top: .3em; font-size: .5em; font-weight: 600; opacity: .5; font-variant-numeric: tabular-nums; }
+  .nums { display: flex; gap: .25em; margin-top: .3em; font-size: max(.5em, var(--min)); font-weight: 600; opacity: .5; font-variant-numeric: tabular-nums; }
   .nums span { flex: 1; text-align: center; }
-  .ends { display: flex; justify-content: space-between; gap: 1em; margin-top: .25em; font-size: .5em; opacity: .55; font-weight: 500; }
+  .ends { display: flex; justify-content: space-between; gap: 1em; margin-top: .25em; font-size: max(.5em, var(--min)); opacity: .55; font-weight: 500; }
   .fld .opts { display: flex; flex-direction: column; gap: .7em; font-size: .9em; }
   .fld .opt .track { height: .55em; }
+  /* Large sizes: the number fields sit side by side, so the column is not too tall to read from the back. */
+  .form.big.split .sums { flex: 0 0 54%; flex-direction: row; gap: 1.4em; }
+  .form.big .sums > .fld { flex: 1 1 0; }
+  .form.compact .dist, .form.compact .nums, .form.compact .ends { display: none; }
   .fld.text { flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; }
   .fld.text .cards { flex: 1; min-height: 0; display: grid; align-content: start; overflow: hidden; }
   .tools { display: none; position: absolute; right: 0; bottom: 0; gap: 6px; font: 600 12px ui-sans-serif, system-ui, sans-serif; }
@@ -828,6 +838,15 @@ ${fontHead(l.font)}
 ${liveBoardFit.toString()}
 const code = ${scriptJson(q.code)};
 const qrOff = ${scriptJson(look.qr === '0' || look.qr === 'false')};
+const SIZE = ${scriptJson(sz)};
+// Floors are for a board on a 1920×1080 slide; a smaller board scales them down so nothing overflows.
+let rel = 1;
+function applySize() {
+  rel = Math.min(1, innerWidth / 1700, innerHeight / 880);
+  document.documentElement.style.setProperty('--min', Math.round(SIZE.minPx * rel) + 'px');
+  document.documentElement.style.setProperty('--lines', SIZE.scale > 1 ? '3' : '4');
+}
+applySize();
 let state = ${scriptJson(boardState(h))};
 const board = document.getElementById('board');
 const grid = document.getElementById('grid');
@@ -870,7 +889,7 @@ function renderForm() {
   if (formBox.dataset.sig !== sig) {
     formBox.dataset.sig = sig;
     formBox.textContent = '';
-    formBox.className = 'form' + (sums.length && texts.length ? ' split' : sums.length ? ' only-sums' : ' only-texts');
+    formBox.className = 'form' + (sums.length && texts.length ? ' split' : sums.length ? ' only-sums' : ' only-texts') + (SIZE.scale > 1 ? ' big' : '');
     const sumCol = el('div', 'sums');
     const textCol = el('div', 'texts');
     sumCol.hidden = !sums.length;
@@ -903,7 +922,7 @@ function renderForm() {
   }
   const rect = formBox.getBoundingClientRect();
   const w = rect.width || innerWidth, h = rect.height || innerHeight * 0.65;
-  let size = Math.max(11, Math.min(w / (texts.length && sums.length ? 46 : 52), h / 16));
+  let size = Math.max(11, Math.min(w / (texts.length && sums.length ? 46 : 52), h / 16) * SIZE.scale, SIZE.answerPx * rel);
   formBox.style.fontSize = Math.round(size) + 'px';
   for (const f of fields) {
     const box = formBox.querySelector('[data-id="' + CSS.escape(f.id) + '"]');
@@ -934,14 +953,23 @@ function renderForm() {
     }
   }
   // The number column shrinks until it fits rather than being cut off.
+  // At a large size it stops at the size's floor and drops the score bars instead.
   const sumCol = formBox.querySelector('.sums');
-  for (let i = 0; i < 12 && sums.length && sumCol.scrollHeight > sumCol.clientHeight + 1; i++) {
+  const floor = Math.max(11, SIZE.answerPx * rel);
+  const over = () => sums.length && sumCol.scrollHeight > sumCol.clientHeight + 1;
+  formBox.classList.remove('compact');
+  for (let i = 0; i < 12 && over() && size * 0.92 >= floor; i++) {
     size *= 0.92;
     formBox.style.fontSize = Math.round(size) + 'px';
   }
+  if (over() && SIZE.scale > 1) {
+    formBox.classList.add('compact');
+    for (let i = 0; i < 12 && over() && size * 0.92 >= floor; i++) { size *= 0.92; formBox.style.fontSize = Math.round(size) + 'px'; }
+  }
+  for (let i = 0; i < 12 && over(); i++) { size *= 0.92; formBox.style.fontSize = Math.round(size) + 'px'; }
   for (const f of texts) {
     const box = formBox.querySelector('[data-id="' + CSS.escape(f.id) + '"] .cards');
-    fillCards(box, f.answers, f.shown, state.open ? 'Answers will appear here.' : 'No answers.', false);
+    fillCards(box, f.answers, f.shown, state.open ? 'Waiting for answers…' : 'No answers.', false);
   }
 }
 
@@ -953,7 +981,8 @@ function renderPoll() {
   const n = Math.max(2, state.options.length);
   const box = pollBox.getBoundingClientRect();
   const h = box.height || innerHeight * 0.6;
-  pollBox.style.fontSize = Math.round(Math.max(14, Math.min(h / (n * 3.8), (box.width || innerWidth) / 22))) + 'px';
+  let size = Math.max(14, Math.min(h / (n * 3.8), (box.width || innerWidth) / 22) * SIZE.scale, SIZE.labelPx * rel);
+  pollBox.style.fontSize = Math.round(size) + 'px';
   const top = Math.max(...state.options.map((o) => o.count));
   if (pollBox.children.length !== state.options.length) {
     pollBox.textContent = '';
@@ -976,16 +1005,22 @@ function renderPoll() {
     // Set after layout so the width transition runs on first paint too.
     requestAnimationFrame(() => { row.querySelector('.bar').style.width = o.percent + '%'; });
   });
+  // Too many options for the size: shrink until every row fits, never cut a bar off.
+  const used = () => [...pollBox.children].reduce((a, c) => a + c.getBoundingClientRect().height, 0) + (pollBox.children.length - 1) * size * 1.1;
+  for (let i = 0; i < 16 && used() > pollBox.clientHeight + 1; i++) {
+    size *= 0.92;
+    pollBox.style.fontSize = Math.round(size) + 'px';
+  }
 }
 
 function renderCards() {
-  fillCards(grid, state.answers, state.total, state.open ? 'Answers will appear here.' : 'No answers.', state.votable);
+  fillCards(grid, state.answers, state.total, state.open ? 'Waiting for answers…' : 'No answers.', state.votable);
 }
 
 /** Answer cards into a grid: as many as fit at a readable size, newest first, then "+ N more". */
 function fillCards(grid, answers, total, emptyText, votable) {
   const box = grid.getBoundingClientRect();
-  const fit = liveBoardFit(answers.length, box.width || innerWidth, box.height || innerHeight * 0.7);
+  const fit = liveBoardFit(answers.length, box.width || innerWidth, box.height || innerHeight * 0.7, SIZE.scale, SIZE.answerPx * rel);
   grid.style.fontSize = fit.fontPx + 'px';
   grid.style.gap = Math.round(fit.fontPx * 0.8) + 'px';
   grid.style.gridTemplateColumns = 'repeat(auto-fill, minmax(' + Math.min(fit.minCardPx, box.width || fit.minCardPx) + 'px, 1fr))';
@@ -1048,7 +1083,7 @@ async function poll(wait) {
 }
 
 render();
-addEventListener('resize', render);
+addEventListener('resize', () => { applySize(); render(); });
 fetch('/api/live/' + code, { credentials: 'same-origin' }).then((r) => r.ok ? r.json() : null).then((me) => {
   canModerate = !!(me && me.canModerate);
   board.classList.toggle('mod', canModerate);

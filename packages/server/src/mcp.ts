@@ -36,7 +36,7 @@ import {
   decisionsOf, addDecisionOps, resolveWithOutcomeOps, describeDecision, decisionsMarkdown,
   sectionOfArtboard, normaliseFlowCard, sectionHeading, findVersionTarget, versionOps, describeVersion, versionOf, targetTitle, VERSION_KINDS,
   GOOGLE_FONT_WEIGHTS, artboardTheme, REPEAT_DATA_ATTR, REPEAT_TEMPLATE_ATTR, REPEAT_STYLE_ATTR, expandRepeat,
-  makeLiveQuestionNode, visibleAnswers, type LiveQuestion,
+  makeLiveQuestionNode, visibleAnswers, LIVE_ATTR, LIVE_SIZE_ATTR, parseLiveSize, withLiveSize, type LiveQuestion,
   makeTimerNode,
 } from '@playground/shared';
 import {
@@ -2251,7 +2251,10 @@ function registerWriteTools(server: McpServer, ctx: McpContext): void {
       + 'votable: true lets the room like text answers, and the board ranks them by likes. '
       + 'kind "form" with 1–8 fields (rating | choice | text) collects feedback with one QR code: the phone shows every field and one Submit; '
       + 'the board shows the response count, each rating’s average and distribution, each choice as bars, and written answers as cards. '
-      + 'With onePerPerson a phone’s resubmission replaces its earlier one.',
+      + 'With onePerPerson a phone’s resubmission replaces its earlier one. '
+      + 'size "s" | "m" (default) | "l" | "xl" scales all the board’s text and spacing for the room: "l" or "xl" for a TV or projector across a room '
+      + '(at "l" on a 1920×1080 slide no text is under 32px). To resize an existing one: '
+      + 'set_attributes { updates: [{ id: "<embed id>", attrs: { "data-live-size": "l" } }] } — the board URL follows.',
     inputSchema: {
       question: z.string().min(1).max(200),
       artboardId: z.string().describe('The slide (artboard) to put it on.'),
@@ -2268,10 +2271,11 @@ function registerWriteTools(server: McpServer, ctx: McpContext): void {
       options: z.array(z.string().min(1).max(60)).min(2).max(6).optional().describe('A poll’s choices, e.g. ["Vitamin", "Painkiller"].'),
       onePerPerson: z.boolean().optional().default(true).describe('One answer (or one changeable vote) per phone.'),
       votable: z.boolean().optional().describe('Text questions: people can like answers; the board ranks by likes.'),
+      size: z.enum(['s', 'm', 'l', 'xl']).optional().default('m').describe('How big the results draw: m is the default; l / xl for a TV or projector across a room.'),
       qr: z.boolean().optional().default(true).describe('false hides the QR code and short URL, so the question and answers use the full width (for decks that show the QR on its own slide).'),
     },
     annotations: { destructiveHint: false },
-  }, async ({ question, artboardId, x, y, width, height, font, ink, accent, card, kind, options, fields, onePerPerson, votable, qr }) => liveGuard(async () => {
+  }, async ({ question, artboardId, x, y, width, height, font, ink, accent, card, kind, options, fields, onePerPerson, votable, qr, size }) => liveGuard(async () => {
     const doc = requireDoc(ctx);
     const artboard = node(doc, artboardId);
     if (artboard.type !== 'artboard') return fail(`${artboardId} is a ${artboard.type}; a live question goes on an artboard.`);
@@ -2282,7 +2286,7 @@ function registerWriteTools(server: McpServer, ctx: McpContext): void {
     const q = await createLiveQuestion(doc.id, question, { kind, options, fields, onePerPerson, votable, qr });
     const embed = makeLiveQuestionNode({
       baseUrl: ctx.baseUrl, code: q.code, question: q.question, artboard, doc,
-      x, y, width, height, look: { font, ink, accent, card },
+      x, y, width, height, look: { font, ink, accent, card, size },
     });
     commit(ctx, [{ t: 'insert', nodes: [embed], parent: artboard.id, index: artboard.children.length }]);
     return json({
@@ -2610,7 +2614,8 @@ function registerWriteTools(server: McpServer, ctx: McpContext): void {
 
   server.registerTool('set_attributes', {
     title: 'Set element attributes',
-    description: 'Sets HTML attributes (src, href, alt, id, aria-*). Pass null to remove one.',
+    description: 'Sets HTML attributes (src, href, alt, id, aria-*). Pass null to remove one. '
+      + 'On a live question embed, "data-live-size": "s" | "m" | "l" | "xl" sets how big its results draw (l / xl for a TV across a room); its board URL is updated to match.',
     inputSchema: {
       updates: z.array(z.object({
         id: z.string(),
@@ -2619,7 +2624,16 @@ function registerWriteTools(server: McpServer, ctx: McpContext): void {
     },
   }, async ({ updates }) => guard(() => {
     const doc = requireDoc(ctx);
-    for (const u of updates) node(doc, u.id);
+    for (const u of updates) {
+      const n = node(doc, u.id);
+      // A live board's size travels in its URL; keep the two in step.
+      if (LIVE_SIZE_ATTR in u.attrs && n.attrs[LIVE_ATTR] && u.attrs.src === undefined) {
+        const raw = u.attrs[LIVE_SIZE_ATTR];
+        const size = parseLiveSize(raw ?? 'm');
+        u.attrs[LIVE_SIZE_ATTR] = size === 'm' ? null : size;
+        if (n.attrs.src) u.attrs.src = withLiveSize(n.attrs.src, size);
+      }
+    }
     commit(ctx, [{ t: 'attrs', updates }]);
     return json({ updated: updates.length });
   }));

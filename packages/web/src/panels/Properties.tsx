@@ -11,11 +11,12 @@ import {
   type Breakpoint, type CanvasNode, type ComponentDef, type NodeId, type StyleMap,
   breakpointSelector, breakpointsOf, maxWidthOf, resolvedProps,
   codeComponentOf, parseHtml, svgColors, replaceSvgColor, vectorMarkup,
-  isTimer,
+  isTimer, LIVE_ATTR,
 } from '@playground/shared';
 import { useCanvas, getDoc } from '../state/store.ts';
 import { attrOps, resolveKey, resetOverrideOps } from '../state/keys.ts';
 import { TimerProps } from './TimerProps.tsx';
+import { LiveProps } from './LiveProps.tsx';
 import { Field, NumberInput, Row, Section, SegmentedControl, Select, TextInput, ColorInput } from '../ui/controls.tsx';
 import { openComponentOf } from '../hooks/commands.ts';
 import { ArrangeBar } from '../ui/ArrangeBar.tsx';
@@ -185,6 +186,7 @@ export function Properties() {
 
       {nodes.length === 1 && first.type === 'vector' && !insideInstance && !readOnly && <VectorProps node={first} tokens={tokens} />}
       {nodes.length === 1 && isTimer(first) && !readOnly && <TimerProps key={selection[0]} node={first} nodeKey={selection[0]!} />}
+      {nodes.length === 1 && !!first.attrs[LIVE_ATTR] && !readOnly && <LiveProps key={selection[0]} node={first} nodeKey={selection[0]!} />}
 
       {simple ? <SimpleEdit read={read} set={set} isText={allText} tokens={tokens} /> : <>
 

@@ -350,14 +350,16 @@ export function visibleAnswers(q: Pick<LiveQuestion, 'answers' | 'votable'>): Li
  * lost on a 1920×1080 slide. `width`/`height` are the room for the cards
  * alone, in CSS pixels of the board.
  */
-export function liveBoardFit(count: number, width: number, height: number): { shown: number; fontPx: number; minCardPx: number } {
+export function liveBoardFit(count: number, width: number, height: number, scale = 1, floorPx = 0): { shown: number; fontPx: number; minCardPx: number } {
   // Relative to the slide, so a board drawn at half size keeps its proportions.
   const unit = Math.max(0.4, Math.min(2, Math.min(width / 1800, height / 760)));
-  const sizes = [34, 28, 24, 20].map((s) => Math.round(s * unit));
+  // A larger size scales every step and never goes under its floor (a TV across a room).
+  const sizes = [34, 28, 24, 20].map((s) => Math.max(Math.round(floorPx), Math.round(s * unit * scale)));
   let fit = { shown: count, fontPx: sizes[0]!, minCardPx: sizes[0]! * 13 };
   for (const fontPx of sizes) {
     const gap = fontPx * 0.8;
-    const minCardPx = fontPx * 13;
+    // Wider cards at larger sizes: fewer columns, more words per line.
+    const minCardPx = fontPx * (scale > 1 ? 15 : 13);
     // A card is about three lines of text plus the name and its padding.
     const cardHeight = fontPx * 1.3 * 3 + fontPx * 2.6;
     const columns = Math.max(1, Math.floor((width + gap) / (minCardPx + gap)));
@@ -368,10 +370,50 @@ export function liveBoardFit(count: number, width: number, height: number): { sh
   return fit;
 }
 
+/**
+ * How big a live board draws its results: "m" is the original size; "l" and
+ * "xl" are for a TV or projector across a room. Stored on the embed as
+ * `data-live-size` and passed to the board as `?size=`.
+ */
+export type LiveSize = 's' | 'm' | 'l' | 'xl';
+export const LIVE_SIZES: readonly LiveSize[] = ['s', 'm', 'l', 'xl'];
+export const LIVE_SIZE_ATTR = 'data-live-size';
+
+/** Accepts s/m/l/xl and the spelled-out names, any case; anything else is "m". */
+export function parseLiveSize(raw: unknown): LiveSize {
+  if (typeof raw !== 'string') return 'm';
+  const v = raw.trim().toLowerCase();
+  const named: Record<string, LiveSize> = { small: 's', medium: 'm', large: 'l', 'x-large': 'xl', xlarge: 'xl', 'extra-large': 'xl' };
+  return (LIVE_SIZES as readonly string[]).includes(v) ? v as LiveSize : named[v] ?? 'm';
+}
+
+/**
+ * The size's multiplier on the board's type and spacing, and the floors on a
+ * 1920×1080 slide: the smallest text, the answer text and the poll labels.
+ * Floors are in slide pixels for a board about 1690 wide and shrink with it.
+ */
+export function liveSizeScale(size: LiveSize): { scale: number; minPx: number; answerPx: number; labelPx: number } {
+  switch (size) {
+    case 's': return { scale: 0.8, minPx: 0, answerPx: 0, labelPx: 0 };
+    case 'l': return { scale: 1.6, minPx: 32, answerPx: 36, labelPx: 40 };
+    case 'xl': return { scale: 2, minPx: 40, answerPx: 46, labelPx: 50 };
+    default: return { scale: 1, minPx: 0, answerPx: 0, labelPx: 0 };
+  }
+}
+
+/** A board URL with its size set ("m" drops the parameter). Other parameters are kept. */
+export function withLiveSize(src: string, size: LiveSize): string {
+  const [path, query = ''] = src.split('?', 2) as [string, string?];
+  const params = new URLSearchParams(query);
+  if (size === 'm') params.delete('size'); else params.set('size', size);
+  const q = params.toString();
+  return q ? `${path}?${q}` : path!;
+}
+
 /** Marks an embed as a live question; the value is the question's code. */
 export const LIVE_ATTR = 'data-live-question';
 
-export interface LiveLook { font?: string; ink?: string; accent?: string; card?: string }
+export interface LiveLook { font?: string; ink?: string; accent?: string; card?: string; size?: string }
 
 /**
  * The deck's look, read off the artboard the question goes on, so the board
@@ -397,7 +439,7 @@ export function liveLookFrom(doc: CanvasDocument | null, artboard: CanvasNode | 
 /** The board's address for a code and a look. */
 export function liveBoardUrl(baseUrl: string, code: string, look: LiveLook = {}): string {
   const params = new URLSearchParams();
-  for (const [k, v] of Object.entries(look)) if (v) params.set(k, v);
+  for (const [k, v] of Object.entries(look)) if (v && !(k === 'size' && v === 'm')) params.set(k, v);
   const query = params.toString();
   return `${baseUrl}/q/${code}/board${query ? `?${query}` : ''}`;
 }
@@ -425,6 +467,7 @@ export function makeLiveQuestionNode(opts: {
       src: liveBoardUrl(opts.baseUrl, opts.code, liveLookFrom(opts.doc ?? null, opts.artboard, opts.look)),
       title: opts.question,
       [LIVE_ATTR]: opts.code,
+      ...(opts.look?.size && opts.look.size !== 'm' ? { [LIVE_SIZE_ATTR]: opts.look.size } : {}),
     },
     styles: {
       position: 'absolute', left: `${x}px`, top: `${y}px`, width: `${width}px`, height: `${height}px`,
