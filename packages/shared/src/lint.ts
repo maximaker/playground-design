@@ -305,7 +305,7 @@ function checkStyleRules(doc: CanvasDocument, stats?: StyleRuleStat[]): Finding[
     if (s.matched === 0) {
       out.push({
         rule: 'style-rule', severity: 'warning', nodeId: at, artboard: artboardOf(doc, at),
-        message: `The rule "${s.selector}" matched nothing, so its styles were never applied.`,
+        message: `The rule "${s.selector}" matched nothing in the markup it came with. It was kept as stylesheet CSS, so it applies to matching elements written later or inside component instances.`,
         fix: 'Check the class names against the markup; the importer keeps them in data-class.',
       });
     } else if (s.total >= 10 && s.matched / s.total > STYLE_RULE_BROAD) {

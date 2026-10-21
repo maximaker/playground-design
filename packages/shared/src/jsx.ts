@@ -77,6 +77,7 @@ function propsFor(node: CanvasNode, format: JsxFormat): string {
     if (k.startsWith('data-x') || k.startsWith('data-y')) continue;
     // Slot markers are authoring metadata, not output.
     if (k === 'data-slot' || k === 'data-slot-target') continue;
+    if (k === 'data-pg-css') continue; // the import's kept stylesheet, not an attribute
     const name = ATTR_MAP[k] ?? k;
     props.push(`${name}={${JSON.stringify(v)}}`);
   }

@@ -13,7 +13,7 @@
 
 import { createElement, memo, useCallback, useEffect, useRef } from 'react';
 import {
-  type ExpandedNode, type NodeId, LIVE_ATTR, LIVE_WAITING_ATTR, codeComponentOf, isTimer, contestedProperties, expandInstance, resolvedCodeProps, sanitizeMarkup,
+  type ExpandedNode, type NodeId, LIVE_ATTR, LIVE_WAITING_ATTR, PRESERVED_CSS_ATTR, codeComponentOf, isTimer, contestedProperties, expandInstance, resolvedCodeProps, sanitizeMarkup,
 } from '@playground/shared';
 import { CodeFrame } from './CodeFrame.tsx';
 import { useCanvas, getDoc, getNodeById } from '../state/store.ts';
@@ -157,6 +157,7 @@ function domProps(
     const lower = k.toLowerCase();
     if (BLOCKED_ATTRS.has(lower) || lower.startsWith('on')) continue;
     if (lower === 'data-x' || lower === 'data-y') continue;
+    if (lower === PRESERVED_CSS_ATTR) continue; // rendered in the artboard's stylesheet
     out[k] = v;
   }
   const style = toReactStyle(

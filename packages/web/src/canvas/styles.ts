@@ -1,7 +1,7 @@
 /** Conversions between the document's CSS-shaped styles and React style objects. */
 
 import type { CanvasDocument, CanvasNode, NodeId, StyleMap } from '@playground/shared';
-import { artboardTheme, contestedProperties, descendants, fontFamiliesIn } from '@playground/shared';
+import { artboardTheme, contestedProperties, descendants, fontFamiliesIn, preservedCssIn } from '@playground/shared';
 import type { CSSProperties } from 'react';
 
 export function toReactStyle(styles: StyleMap): CSSProperties {
@@ -37,6 +37,11 @@ export function artboardStylesheet(doc: CanvasDocument, artboardId: NodeId, them
     })
     .filter(Boolean);
   if (vars.length) blocks.push(`:root {\n${vars.join('\n')}\n}`);
+
+  // Rules an import kept as real CSS (::before/::after, states, @keyframes):
+  // the iframe renders them natively, against this artboard's own width.
+  const kept = preservedCssIn(doc, artboardId);
+  if (kept) blocks.push(kept);
 
   for (const id of [artboardId, ...descendants(doc, artboardId)]) {
     const node = doc.nodes[id];

@@ -119,6 +119,9 @@ export interface ComponentVariant {
   overrides: Record<NodeId, InstanceOverride>;
 }
 
+/** Where an import keeps the CSS it could not resolve onto nodes; see html.ts. */
+export const PRESERVED_CSS_ATTR = 'data-pg-css';
+
 /** A node in a definition marked `data-slot` renders the instance's children. */
 export const SLOT_ATTR = 'data-slot';
 

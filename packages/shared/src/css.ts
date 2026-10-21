@@ -67,10 +67,28 @@ export interface CssRule {
 }
 
 /**
- * Parses a stylesheet into a flat rule list. Nested at-rules deeper than one
- * level are dropped rather than mis-attributed.
+ * What a stylesheet held besides plain rules. Filled by `parseStylesheet` when
+ * asked: blocks kept verbatim (`@keyframes`, `@font-face`, `@import`), and
+ * anything that could not be represented at all, so a caller can say so
+ * rather than return an empty warnings list.
  */
-export function parseStylesheet(css: string): CssRule[] {
+export interface StylesheetExtras {
+  /** At-rules kept as written, to go into the document's preserved CSS. */
+  raw: string[];
+  /** Short descriptions of what was dropped. */
+  dropped: string[];
+}
+
+/** At-rules that are whole statements of their own and are kept verbatim. */
+const VERBATIM_AT = /^@(-[a-z]+-)?(keyframes|font-face|property|counter-style|font-feature-values|font-palette-values|page)\b/i;
+
+/**
+ * Parses a stylesheet into a flat rule list. Group at-rules (`@media`,
+ * `@supports`, `@container`, `@layer`) one level deep become the rule's
+ * `atRule`; deeper nesting is dropped rather than mis-attributed, and reported
+ * through `extras` along with the verbatim at-rules.
+ */
+export function parseStylesheet(css: string, extras?: StylesheetExtras): CssRule[] {
   const rules: CssRule[] = [];
   const stripped = css.replace(/\/\*[\s\S]*?\*\//g, '');
   let i = 0;
@@ -80,6 +98,16 @@ export function parseStylesheet(css: string): CssRule[] {
     while (i < stripped.length) {
       const ch = stripped[i]!;
       if (ch === '}') { i++; return; }
+      // A statement at-rule (`@import url(x);`) ends at its semicolon. Read as
+      // part of the next prelude it swallowed the rule after it.
+      if (ch === ';' && buf.trim().startsWith('@')) {
+        const statement = buf.trim();
+        if (/^@import\b/i.test(statement) && !atRule) extras?.raw.push(`${statement};`);
+        else if (!/^@(charset|namespace)\b/i.test(statement)) extras?.dropped.push(statement);
+        buf = '';
+        i++;
+        continue;
+      }
       if (ch === '{') {
         i++;
         const prelude = buf.trim();
@@ -88,7 +116,12 @@ export function parseStylesheet(css: string): CssRule[] {
           if (/^@(media|supports|container|layer)/i.test(prelude) && !atRule) {
             parseBlock(prelude);
           } else {
+            const start = i;
             skipBlock();
+            const block = `${prelude} {${stripped.slice(start, i - 1)}}`;
+            if (VERBATIM_AT.test(prelude) && !atRule) extras?.raw.push(block);
+            else if (VERBATIM_AT.test(prelude)) extras?.raw.push(`${atRule} {\n${block}\n}`);
+            else extras?.dropped.push(atRule ? `${prelude} inside ${atRule}` : prelude);
           }
         } else {
           const body = readDeclarations();

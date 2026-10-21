@@ -12,13 +12,58 @@ import { TIMER_ASPECT, TIMER_ATTR, isTimer, makeTimerNode, readTimer, timerSpecF
 import { parse as parseHtmlDom, type HTMLElement as ParsedElement } from 'node-html-parser';
 import {
   type CanvasDocument, type CanvasNode, type ComponentDef, type InstanceOverride, type NodeId, type NodeType, type StyleMap,
-  SLOT_ATTR, artboardTheme, contestedProperties, makeNode, newId, defaultStylesFor,
+  SLOT_ATTR, PRESERVED_CSS_ATTR, artboardTheme, contestedProperties, makeNode, newId, defaultStylesFor,
 } from './model.ts';
 import { type ExpandedNode, expandNode } from './components.ts';
 import {
   parseDeclarations, inlineDeclarations, serializeDeclarations, parseStylesheet,
-  specificity, tokenToCssVar, resolveTokenAliases,
+  specificity, tokenToCssVar, resolveTokenAliases, type CssRule, type StylesheetExtras,
 } from './css.ts';
+
+/**
+ * CSS an import keeps as real stylesheet rules rather than resolving onto
+ * nodes: `::before`/`::after`, state rules the node model cannot hold
+ * (`.card:hover .title`), selectors that matched nothing in the markup (they
+ * may match a component instance's content, or markup written later),
+ * `:root`/`body` rules, and verbatim at-rules (`@keyframes`, `@font-face`).
+ *
+ * Classes in these rules are rewritten to `[data-class~="x"]`, which every
+ * imported element carries, so the browser matches them natively in the
+ * artboard, the export and the headless render. Stored on the import's first
+ * root, so it travels with the layers through every existing op.
+ */
+export { PRESERVED_CSS_ATTR };
+
+/**
+ * Joins preserved stylesheets, hoisting `@import` to the front (a browser
+ * ignores one that follows any other rule) and dropping exact duplicates (the
+ * same site stylesheet written into four pages).
+ */
+export function joinPreservedCss(chunks: readonly string[]): string {
+  const imports: string[] = [];
+  const rest: string[] = [];
+  const seen = new Set<string>();
+  for (const chunk of chunks) {
+    if (!chunk || seen.has(chunk)) continue;
+    seen.add(chunk);
+    rest.push(chunk.replace(/@import\b[^;{}]*;\s*/gi, (m) => { imports.push(m.trim()); return ''; }).trim());
+  }
+  return [...new Set(imports), ...rest.filter(Boolean)].join('\n');
+}
+
+/** Every preserved stylesheet in a subtree, instances expanded. */
+export function preservedCssIn(doc: CanvasDocument, rootId: NodeId): string {
+  const chunks: string[] = [];
+  const visit = (e: ExpandedNode | null) => {
+    if (!e) return;
+    const css = e.node.attrs[PRESERVED_CSS_ATTR];
+    if (css) chunks.push(css);
+    for (const c of e.children) visit(c);
+  };
+  const root = doc.nodes[rootId];
+  if (root) visit(expandNode(doc, root));
+  return joinPreservedCss(chunks);
+}
 
 const VOID_TAGS = new Set(['img', 'br', 'hr', 'input', 'source', 'track', 'wbr', 'meta', 'link']);
 /** Text-level tags: a sibling of these is part of a run of text, not a block. */
@@ -103,12 +148,14 @@ export function emitHtml(doc: CanvasDocument, rootId: NodeId, opts: EmitOptions 
   const mode = opts.mode ?? 'inline';
   const pretty = opts.pretty ?? true;
   const cssBlocks: string[] = [];
+  const headBlocks: string[] = [];
+  const preserved: string[] = [];
 
   if (opts.includeTokens !== false) {
     // An artboard set to a theme resolves its tokens in that theme at :root,
     // so a dark screen exports, screenshots and publishes dark.
     const vars = tokenCss(doc, opts.theme ?? artboardTheme(doc, rootId), ':root');
-    if (vars) cssBlocks.push(vars);
+    if (vars) headBlocks.push(vars);
   }
 
   // `flat`: inside running text, where a newline between children would render
@@ -125,6 +172,7 @@ export function emitHtml(doc: CanvasDocument, rootId: NodeId, opts: EmitOptions 
     for (const [k, v] of Object.entries(node.attrs)) {
       if (k.startsWith('data-x') || k.startsWith('data-y')) continue; // canvas-space only
       if (k.startsWith('data-repeat')) continue; // editor-side memory of a <repeat>
+      if (k === PRESERVED_CSS_ATTR) { preserved.push(v); continue; } // goes in the stylesheet
       attrs.push(`${k}="${escapeAttr(v)}"`);
     }
 
@@ -176,7 +224,7 @@ export function emitHtml(doc: CanvasDocument, rootId: NodeId, opts: EmitOptions 
     // Mixed text and inline elements are one run: no whitespace between them.
     // Also flat where whitespace is significant: under pre-wrap the indentation
     // between children rendered as blank lines.
-    const run = flat || /^pre/.test(node.styles['white-space'] ?? '')
+    const run = flat || /^pre|break-spaces/.test(node.styles['white-space'] ?? '') || node.tag === 'pre' || node.tag === 'textarea'
       || expanded.children.some((c) => c?.node.type === 'text' && INLINE_TAGS.has(c.node.tag));
     const kids = expanded.children.map((c) => emitNode(c, depth + 1, run)).filter(Boolean);
     if (kids.length === 0) return `${pad}<${tag}${attrStr}></${tag}>`;
@@ -185,9 +233,13 @@ export function emitHtml(doc: CanvasDocument, rootId: NodeId, opts: EmitOptions 
   };
 
   const root = doc.nodes[rootId];
+  const html = root ? emitNode(expandNode(doc, root), 0) : '';
+  // Preserved rules go before the nodes' own: a node's explicit style wins
+  // over a site rule that happens to match it, as an inline style would.
+  const kept = joinPreservedCss(preserved);
   return {
-    html: root ? emitNode(expandNode(doc, root), 0) : '',
-    css: cssBlocks.join('\n\n'),
+    html,
+    css: [...headBlocks, ...(kept ? [kept] : []), ...cssBlocks].join('\n\n'),
   };
 }
 
@@ -270,6 +322,12 @@ export interface ParseResult {
   instances?: number;
   /** `<repeat>` blocks expanded. */
   repeats?: number;
+  /** The CSS kept as real stylesheet rules (also on the first root's PRESERVED_CSS_ATTR). */
+  css?: string;
+  /** Rules kept that way. */
+  preservedRules?: number;
+  /** `:root` custom properties, when `extractRootVars` is set. */
+  rootVars?: Record<string, string>;
 }
 
 export interface StyleRuleStat {
@@ -294,6 +352,11 @@ export interface ParseOptions {
   components?: Record<string, ComponentDef>;
   /** Definition nodes, to find a component's slots and main text. */
   defNodes?: Record<NodeId, CanvasNode>;
+  /**
+   * Return `:root` custom properties in `rootVars` instead of keeping them in
+   * the preserved CSS, so the caller can make them document tokens.
+   */
+  extractRootVars?: boolean;
 }
 
 /** Marks a frame produced by `<repeat>`; holds the data it was expanded from. */
@@ -380,17 +443,23 @@ export function parseHtml(html: string, opts: ParseOptions = {}): ParseResult {
   const root = parseHtmlDom(html, {
     lowerCaseTagName: false,
     comment: opts.keepComments ?? false,
-    blockTextElements: { script: false, noscript: false, style: true, pre: true },
+    // <pre> is parsed as HTML: `<pre><b>role:</b> critic</pre>` is bold text,
+    // not the literal tag. Its whitespace is kept by the walk below.
+    blockTextElements: { script: false, noscript: false, style: true },
   });
 
   // Collect and remove <style> blocks before walking the tree.
-  const rules = [] as ReturnType<typeof parseStylesheet>;
+  const rules: CssRule[] = [];
+  const extras: StylesheetExtras = { raw: [], dropped: [] };
   const styleText: string[] = [];
   for (const styleEl of root.querySelectorAll('style')) {
     styleText.push(styleEl.textContent ?? '');
-    rules.push(...parseStylesheet(styleEl.textContent ?? ''));
+    rules.push(...parseStylesheet(styleEl.textContent ?? '', extras));
     styleEl.remove();
   }
+  for (const d of extras.dropped) warnings.push(`Dropped the CSS at-rule "${truncate(d, 60)}": it cannot be represented here.`);
+  const entries = ruleEntries(rules);
+  inlineSvgSymbols(root);
   for (const scriptEl of root.querySelectorAll('script')) {
     warnings.push('Removed a <script> element; Canvas does not execute pasted scripts.');
     scriptEl.remove();
@@ -410,7 +479,7 @@ export function parseHtml(html: string, opts: ParseOptions = {}): ParseResult {
   const nodes: CanvasNode[] = [];
   const roots: NodeId[] = [];
   const ruleHits = new Map<string, number>();
-  for (const r of rules) for (const part of r.selector.split(',')) if (part.trim()) ruleHits.set(part.trim(), 0);
+  for (const e of entries) if (e.kind.kind !== 'preserve') ruleHits.set(e.part, 0);
   let elements = 0;
   let instances = 0;
   let repeats = 0;
@@ -507,7 +576,7 @@ export function parseHtml(html: string, opts: ParseOptions = {}): ParseResult {
       warnings.push(`<repeat data> is not valid JSON (single-quote the attribute: data='[{"a":1}]'); nothing was repeated.`);
     }
     const template = el.innerHTML;
-    const { base } = resolveStyles(el, rules, ruleHits);
+    const { base } = resolveStyles(el, entries, ruleHits);
     const css = styleText.join('\n').trim();
     const frame = makeNode({
       type: 'frame', id: newId(), tag: 'div', parent,
@@ -521,7 +590,7 @@ export function parseHtml(html: string, opts: ParseOptions = {}): ParseResult {
     });
     const expanded = parseHtmlDom(expandRepeat(template, data), {
       lowerCaseTagName: false, comment: false,
-      blockTextElements: { script: false, noscript: false, style: true, pre: true },
+      blockTextElements: { script: false, noscript: false, style: true },
     });
     for (const sc of expanded.querySelectorAll('script')) sc.remove();
     for (const child of expanded.childNodes) {
@@ -546,7 +615,7 @@ export function parseHtml(html: string, opts: ParseOptions = {}): ParseResult {
       warnings.push(...r.warnings);
       spec = r.spec;
     } else spec = readTimer(raw);
-    const { base } = resolveStyles(el, rules, ruleHits);
+    const { base } = resolveStyles(el, entries, ruleHits);
     const made = makeTimerNode(spec);
     const styles: StyleMap = { 'font-family': made.styles['font-family']!, ...base };
     if (!styles.width && !styles.height) {
@@ -568,6 +637,14 @@ export function parseHtml(html: string, opts: ParseOptions = {}): ParseResult {
   // Containers whose layout drops edge spaces (flex, grid): inline runs inside
   // them are trimmed; everywhere else a run keeps one space at each edge.
   const collapsing = new Set<NodeId>();
+  // Containers whose whitespace is significant: <pre>, <textarea>, and
+  // anything under white-space: pre*. Their text is kept exactly as written.
+  const preserving = new Set<NodeId>();
+  const keepsWhitespace = (tag: string, styles: StyleMap, parent: NodeId | null): boolean => {
+    const ws = styles['white-space'] ?? styles['white-space-collapse'];
+    if (ws) return /^pre|break-spaces|preserve/.test(ws);
+    return tag === 'pre' || tag === 'textarea' || (parent !== null && preserving.has(parent));
+  };
   const walk = (el: ParsedElement, parent: NodeId | null): NodeId | null => {
     const raw = el.rawTagName;
     let tag = raw?.toLowerCase();
@@ -600,7 +677,7 @@ export function parseHtml(html: string, opts: ParseOptions = {}): ParseResult {
     if (classList && !attrs['data-class']) attrs['data-class'] = classList;
 
     elements++;
-    const { base, variants } = resolveStyles(el, rules, ruleHits);
+    const { base, variants } = resolveStyles(el, entries, ruleHits);
     const styles: StyleMap = { ...(parent === null ? opts.baseStyles ?? {} : {}), ...base };
 
     // Give containers the display they would have in a browser, so pasted or
@@ -629,7 +706,8 @@ export function parseHtml(html: string, opts: ParseOptions = {}): ParseResult {
       const text = decodeEntities(el.textContent ?? '');
       const inline = INLINE_TAGS.has(tag) && (parent === null || !collapsing.has(parent));
       const collapsed = text.replace(/\s+/g, ' ');
-      node.text = inline ? (collapsed.trim() ? collapsed : (text ? ' ' : '')) : text.trim();
+      node.text = keepsWhitespace(tag, styles, parent) ? text
+        : inline ? (collapsed.trim() ? collapsed : (text ? ' ' : '')) : text.trim();
       node.children = [];
     } else if (type === 'vector') {
       node.text = el.innerHTML;
@@ -653,10 +731,21 @@ export function parseHtml(html: string, opts: ParseOptions = {}): ParseResult {
       const layout = String(styles.display ?? '');
       const collapses = /flex|grid/.test(layout);
       if (collapses) collapsing.add(node.id);
+      const keep = keepsWhitespace(tag, styles, parent);
+      if (keep) preserving.add(node.id);
       for (const [i, child] of kids.entries()) {
         if (isElement(child)) {
           const cid = walk(child as ParsedElement, node.id);
           if (cid) node.children.push(cid);
+        } else if (keep) {
+          // Exactly as written. A newline straight after <pre> is not content
+          // (the HTML parser drops it), so it is dropped here too.
+          let raw = decodeEntities(String(child.rawText ?? ''));
+          if (i === 0 && tag === 'pre') raw = raw.replace(/^\r?\n/, '');
+          if (!raw) continue;
+          const t = makeNode({ type: 'text', id: newId(), tag: 'span', name: truncate(raw, 24) || 'Text', styles: {}, parent: node.id, text: raw });
+          nodes.push(t);
+          node.children.push(t.id);
         } else {
           // Collapse whitespace like HTML does, but keep one space at an edge
           // that touches an element: "<strong>Ana</strong> Popescu" must not
@@ -709,7 +798,201 @@ export function parseHtml(html: string, opts: ParseOptions = {}): ParseResult {
   }
 
   const styleRules = [...ruleHits].map(([selector, matched]) => ({ selector, matched, total: elements, root: roots[0] }));
-  return { nodes, roots, warnings, styleRules, elements, instances, repeats };
+
+  const kept = preservedStylesheet(entries, ruleHits, extras.raw, !!opts.extractRootVars);
+  const css = kept.css.replace(/<\/(style)/gi, '<\\/$1');
+  if (css && roots[0]) {
+    const first = nodes.find((n) => n.id === roots[0]);
+    if (first) first.attrs[PRESERVED_CSS_ATTR] = first.attrs[PRESERVED_CSS_ATTR] ? joinPreservedCss([first.attrs[PRESERVED_CSS_ATTR]!, css]) : css;
+  }
+  return {
+    nodes, roots, warnings, styleRules, elements, instances, repeats,
+    ...(css ? { css, preservedRules: kept.count } : {}),
+    ...(opts.extractRootVars ? { rootVars: kept.rootVars } : {}),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Selector classification
+// ---------------------------------------------------------------------------
+
+/** States a node variant can hold (the variant editor's own list). */
+const STATE_VARIANT = /(:hover|:focus|:active|:focus-visible|:disabled)$/;
+const STATE_PSEUDOS = new Set([
+  'hover', 'focus', 'focus-visible', 'focus-within', 'active', 'visited', 'link', 'any-link', 'checked',
+  'disabled', 'enabled', 'target', 'placeholder-shown', 'invalid', 'valid', 'required', 'optional',
+  'read-only', 'read-write', 'indeterminate', 'default', 'user-invalid', 'user-valid', 'autofill',
+  'open', 'popover-open', 'modal', 'fullscreen', 'playing', 'paused',
+]);
+/** Resolved against the parsed tree, so `.item:first-child` styles only the first. */
+const STRUCTURAL_PSEUDOS = new Set([
+  'first-child', 'last-child', 'only-child', 'nth-child', 'nth-last-child',
+  'first-of-type', 'last-of-type', 'only-of-type', 'nth-of-type', 'nth-last-of-type', 'not', 'empty',
+]);
+const LEGACY_PSEUDO_ELEMENTS = new Set(['before', 'after', 'first-line', 'first-letter']);
+const PSEUDO = /(::?)([\w-]+)(\((?:[^()]|\([^()]*\))*\))?/g;
+
+type PartKind =
+  | { kind: 'resolve' }
+  | { kind: 'variant'; key: string }
+  /** `state`: applies in a state (gets !important to beat the node's inline styles). */
+  | { kind: 'preserve'; state: boolean };
+
+interface RuleEntry { rule: CssRule; part: string; kind: PartKind }
+
+function compoundsOf(selector: string): string[] {
+  return selector.trim().replace(/\s*([>+~])\s*/g, ' $1 ').split(/\s+/).filter((t) => t && !/^[>+~]$/.test(t));
+}
+
+/**
+ * How a selector reaches the document. Resolving a rule onto a node is only
+ * right when the rule applies to that node, at rest: `.x::after` styles a box
+ * the node does not have, and `.x:hover` a moment it is not in. Those used to
+ * be folded into the node's own styles — `.slab::after{position:absolute}`
+ * made every card absolute.
+ */
+export function classifySelector(part: string): PartKind {
+  const compounds = compoundsOf(part);
+  let element = false;
+  let state = false;
+  let stateEarly = false;
+  let other = false;
+  compounds.forEach((c, idx) => {
+    for (const m of c.matchAll(PSEUDO)) {
+      const name = m[2]!.toLowerCase();
+      if (m[1] === '::' || LEGACY_PSEUDO_ELEMENTS.has(name)) element = true;
+      else if (STATE_PSEUDOS.has(name)) { state = true; if (idx < compounds.length - 1) stateEarly = true; }
+      else if (!STRUCTURAL_PSEUDOS.has(name)) other = true;
+      else if (name === 'not' && [...(m[3] ?? '').matchAll(/:([\w-]+)/g)].some((x) => !STRUCTURAL_PSEUDOS.has(x[1]!.toLowerCase()))) other = true;
+    }
+  });
+  if (element || other || stateEarly) return { kind: 'preserve', state: state && !element };
+  if (state) {
+    const m = STATE_VARIANT.exec(part.trim());
+    const rest = m ? part.trim().slice(0, -m[1]!.length) : '';
+    if (m && ![...rest.matchAll(PSEUDO)].some((x) => STATE_PSEUDOS.has(x[2]!.toLowerCase()))) return { kind: 'variant', key: m[1]! };
+    return { kind: 'preserve', state: true };
+  }
+  return { kind: 'resolve' };
+}
+
+function ruleEntries(rules: CssRule[]): RuleEntry[] {
+  const out: RuleEntry[] = [];
+  for (const rule of rules) {
+    for (const raw of splitSelectorList(rule.selector)) {
+      const part = raw.trim();
+      if (!part) continue;
+      let kind = classifySelector(part);
+      // A state inside a media query has nowhere to live on a node: keep it as CSS.
+      if (rule.atRule && kind.kind === 'variant') kind = { kind: 'preserve', state: true };
+      out.push({ rule, part, kind });
+    }
+  }
+  return out;
+}
+
+/** Splits a selector list on top-level commas (not those inside `:not(a, b)`). */
+function splitSelectorList(selector: string): string[] {
+  const out: string[] = [];
+  let depth = 0;
+  let buf = '';
+  for (const ch of selector) {
+    if (ch === '(' || ch === '[') depth++;
+    else if (ch === ')' || ch === ']') depth--;
+    if (ch === ',' && depth === 0) { out.push(buf); buf = ''; } else buf += ch;
+  }
+  out.push(buf);
+  return out;
+}
+
+/** `.card .x` -> `[data-class~="card"] [data-class~="x"]`; strings left alone. */
+export function rewriteClassSelectors(selector: string): string {
+  return selector.replace(/("[^"]*"|'[^']*')|\.((?:[\w-]|\\.)+)/g, (m, quoted: string | undefined, cls: string | undefined) => {
+    if (quoted || !cls) return m;
+    const name = cls.replace(/\\(.)/g, '$1').replace(/["\\]/g, '\\$&');
+    return `[data-class~="${name}"]`;
+  });
+}
+
+const ROOT_SELECTOR = /^(:root|html)$/i;
+
+function preservedStylesheet(
+  entries: RuleEntry[], hits: Map<string, number>, raw: string[], extractRootVars: boolean,
+): { css: string; count: number; rootVars: Record<string, string> } {
+  const blocks: string[] = [...raw];
+  const rootVars: Record<string, string> = {};
+  let count = raw.length;
+  const byRule = new Map<CssRule, RuleEntry[]>();
+  for (const e of entries) byRule.set(e.rule, [...(byRule.get(e.rule) ?? []), e]);
+
+  for (const [rule, parts] of byRule) {
+    const plain: string[] = [];
+    const states: string[] = [];
+    let styles = rule.styles;
+    for (const { part, kind } of parts) {
+      if (kind.kind === 'preserve') (kind.state ? states : plain).push(part);
+      else if ((hits.get(part) ?? 0) === 0) (kind.kind === 'variant' ? states : plain).push(part);
+    }
+    if (!plain.length && !states.length) continue;
+    if (extractRootVars && !rule.atRule && plain.length && plain.every((p) => ROOT_SELECTOR.test(p)) && !states.length) {
+      const rest: StyleMap = {};
+      for (const [k, v] of Object.entries(styles)) {
+        if (k.startsWith('--')) rootVars[k] = v;
+        else rest[k] = v;
+      }
+      styles = rest;
+      if (!Object.keys(styles).length) continue;
+    }
+    const decls = (important: boolean) => Object.entries(styles)
+      .filter(([, v]) => v)
+      .map(([k, v]) => `  ${k}: ${important && !/!important\s*$/i.test(v) ? `${v} !important` : v};`)
+      .join('\n');
+    const emit = (sels: string[], important: boolean) => {
+      if (!sels.length) return;
+      const body = `${sels.map(rewriteClassSelectors).join(',\n')} {\n${decls(important)}\n}`;
+      blocks.push(rule.atRule ? `${rule.atRule} {\n${body}\n}` : body);
+      count++;
+    };
+    emit(plain, false);
+    // A state rule has to beat the inline styles the node's resting look is
+    // stored in; !important does that, and only while the state holds.
+    emit(states, true);
+  }
+  return { css: blocks.join('\n'), count, rootVars };
+}
+
+/**
+ * `<use href="#icon">` pointing at a `<symbol>` in the same fragment.
+ *
+ * Every `<svg>` becomes its own vector layer, so a sprite sheet and the icons
+ * that reference it end up in separate layers — and in a single-layer export
+ * the reference points at nothing. The symbol is inlined in place of the
+ * `<use>`, the way a browser renders it.
+ */
+function inlineSvgSymbols(root: ParsedElement): void {
+  const symbols = new Map<string, ParsedElement>();
+  for (const s of root.querySelectorAll('symbol')) {
+    const id = s.getAttribute('id');
+    if (id) symbols.set(id, s);
+  }
+  if (!symbols.size) return;
+  for (const use of root.querySelectorAll('use')) {
+    const href = use.getAttribute('href') ?? use.getAttribute('xlink:href') ?? '';
+    const sym = href.startsWith('#') ? symbols.get(href.slice(1)) : undefined;
+    if (!sym) continue;
+    const attrs: string[] = [];
+    const vb = sym.getAttribute('viewBox');
+    if (vb) attrs.push(`viewBox="${escapeAttr(vb)}"`);
+    const par = sym.getAttribute('preserveAspectRatio');
+    if (par) attrs.push(`preserveAspectRatio="${escapeAttr(par)}"`);
+    for (const [k, v] of Object.entries(use.attributes ?? {})) {
+      if (k === 'href' || k === 'xlink:href') continue;
+      attrs.push(`${k}="${escapeAttr(String(v))}"`);
+    }
+    if (!use.getAttribute('width')) attrs.push('width="100%"');
+    if (!use.getAttribute('height')) attrs.push('height="100%"');
+    use.replaceWith(`<svg ${attrs.join(' ')}>${sym.innerHTML}</svg>`);
+  }
 }
 
 function isElement(n: unknown): n is ParsedElement {
@@ -718,38 +1001,49 @@ function isElement(n: unknown): n is ParsedElement {
 
 function resolveStyles(
   el: ParsedElement,
-  rules: ReturnType<typeof parseStylesheet>,
+  entries: RuleEntry[],
   hits?: Map<string, number>,
 ): { base: StyleMap; variants: { selector: string; styles: StyleMap }[] } {
   const base: StyleMap = {};
   const variantMap = new Map<string, StyleMap>();
 
-  const matching = rules
-    .map((r) => ({ rule: r, parts: r.selector.split(',').map((s) => s.trim()) }))
-    .flatMap(({ rule, parts }) => parts.map((p) => ({ rule, part: p })))
-    .filter(({ part }) => selectorMatches(el, part))
+  const matching = entries
+    .filter(({ kind }) => kind.kind !== 'preserve')
+    .filter(({ part, kind }) => selectorMatches(el, kind.kind === 'variant' ? part.slice(0, -kind.key.length) || '*' : part))
     .sort((a, b) => specificity(a.part) - specificity(b.part));
   if (hits) for (const { part } of matching) hits.set(part, (hits.get(part) ?? 0) + 1);
 
-  for (const { rule, part } of matching) {
-    const pseudo = /(:hover|:focus|:active|:focus-visible|:disabled)\s*$/.exec(part);
-    const key = rule.atRule ?? (pseudo ? pseudo[1]! : null);
+  for (const { rule, kind } of matching) {
+    const key = rule.atRule ?? (kind.kind === 'variant' ? kind.key : null);
     if (key) {
       const target = variantMap.get(key) ?? {};
-      Object.assign(target, rule.styles);
+      cascade(target, rule.styles);
       variantMap.set(key, target);
     } else {
-      Object.assign(base, rule.styles);
+      cascade(base, rule.styles);
     }
   }
 
   // The style attribute is the highest-precedence source.
-  Object.assign(base, parseDeclarations(el.getAttribute('style') ?? ''));
+  cascade(base, parseDeclarations(el.getAttribute('style') ?? ''));
 
   return {
     base,
     variants: [...variantMap.entries()].map(([selector, styles]) => ({ selector, styles })),
   };
+}
+
+/**
+ * Applies declarations in cascade order. A property set again moves to the
+ * end: `Object.assign` kept its first position, so a later `background:` came
+ * out *before* an earlier `background-image:` and, being a shorthand, the
+ * browser reset the image — a tiled dot grid drew nothing.
+ */
+function cascade(target: StyleMap, styles: StyleMap): void {
+  for (const [k, v] of Object.entries(styles)) {
+    delete target[k];
+    target[k] = v;
+  }
 }
 
 /**
@@ -795,20 +1089,82 @@ function matchAt(el: ParsedElement, compounds: string[], combinators: string[], 
 }
 
 function compoundMatches(el: ParsedElement, raw: string): boolean {
-  const compound = raw.replace(/::?[\w-]+(\([^)]*\))?/g, '');
-  if (!compound || compound === '*') return true;
+  const pseudos = [...raw.matchAll(PSEUDO)];
+  const attrSels = [...raw.matchAll(/\[\s*([\w:-]+)\s*(?:([~^$*|]?=)\s*("[^"]*"|'[^']*'|[^\]\s]+)\s*(i)?)?\s*\]/g)];
+  const compound = raw.replace(PSEUDO, '').replace(/\[[^\]]*\]/g, '');
+  if (compound && compound !== '*') {
+    const tagMatch = /^[a-zA-Z][\w-]*/.exec(compound);
+    if (tagMatch && tagMatch[0].toLowerCase() !== el.rawTagName?.toLowerCase()) return false;
 
-  const tagMatch = /^[a-zA-Z][\w-]*/.exec(compound);
-  if (tagMatch && tagMatch[0].toLowerCase() !== el.rawTagName?.toLowerCase()) return false;
+    const classes = compound.match(/\.[\w-]+/g) ?? [];
+    const elClasses = (el.getAttribute('class') ?? '').split(/\s+/).filter(Boolean);
+    for (const c of classes) if (!elClasses.includes(c.slice(1))) return false;
 
-  const classes = compound.match(/\.[\w-]+/g) ?? [];
-  const elClasses = (el.getAttribute('class') ?? '').split(/\s+/).filter(Boolean);
-  for (const c of classes) if (!elClasses.includes(c.slice(1))) return false;
+    const ids = compound.match(/#[\w-]+/g) ?? [];
+    for (const i of ids) if (el.getAttribute('id') !== i.slice(1)) return false;
+  }
 
-  const ids = compound.match(/#[\w-]+/g) ?? [];
-  for (const i of ids) if (el.getAttribute('id') !== i.slice(1)) return false;
+  for (const [, name, op, rawValue, flag] of attrSels) {
+    const actual = el.getAttribute(name!);
+    if (actual === undefined || actual === null) return false;
+    if (!op) continue;
+    let want = rawValue!.replace(/^["']|["']$/g, '');
+    let have = String(actual);
+    if (flag) { want = want.toLowerCase(); have = have.toLowerCase(); }
+    const ok = op === '=' ? have === want
+      : op === '~=' ? have.split(/\s+/).includes(want)
+      : op === '^=' ? !!want && have.startsWith(want)
+      : op === '$=' ? !!want && have.endsWith(want)
+      : op === '*=' ? !!want && have.includes(want)
+      : have === want || have.startsWith(`${want}-`);
+    if (!ok) return false;
+  }
 
+  for (const m of pseudos) {
+    const name = m[2]!.toLowerCase();
+    const arg = (m[3] ?? '').slice(1, -1).trim();
+    if (!STRUCTURAL_PSEUDOS.has(name)) continue; // states are the caller's business
+    if (name === 'not') {
+      if (splitSelectorList(arg).some((s) => s.trim() && compoundMatches(el, s.trim()))) return false;
+      continue;
+    }
+    if (name === 'empty') {
+      if (el.childNodes.some((c) => isElement(c) || String((c as { rawText?: string }).rawText ?? '').length)) return false;
+      continue;
+    }
+    const sibs = siblingsOf(el);
+    const pool = name.includes('of-type')
+      ? sibs.filter((x) => x.rawTagName?.toLowerCase() === el.rawTagName?.toLowerCase())
+      : sibs;
+    const i = pool.indexOf(el);
+    const fromEnd = pool.length - i;
+    const ok = name.startsWith('first') ? i === 0
+      : name.startsWith('last') ? fromEnd === 1
+      : name.startsWith('only') ? pool.length === 1
+      : name.startsWith('nth-last') ? nthMatches(arg, fromEnd)
+      : nthMatches(arg, i + 1);
+    if (!ok) return false;
+  }
   return true;
+}
+
+function siblingsOf(el: ParsedElement): ParsedElement[] {
+  const p = (el as unknown as Parentish).parentNode as Parentish | undefined;
+  return (p?.childNodes ?? []).filter(isElement) as ParsedElement[];
+}
+
+/** `an+b`, `odd`, `even`, or a number, against a 1-based position. */
+export function nthMatches(expr: string, pos: number): boolean {
+  const e = expr.replace(/\s+/g, '').toLowerCase().replace(/of.*$/, '');
+  if (e === 'odd') return pos % 2 === 1;
+  if (e === 'even') return pos % 2 === 0;
+  const m = /^([+-]?\d*)n([+-]\d+)?$/.exec(e);
+  if (!m) return Number(e) === pos;
+  const a = m[1] === '' || m[1] === '+' ? 1 : m[1] === '-' ? -1 : Number(m[1]);
+  const b = Number(m[2] ?? 0);
+  if (a === 0) return pos === b;
+  const n = (pos - b) / a;
+  return Number.isInteger(n) && n >= 0;
 }
 
 function nameFor(el: ParsedElement, type: NodeType, tag: string): string {

@@ -12,7 +12,7 @@
 import {
   type CanvasDocument, type CanvasNode, type ComponentDef, type ComponentVariant,
   type InstanceOverride, type NodeId,
-  componentOfInstance, resolvedProps, slotNameOf, variantKey,
+  PRESERVED_CSS_ATTR, componentOfInstance, resolvedProps, slotNameOf, variantKey,
 } from './model.ts';
 
 export interface ExpandedNode {
@@ -86,10 +86,15 @@ export function expandInstance(
       }
     }
 
+    // CSS an import kept on the instance itself renders with its expansion:
+    // the instance has no element of its own to carry it.
+    const kept = defNode.id === def.root ? instance.attrs[PRESERVED_CSS_ATTR] : undefined;
     const merged: CanvasNode = {
       ...defNode,
       styles: override?.styles ? { ...defNode.styles, ...override.styles } : defNode.styles,
-      attrs: override?.attrs ? { ...defNode.attrs, ...override.attrs } : defNode.attrs,
+      attrs: override?.attrs || kept
+        ? { ...defNode.attrs, ...override?.attrs, ...(kept ? { [PRESERVED_CSS_ATTR]: kept } : {}) }
+        : defNode.attrs,
       text: override?.text ?? defNode.text,
     };
 
