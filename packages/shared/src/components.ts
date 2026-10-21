@@ -105,7 +105,11 @@ export function expandInstance(
         key: makeInstanceKey(instance.id, defNode.id),
         defId: defNode.id,
         children: fill.length
-          ? fill.map((child) => expandNode(doc, child, nextSeen)).filter((x): x is ExpandedNode => !!x)
+          // Slotted content belongs to the page the instance sits on, not to
+          // this definition, so it carries the outer cycle guard: a Stack in a
+          // Stack's slot is not a component containing itself, and passing
+          // this definition's guard dropped it silently.
+          ? fill.map((child) => expandNode(doc, child, seen)).filter((x): x is ExpandedNode => !!x)
           // An empty slot falls back to the definition's contents, so a new
           // instance looks like the component rather than an empty box.
           : defNode.children
