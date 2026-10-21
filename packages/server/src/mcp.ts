@@ -37,7 +37,7 @@ import {
   sectionOfArtboard, normaliseFlowCard, sectionHeading, findVersionTarget, versionOps, describeVersion, versionOf, targetTitle, VERSION_KINDS,
   GOOGLE_FONT_WEIGHTS, artboardTheme, REPEAT_DATA_ATTR, REPEAT_TEMPLATE_ATTR, REPEAT_STYLE_ATTR, expandRepeat,
   makeLiveQuestionNode, visibleAnswers, LIVE_ATTR, LIVE_SIZE_ATTR, parseLiveSize, withLiveSize, type LiveQuestion,
-  makeTimerNode,
+  makeTimerNode, tokenNameFromVar, groupFor, type Token,
 } from '@playground/shared';
 import {
   applyOps, ensureLoaded, getDocument, getSnapshot, listSnapshots, StoreError, createSnapshot,
@@ -2475,7 +2475,7 @@ function registerWriteTools(server: McpServer, ctx: McpContext): void {
   server.registerTool('write_html', {
     title: 'Write HTML into the document',
     description:
-      'The main creation tool. Parses an HTML fragment into editable layers: elements become nodes, inline styles and <style> rules become node styles, :hover and @media rules become variants. Write ordinary, well-structured HTML with flexbox — read get_guide("layout") first. '
+      'The main creation tool. Parses an HTML fragment into editable layers: elements become nodes, inline styles and <style> rules become node styles, :hover and @media rules become variants; ::before/::after, other state rules, @keyframes/@font-face, :root variables (made tokens) and selectors that match nothing yet are kept as real CSS (classes match through data-class), so they render natively and reach component instances. Write ordinary, well-structured HTML with flexbox — read get_guide("layout") first. '
       + 'Components: a tag named after a component inserts a real instance — <Button variant="primary">Save</Button> or <component name="Tab bar / Home" /> — attributes set variant props (or text layers by name), text fills the main text layer, child elements fill data-slot(s) (slot="name" for named ones). '
       + 'Lists: <repeat data=\'[{"name":"Ana"}]\' style="display:flex;gap:8px"><div>{{name}}</div></repeat> expands the row once per item ({{a.b}}, {{@index}}, {{@number}}); change the data later with update_repeat_data. '
       + 'Countdown timers: <timer minutes="3" seconds="0" autostart="slide" variant="ring" end="message" label="Discuss" style="position:absolute;left:480px;top:180px;width:320px;height:320px"></timer> — autostart slide|click, variant ring|pill|bar, end message|pulse, chime (off unless present). Static on the canvas and in exports; counts down in Present (add_timer does the placing for you).',
@@ -2491,10 +2491,30 @@ function registerWriteTools(server: McpServer, ctx: McpContext): void {
     const doc = requireDoc(ctx);
     const target = node(doc, targetId);
 
-    const parsed = parseHtml(html, { components: doc.components, defNodes: doc.nodes });
+    const parsed = parseHtml(html, { components: doc.components, defNodes: doc.nodes, extractRootVars: true });
     if (parsed.nodes.length === 0) return fail('The HTML produced no nodes. Check that it contains elements.');
 
     const ops: Op[] = [];
+    // `:root` custom properties become document tokens, emitted under the same
+    // names, so var(--x, fallback) in the layers keeps resolving and the values
+    // show up in the token panel instead of being copied onto every element.
+    const tokenNotes: string[] = [];
+    const addedTokens: string[] = [];
+    if (parsed.rootVars && Object.keys(parsed.rootVars).length) {
+      const known = doc.tokens.map((t) => t.name);
+      const next: Token[] = doc.tokens.map((t) => ({ ...t, values: { ...t.values } }));
+      for (const [cssVar, value] of Object.entries(parsed.rootVars)) {
+        const name = tokenNameFromVar(cssVar, known);
+        const existing = next.find((t) => t.name === name);
+        if (!existing) {
+          next.push({ name, group: groupFor(name, value), values: { default: value } });
+          addedTokens.push(name);
+        } else if (existing.values.default !== value) {
+          tokenNotes.push(`${cssVar} is already the document token "${name}" (${existing.values.default}); kept that value, not ${value}. Change it with set_tokens if the page's value is right.`);
+        }
+      }
+      if (addedTokens.length) ops.push({ t: 'tokens', tokens: next });
+    }
     let parent: NodeId | null;
     let at: number;
 
@@ -2536,7 +2556,12 @@ function registerWriteTools(server: McpServer, ctx: McpContext): void {
         const n = parsed.nodes.find((x) => x.id === id)!;
         return { id, name: n.name, type: n.type, tag: n.tag };
       }),
-      warnings: [...parsed.warnings, ...selectorWarnings],
+      ...(addedTokens.length ? { tokensAdded: addedTokens } : {}),
+      ...(parsed.preservedRules ? {
+        keptAsCss: `${parsed.preservedRules} rule(s) kept as real stylesheet CSS (pseudo-elements, states, @keyframes/@font-face, `
+          + 'selectors with no match in this markup); classes in them match through data-class.',
+      } : {}),
+      warnings: [...parsed.warnings, ...tokenNotes, ...selectorWarnings],
       next: 'Call get_screenshot on the artboard to check the result.',
     });
   }));
