@@ -14,17 +14,17 @@
     "@hono/node-server": "^1.13.7",
     "@modelcontextprotocol/sdk": "^1.12.0",
     "@playground/shared": "*",
-    "@vercel/blob": "^2.8.0",
-    "hono": "^4.6.14",
+    "@vercel/blob": "^2.8.2",
+    "hono": "^4.13.13",
     "qrcode": "^1.5.4",
-    "ws": "^8.18.0",
+    "ws": "^8.22.0",
     "zod": "^3.24.1"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
-    "@types/qrcode": "^1.5.5",
-    "@types/ws": "^8.5.13",
-    "playwright": "^1.63.0",
+    "@types/qrcode": "^1.5.6",
+    "@types/ws": "^8.18.2",
+    "playwright": "^1.64.1",
     "typescript": "^5.7.2"
   }
 }
