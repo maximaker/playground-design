@@ -11,6 +11,7 @@
  * is the exception.
  */
 
+import { sharePresentUrl } from '../net/presentLink.ts';
 import { useCallback, useEffect, useState } from 'react';
 import { useCanvas } from '../state/store.ts';
 import { Icon } from '../ui/Icon.tsx';
@@ -36,10 +37,7 @@ export function Share({ onClose }: { onClose: () => void }) {
   const [asPresentation, setAsPresentation] = useState(true);
   const linkFor = (url: string) => {
     if (!asPresentation || !pageHasFrames || !pageId) return url;
-    const u = new URL(url, window.location.origin);
-    u.searchParams.set('present', pageId);
-    u.searchParams.set('frame', '1');
-    return u.toString();
+    return sharePresentUrl(url, pageId);
   };
 
   const [links, setLinks] = useState<ShareRow[]>([]);

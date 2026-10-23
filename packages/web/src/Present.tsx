@@ -14,6 +14,7 @@
  * in a deck never is — the design responding to the width it is given.
  */
 
+import { presentFromUrl } from './net/presentLink.ts';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { BoardSide, CanvasDocument, NodeId, Page } from '@playground/shared';
@@ -33,7 +34,7 @@ type Scaling = 'fit' | 'fill' | 'actual';
 const EMPTY: never[] = [];
 
 /** Read once, at load: whether this visit began on a presentation link. */
-const ARRIVED_PRESENTING = typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('present');
+const ARRIVED_PRESENTING = typeof window !== 'undefined' && !!presentFromUrl();
 
 const SCALING: { value: Scaling; label: string; hint: string }[] = [
   { value: 'fit', label: 'Fit', hint: 'The whole frame, scaled to the window' },

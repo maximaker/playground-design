@@ -1,5 +1,6 @@
 /** Application shell: routing, layout, panels and global interactions. */
 
+import { presentFromUrl, withPresent } from './net/presentLink.ts';
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { useCanvas } from './state/store.ts';
 import { type Source, connectDocument } from './net/socket.ts';
@@ -278,16 +279,9 @@ function Editor({ source, onHome, appearance, onAppearance, session }: {
       if (!present) return;
     }
     const url = new URL(window.location.href);
-    const had = url.searchParams.has('present');
-    if (present) {
-      url.searchParams.set('present', present.pageId);
-      url.searchParams.set('frame', String(present.index + 1));
-    } else {
-      if (!had) return;
-      url.searchParams.delete('present');
-      url.searchParams.delete('frame');
-    }
-    window.history.replaceState(null, '', url.toString());
+    if (!present && !presentFromUrl(url)) return;
+    const next = withPresent(url, present ? { pageId: present.pageId, frame: present.index + 1 } : null);
+    window.history.replaceState(null, '', next.toString());
   }, [present]);
 
   // The first thing you see of a document is all of it. The viewport used to
@@ -327,13 +321,12 @@ function Editor({ source, onHome, appearance, onAppearance, session }: {
   // And read back on arrival, once the document is there to check it against.
   useEffect(() => {
     if (!docReady) return;
-    const url = new URL(window.location.href);
-    const pageId = url.searchParams.get('present');
-    if (!pageId) return;
+    const target = presentFromUrl();
+    if (!target) return;
     const state = useCanvas.getState();
-    const page = state.doc?.pages.find((p) => p.id === pageId) ?? state.doc?.pages[0];
+    const page = state.doc?.pages.find((p) => p.id === target.pageId) ?? state.doc?.pages[0];
     if (!page) return;
-    const frame = Math.max(1, Number(url.searchParams.get('frame') ?? 1)) - 1;
+    const frame = target.frame - 1;
     state.setPresent({ pageId: page.id, index: frame });
     // Once: re-running would drag a presenter back to the linked frame every
     // time the document changed under them.
