@@ -22,6 +22,7 @@ export function Export({ onClose }: { onClose: () => void }) {
   const selection = useCanvas((s) => s.selection);
   const version = useCanvas((s) => s.version);
   const docId = useCanvas((s) => s.docId);
+  const pageId = useCanvas((s) => s.pageId);
   const toast = useCanvas((s) => s.toast);
   const [format, setFormat] = useState<Format>('jsx-tailwind');
   const [imageFormat, setImageFormat] = useState('png');
@@ -111,6 +112,16 @@ export function Export({ onClose }: { onClose: () => void }) {
                     download
                   >Download</a>
                 </span>
+
+                {pageId && (
+                  <a
+                    className="button"
+                    href={`/api/documents/${docId}/pages/${pageId}/pdf?scale=${imageFormat === 'svg' || imageFormat === 'html' ? 1 : scale}`}
+                    title="Every frame on this page, in order, one per PDF page. Takes a moment for a long deck."
+                    onClick={() => toast('Building the PDF, the download starts when it is ready', 'info')}
+                    download
+                  >Download page as PDF</a>
+                )}
 
                 {selection.length > 1 && (
                   <button className="button" onClick={() => void downloadAll()}>

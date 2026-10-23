@@ -50,6 +50,8 @@ import {
 import { getTemplate, templateSummaries, type Template } from './templates.ts';
 import { DEFAULT_STYLE, getStarter, starterHtml, starterSummaries, STARTERS } from './starters.ts';
 import { RENDERER_VERSION, renderNode, renderThumbnail } from './render.ts';
+import { jpegsToPdf } from './pdf.ts';
+import { getArtboardSize as artboardSizeOf } from '@playground/shared';
 import { persistence, type MemberRole } from './persistence.ts';
 import {
   AuthError, SESSION_COOKIE, atLeast, authenticate, createAccount, documentsFor, endSession, grant,
@@ -686,6 +688,32 @@ api.get('/documents/:id/export/:nodeId', async (c) => {
   return c.body(new Uint8Array(data), 200, {
     'Content-Type': mime,
     'Content-Disposition': `attachment; filename="${name}.${format}"`,
+  });
+});
+
+/**
+ * A page as one PDF: every artboard on it, in order, one per PDF page. For a
+ * deck that is the slides as a handout; live slides show what they hold now.
+ */
+api.get('/documents/:id/pages/:pageId/pdf', async (c) => {
+  const doc = await requireDocument(c.req.param('id'));
+  const page = doc.pages.find((p) => p.id === c.req.param('pageId'));
+  if (!page) return c.json({ error: `page ${c.req.param('pageId')} not found` }, 404);
+  if (!page.artboards.length) return c.json({ error: 'This page has no frames to export.' }, 400);
+  const scale = Math.min(3, Math.max(1, Number(c.req.query('scale') ?? 1)));
+
+  const pages = [];
+  // One at a time: each render is a browser page, and a deck is dozens of them.
+  for (const id of page.artboards) {
+    const node = getNode(doc, id);
+    if (!node) continue;
+    const { data } = await renderNode(doc, id, { format: 'jpg', scale, baseUrl: PUBLIC_URL });
+    pages.push({ data: new Uint8Array(data), ...artboardSizeOf(node) });
+  }
+  const name = page.name.replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').toLowerCase() || 'page';
+  return c.body(jpegsToPdf(pages).buffer as ArrayBuffer, 200, {
+    'Content-Type': 'application/pdf',
+    'Content-Disposition': `attachment; filename="${name}.pdf"`,
   });
 });
 
