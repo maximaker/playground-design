@@ -3908,3 +3908,7 @@ html:not(.hm-dial-compact) .hm-dial.corner.closed { visibility: hidden; pointer-
 .page-item .page-delete { opacity: 0; }
 .page-item:hover .page-delete, .page-item .page-delete:focus-visible { opacity: 1; }
 @media (hover: none) { .page-item .page-delete { opacity: 1; } }
+/* A deleted page folds away rather than vanishing. */
+.page-item { transition: opacity .2s ease, transform .2s ease, max-height .2s ease; max-height: 4rem; }
+.page-item.is-removing { opacity: 0; transform: translateX(-12px); max-height: 0; overflow: hidden; pointer-events: none; }
+@media (prefers-reduced-motion: reduce) { .page-item { transition: none; } }

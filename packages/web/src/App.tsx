@@ -357,6 +357,7 @@ function Editor({ source, onHome, appearance, onAppearance, session }: {
   // Someone holding a view-only link is there to read the design, not to look at
   // controls they cannot use: the inspector opens on the spec for them.
   const [rightTab, setRightTab] = useState<RightTab>(source.kind === 'share' ? 'spec' : 'properties');
+  const [removingPage, setRemovingPage] = useState<string | null>(null);
   const [modal, setModal] = useState<'connect' | 'share' | 'publish' | 'export' | 'import' | 'shortcuts' | null>(null);
   // Whether this document has a live public page, for the dot on Publish.
   const [isLive, setIsLive] = useState(false);
@@ -738,7 +739,7 @@ function Editor({ source, onHome, appearance, onAppearance, session }: {
             {leftTab === 'pages' && (
               <div className="pages">
                 {doc.pages.map((p) => (
-                  <div key={p.id} className={`page-item${p.version?.state === 'superseded' ? ' is-superseded' : ''}`}>
+                  <div key={p.id} className={`page-item${p.version?.state === 'superseded' ? ' is-superseded' : ''}${removingPage === p.id ? ' is-removing' : ''}`}>
                     <button
                       className={`page-row${p.id === pageId ? ' is-active' : ''}`}
                       onClick={() => setPage(p.id)}
@@ -758,11 +759,17 @@ function Editor({ source, onHome, appearance, onAppearance, session }: {
                           if (n && !window.confirm(`Delete "${p.name}" and its ${n} artboard${n === 1 ? '' : 's'}? Ctrl+Z brings it back.`)) return;
                           // Artboards first, so their nodes don't linger with nothing pointing at them.
                           const artboards = [...p.artboards];
-                          if (p.id === pageId) setPage(doc.pages.find((o) => o.id !== p.id)!.id);
-                          dispatch([
-                            ...(artboards.length ? [{ t: 'remove' as const, ids: artboards }] : []),
-                            { t: 'page', action: 'remove', page: { ...p, artboards } },
-                          ]);
+                          // The row folds away first, so the eye sees what went; then the page goes.
+                          setRemovingPage(p.id);
+                          window.setTimeout(() => {
+                            setRemovingPage(null);
+                            if (p.id === useCanvas.getState().pageId) setPage(doc.pages.find((o) => o.id !== p.id)!.id);
+                            dispatch([
+                              ...(artboards.length ? [{ t: 'remove' as const, ids: artboards }] : []),
+                              { t: 'page', action: 'remove', page: { ...p, artboards } },
+                            ]);
+                            useCanvas.getState().toast(`Deleted "${p.name}". Ctrl+Z brings it back.`, 'success');
+                          }, 220);
                         }}
                       ><Icon name="trash" size={12} /></button>
                     )}
