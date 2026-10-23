@@ -345,7 +345,7 @@ export function timerSvg(spec: TimerSpec, face: TimerFace = staticFace(spec)): s
   const label = spec.label ? esc(spec.label) : '';
   const pulse = face.done && spec.end === 'pulse' && !face.reducedMotion;
   const color = face.urgent || face.done ? `color:${TIMER_NOW_COLOR};` : '';
-  const text = 'font-family:inherit;font-variant-numeric:tabular-nums;font-feature-settings:"tnum";';
+  const text = "font-family:inherit;font-variant-numeric:tabular-nums;font-feature-settings:'tnum';";
   const css = pulse
     ? '<style>@keyframes pg-timer-pulse{0%,100%{opacity:1}50%{opacity:.35}}.pg-timer-pulse{animation:pg-timer-pulse 1.4s ease-in-out infinite}@media (prefers-reduced-motion: reduce){.pg-timer-pulse{animation:none}}</style>'
     : '';

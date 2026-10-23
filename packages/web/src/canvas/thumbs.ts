@@ -95,6 +95,11 @@ async function draw(id: NodeId, doc: CanvasDocument, theme: string) {
   // emitHtml writes HTML, and foreignObject wants XML: let the HTML parser
   // read it, then serialise what it built.
   const parsed = new DOMParser().parseFromString(`<!doctype html><html><body>${html}</body></html>`, 'text/html');
+  // A stray attribute name the HTML parser tolerated (a quote that closed an
+  // attribute early) is not XML, and one of them blanks the whole thumbnail.
+  for (const el of Array.from(parsed.body.querySelectorAll('*'))) {
+    for (const a of Array.from(el.attributes)) if (!/^[A-Za-z_:][\w.:-]*$/.test(a.name)) el.removeAttribute(a.name);
+  }
   await inlineImages(parsed.body);
   for (const el of Array.from(parsed.body.querySelectorAll<HTMLElement>('[style*="url("]'))) {
     el.setAttribute('style', await inlineCssUrls(el.getAttribute('style') ?? ''));
