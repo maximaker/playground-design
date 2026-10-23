@@ -748,6 +748,24 @@ function Editor({ source, onHome, appearance, onAppearance, session }: {
                       <PageCount page={p} />
                     </button>
                     {!readOnly && <VersionPicker doc={doc} id={p.id} version={p.version} />}
+                    {!readOnly && doc.pages.length > 1 && (
+                      <button
+                        className="icon-button page-delete"
+                        title="Delete page"
+                        aria-label={`Delete ${p.name}`}
+                        onClick={() => {
+                          const n = p.artboards.length;
+                          if (n && !window.confirm(`Delete "${p.name}" and its ${n} artboard${n === 1 ? '' : 's'}? Ctrl+Z brings it back.`)) return;
+                          // Artboards first, so their nodes don't linger with nothing pointing at them.
+                          const artboards = [...p.artboards];
+                          if (p.id === pageId) setPage(doc.pages.find((o) => o.id !== p.id)!.id);
+                          dispatch([
+                            ...(artboards.length ? [{ t: 'remove' as const, ids: artboards }] : []),
+                            { t: 'page', action: 'remove', page: { ...p, artboards } },
+                          ]);
+                        }}
+                      ><Icon name="trash" size={12} /></button>
+                    )}
                   </div>
                 ))}
                 <button

@@ -3903,3 +3903,8 @@ html:not(.hm-dial-compact):has(.rail-left.is-open) .hm-dial.corner ~ .hm-flyout 
    artboards wherever it sat. It is gone until asked for: Ctrl / (⌘ /) opens
    it, and closing it hides it again. Phones keep their menu button. */
 html:not(.hm-dial-compact) .hm-dial.corner.closed { visibility: hidden; pointer-events: none; }
+
+/* Delete sits quiet until the row is hovered or focused. */
+.page-item .page-delete { opacity: 0; }
+.page-item:hover .page-delete, .page-item .page-delete:focus-visible { opacity: 1; }
+@media (hover: none) { .page-item .page-delete { opacity: 1; } }
