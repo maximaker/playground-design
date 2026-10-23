@@ -62,6 +62,8 @@ export function Present() {
    */
   const [custom, setCustom] = useState<number | null>(null);
   const [showComments, setShowComments] = useState(false);
+  // A clicker's blank-screen button (B or .), as in PowerPoint.
+  const [blank, setBlank] = useState(false);
   const [chrome, setChrome] = useState(true);
   // Measured from the stage, not the window: the stage has padding, and a
   // "fit" computed from the window is a frame that overflows it by that much.
@@ -140,14 +142,21 @@ export function Present() {
     const typing = target?.tagName === 'TEXTAREA' || target?.tagName === 'INPUT';
     if (typing && e.key !== 'Escape') return;
     const keys = ['ArrowRight', 'ArrowLeft', 'ArrowDown', 'ArrowUp', ' ', 'Home', 'End',
-      'Escape', 'PageDown', 'PageUp', 'f', 'c', 'l', 'L', 't', 'T', 'r', 'R', 'e', 'E'];
+      'Escape', 'PageDown', 'PageUp', 'F5', 'b', 'B', '.', 'f', 'c', 'l', 'L', 't', 'T', 'r', 'R', 'e', 'E'];
     if (!keys.includes(e.key) || e.metaKey || e.ctrlKey) return;
     if ((e.key === 'l' || e.key === 'L') && !showLive) return;
     e.preventDefault();
     e.stopPropagation();
     // Navigating is not asking for the controls; only the pointer brings them back.
     if (e.key === 'f' || e.key === 'c') wake();
+    // Clickers send F5 / Shift+F5 for "start show"; in a browser that would reload
+    // the page and drop out of the presentation, so it does nothing here.
+    if (e.key === 'F5') return;
+    if (e.key === 'b' || e.key === 'B' || e.key === '.') return setBlank((v) => !v);
+    // Any move wakes a blanked screen, the way PowerPoint does.
+    if (blank) setBlank(false);
     if (e.key === 'Escape') {
+      if (blank) return;
       if (useCanvas.getState().draftComment) return useCanvas.getState().setDraftComment(null);
       return exit(setPresent);
     }
@@ -164,7 +173,7 @@ export function Present() {
     // Shift+R shows withheld live results now; R alone resets (and withholds them again).
     else if (e.key === 'R' && e.shiftKey) sendTimer('reveal');
     else if (e.key === 'r' || e.key === 'R') sendTimer('reset');
-  }, [index, frames.length, go, setPresent, wake, showLive, liveDocId]);
+  }, [index, frames.length, go, setPresent, wake, showLive, liveDocId, blank]);
 
   useEffect(() => {
     if (!present) return;
@@ -314,6 +323,7 @@ export function Present() {
         />
       </div>
 
+      {blank && <div className="present-blank" onClick={(e) => { e.stopPropagation(); setBlank(false); }} />}
       <div className="present-bar" onClick={(e) => e.stopPropagation()}>
         <button className="icon-button" onClick={() => exit(setPresent)} aria-label="Leave presentation" title="Leave  Esc">
           <Icon name="close" size={14} />
