@@ -140,7 +140,7 @@ export function Present() {
     const typing = target?.tagName === 'TEXTAREA' || target?.tagName === 'INPUT';
     if (typing && e.key !== 'Escape') return;
     const keys = ['ArrowRight', 'ArrowLeft', 'ArrowDown', 'ArrowUp', ' ', 'Home', 'End',
-      'Escape', 'PageDown', 'PageUp', 'f', 'c', 'l', 'L', 't', 'T', 'r', 'R'];
+      'Escape', 'PageDown', 'PageUp', 'f', 'c', 'l', 'L', 't', 'T', 'r', 'R', 'e', 'E'];
     if (!keys.includes(e.key) || e.metaKey || e.ctrlKey) return;
     if ((e.key === 'l' || e.key === 'L') && !showLive) return;
     e.preventDefault();
@@ -160,6 +160,7 @@ export function Present() {
     else if ((e.key === 'l' || e.key === 'L') && liveDocId) openLiveControls(liveDocId);
     // Countdown timers on this slide: T starts, pauses and resumes; R resets.
     else if (e.key === 't' || e.key === 'T') sendTimer('toggle');
+    else if (e.key === 'e' || e.key === 'E') sendTimer('finish');
     // Shift+R shows withheld live results now; R alone resets (and withholds them again).
     else if (e.key === 'R' && e.shiftKey) sendTimer('reveal');
     else if (e.key === 'r' || e.key === 'R') sendTimer('reset');
@@ -441,6 +442,7 @@ function PresentFrame({ id, width, height, scale, scaling, comments, links, onLi
   const mine = allComments.filter((c) =>
     c.x >= origin.x && c.x <= origin.x + width && c.y >= origin.y && c.y <= origin.y + height);
 
+  const lastTimerTap = useRef<{ el: Element; at: number } | null>(null);
   const place = (e: React.MouseEvent) => {
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
     const local = { x: (e.clientX - rect.left) / scale, y: (e.clientY - rect.top) / scale };
@@ -448,7 +450,16 @@ function PresentFrame({ id, width, height, scale, scaling, comments, links, onLi
     if (!comments) {
       const frameDoc = (e.currentTarget as HTMLElement).querySelector('iframe')?.contentDocument;
       const timer = timerAt(frameDoc, local.x, local.y);
-      if (timer) { sendTimer('toggle', timer); return; }
+      if (timer) {
+        // A second tap on the same timer soon after ends it: the first tap's
+        // toggle is overridden, so the room sees it jump to zero.
+        const t = Date.now();
+        const last = lastTimerTap.current;
+        lastTimerTap.current = { el: timer, at: t };
+        if (last && last.el === timer && t - last.at < 400) { lastTimerTap.current = null; sendTimer('finish', timer); }
+        else sendTimer('toggle', timer);
+        return;
+      }
     }
     if (!comments || readOnly || !doc) return;
     setOpenComment(null);

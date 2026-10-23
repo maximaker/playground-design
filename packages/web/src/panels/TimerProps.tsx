@@ -86,7 +86,7 @@ export function TimerProps({ node, nodeKey }: { node: CanvasNode; nodeKey: strin
           <TextInput value={spec.label} placeholder="Optional, e.g. Discuss in pairs" maxLength={60} onCommit={(v) => set({ [TIMER_LABEL_ATTR]: v.trim() })} />
         </Field>
       </Row>
-      <p className="panel-hint">Counts down in Present. Click it or press T to start and pause, R to reset. With live results at zero, Shift+R reveals them early.</p>
+      <p className="panel-hint">Counts down in Present. Click it or press T to start and pause, R to reset, double-tap it or press E to end it now. With live results at zero, Shift+R reveals them early.</p>
     </Section>
   );
 }

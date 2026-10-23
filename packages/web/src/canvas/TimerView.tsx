@@ -19,7 +19,7 @@ import {
 /** True inside the presented frame. */
 export const PresentingTimers = createContext(false);
 
-export type TimerAction = 'toggle' | 'reset' | 'start' | 'pause' | 'reveal';
+export type TimerAction = 'toggle' | 'reset' | 'start' | 'pause' | 'reveal' | 'finish';
 
 /**
  * Results withheld until time is up. Present wraps a slide that has both a
@@ -157,6 +157,8 @@ function LiveTimer({ tag, props, spec }: { tag: string; props: Record<string, un
       setState((s) => {
         const now = tickTimer(s, duration, t);
         if (action === 'reset') return resetTimer();
+        // Straight to zero: what time running out would have done, results included.
+        if (action === 'finish') return { status: 'done', banked: duration, since: 0 };
         if (action === 'start') return startTimer(now, t);
         if (action === 'pause') return pauseTimer(now, t);
         return toggleTimer(now, t);
@@ -241,7 +243,7 @@ function LiveTimer({ tag, props, spec }: { tag: string; props: Record<string, un
     'data-timer-status': state.status,
     ...(reveals ? { 'data-timer-stage': stage.results ? 'revealed' : stage.big ? 'big' : 'small' } : {}),
     title: (state.status === 'running' ? 'Click or T to pause, R to reset' : 'Click or T to start, R to reset')
-      + (reveals ? ', Shift+R to reveal results now' : ''),
+      + ', double-tap or E to end it now' + (reveals ? ', Shift+R to reveal results now' : ''),
     dangerouslySetInnerHTML: { __html: svg },
   });
 }
