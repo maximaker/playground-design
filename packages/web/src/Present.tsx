@@ -32,6 +32,9 @@ type Scaling = 'fit' | 'fill' | 'actual';
 /** One shared empty list, so an absent value is a stable reference. */
 const EMPTY: never[] = [];
 
+/** Read once, at load: whether this visit began on a presentation link. */
+const ARRIVED_PRESENTING = typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('present');
+
 const SCALING: { value: Scaling; label: string; hint: string }[] = [
   { value: 'fit', label: 'Fit', hint: 'The whole frame, scaled to the window' },
   { value: 'fill', label: 'Fill width', hint: 'The frame at the window’s width — the design responds to it' },
@@ -45,6 +48,9 @@ export function Present() {
   const liveDoc = useCanvas((s) => s.doc);
   const liveDocId = useCanvas((s) => s.docId);
   const canModerate = !useCanvas((s) => s.readOnly);
+  // A view-only link that opened straight into the presentation is the
+  // presentation: there is no editor behind it to go back to.
+  const locked = !canModerate && ARRIVED_PRESENTING;
   const structureVersion = useCanvas((s) => s.structureVersion);
   // eslint-disable-next-line react-hooks/exhaustive-deps -- the document is edited in place.
   const liveQuestions = useMemo(() => liveCount(liveDoc), [liveDoc, structureVersion]);
@@ -158,6 +164,7 @@ export function Present() {
     if (e.key === 'Escape') {
       if (blank) return;
       if (useCanvas.getState().draftComment) return useCanvas.getState().setDraftComment(null);
+      if (locked) return;
       return exit(setPresent);
     }
     if (e.key === 'ArrowRight' || e.key === 'ArrowDown' || e.key === ' ' || e.key === 'PageDown') go(index + 1);
@@ -173,7 +180,7 @@ export function Present() {
     // Shift+R shows withheld live results now; R alone resets (and withholds them again).
     else if (e.key === 'R' && e.shiftKey) sendTimer('reveal');
     else if (e.key === 'r' || e.key === 'R') sendTimer('reset');
-  }, [index, frames.length, go, setPresent, wake, showLive, liveDocId, blank]);
+  }, [index, frames.length, go, setPresent, wake, showLive, liveDocId, blank, locked]);
 
   useEffect(() => {
     if (!present) return;
@@ -325,9 +332,11 @@ export function Present() {
 
       {blank && <div className="present-blank" onClick={(e) => { e.stopPropagation(); setBlank(false); }} />}
       <div className="present-bar" onClick={(e) => e.stopPropagation()}>
-        <button className="icon-button" onClick={() => exit(setPresent)} aria-label="Leave presentation" title="Leave  Esc">
-          <Icon name="close" size={14} />
-        </button>
+        {!locked && (
+          <button className="icon-button" onClick={() => exit(setPresent)} aria-label="Leave presentation" title="Leave  Esc">
+            <Icon name="close" size={14} />
+          </button>
+        )}
 
         <span className="present-title">
           <strong>{node?.name}</strong>
@@ -345,7 +354,7 @@ export function Present() {
           ><Icon name="chevronRight" size={14} /></button>
         </span>
 
-        {doc.pages.length > 1 && (
+        {doc.pages.length > 1 && !locked && (
           <select
             className="input select present-page"
             value={page.id}

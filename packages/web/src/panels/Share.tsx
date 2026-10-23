@@ -29,6 +29,18 @@ interface ShareRow {
 export function Share({ onClose }: { onClose: () => void }) {
   const docId = useCanvas((s) => s.docId);
   const toast = useCanvas((s) => s.toast);
+  const pageId = useCanvas((s) => s.pageId);
+  const pageHasFrames = useCanvas((s) => !!s.doc?.pages.find((p) => p.id === s.pageId)?.artboards.length);
+  // Links open the page you are on as a presentation, unless asked otherwise:
+  // the person receiving a deck wants the slides, not the editor around them.
+  const [asPresentation, setAsPresentation] = useState(true);
+  const linkFor = (url: string) => {
+    if (!asPresentation || !pageHasFrames || !pageId) return url;
+    const u = new URL(url, window.location.origin);
+    u.searchParams.set('present', pageId);
+    u.searchParams.set('frame', '1');
+    return u.toString();
+  };
 
   const [links, setLinks] = useState<ShareRow[]>([]);
   const [label, setLabel] = useState('');
@@ -64,9 +76,9 @@ export function Share({ onClose }: { onClose: () => void }) {
         body: JSON.stringify({ label: label.trim() || undefined }),
       });
       const body = (await res.json()) as { url: string };
-      setJustMade(body.url);
+      setJustMade(linkFor(body.url));
       setLabel('');
-      await copy(body.url);
+      await copy(linkFor(body.url));
       await refresh();
     } finally {
       setBusy(false);
@@ -123,6 +135,13 @@ export function Share({ onClose }: { onClose: () => void }) {
             </button>
           </div>
 
+          {pageHasFrames && (
+            <label className="share-option">
+              <input type="checkbox" checked={asPresentation} onChange={(e) => setAsPresentation(e.target.checked)} />
+              Open as a presentation of this page, without the editor
+            </label>
+          )}
+
           {justMade && (
             <div className="code-display">
               <code>{justMade}</code>
@@ -142,7 +161,7 @@ export function Share({ onClose }: { onClose: () => void }) {
                         {l.lastUsedAt ? `opened ${relative(l.lastUsedAt)}` : 'not opened yet'}
                       </span>
                     </div>
-                    <button className="button subtle" onClick={() => copy(l.url)}>Copy</button>
+                    <button className="button subtle" onClick={() => copy(linkFor(l.url))}>Copy</button>
                     <button
                       className="button subtle"
                       title="Stop this link working, for everyone who has it"
