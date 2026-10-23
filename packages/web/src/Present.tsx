@@ -445,6 +445,7 @@ function PresentFrame({ id, width, height, scale, scaling, comments, links, onLi
   const doc = getDoc();
   // A slide with live results and a timer that withholds them until zero.
   const gated = useMemo(() => slideWithholdsResults(doc, id), [doc, id]);
+  const closed = useLiveClosed(doc, id);
   const board = useMemo(() => ({ width, height }), [width, height]);
   // Not `s.doc?.comments ?? []`: that returns a fresh array every time the
   // selector runs, which the store reads as a change, which re-renders, which
@@ -530,7 +531,7 @@ function PresentFrame({ id, width, height, scale, scaling, comments, links, onLi
         />
         {body && createPortal(
           <PresentingTimers.Provider value>
-            <RevealScope gated={gated} board={board}><NodeView id={id} isRoot /></RevealScope>
+            <RevealScope gated={gated} closed={closed} board={board}><NodeView id={id} isRoot /></RevealScope>
           </PresentingTimers.Provider>,
           body,
         )}
@@ -631,6 +632,47 @@ function facing(a: Parameters<typeof getArtboardSize>[0], b: Parameters<typeof g
   const ca = { x: pa.x + sa.width / 2, y: pa.y + sa.height / 2 };
   const cb = { x: pb.x + sb.width / 2, y: pb.y + sb.height / 2 };
   return gapX >= gapY ? (cb.x >= ca.x ? 'right' : 'left') : (cb.y >= ca.y ? 'bottom' : 'top');
+}
+
+/** The live question codes on a slide. */
+function liveCodesOn(doc: CanvasDocument | null, id: NodeId): string[] {
+  if (!doc) return [];
+  const codes = new Set<string>();
+  const stack = [...(doc.nodes[id]?.children ?? [])];
+  while (stack.length) {
+    const n = doc.nodes[stack.pop()!];
+    if (!n || !n.visible) continue;
+    if (n.attrs[LIVE_ATTR]) codes.add(n.attrs[LIVE_ATTR]!);
+    stack.push(...n.children);
+  }
+  return [...codes];
+}
+
+/**
+ * Whether every live question on the slide has been closed. Checked while the
+ * slide is up, so closing it from the live controls mid-countdown takes effect.
+ */
+function useLiveClosed(doc: CanvasDocument | null, id: NodeId): boolean {
+  const key = useMemo(() => liveCodesOn(doc, id).join(','), [doc, id]);
+  const [closed, setClosed] = useState(false);
+  useEffect(() => {
+    setClosed(false);
+    if (!key) return;
+    let alive = true;
+    const check = async () => {
+      try {
+        const states = await Promise.all(key.split(',').map(async (code) => {
+          const r = await fetch(`/api/live/${encodeURIComponent(code)}`, { cache: 'no-store' });
+          return r.ok ? ((await r.json()) as { open?: boolean }).open !== false : true;
+        }));
+        if (alive) setClosed(states.every((open) => !open));
+      } catch { /* offline: keep what we had */ }
+    };
+    void check();
+    const t = window.setInterval(check, 4000);
+    return () => { alive = false; window.clearInterval(t); };
+  }, [key]);
+  return closed;
 }
 
 /** True when a slide has a live results embed and a timer set to reveal them at zero. */

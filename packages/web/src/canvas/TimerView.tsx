@@ -30,6 +30,8 @@ export type TimerAction = 'toggle' | 'reset' | 'start' | 'pause' | 'reveal' | 'f
 export interface RevealGateValue {
   /** The slide has live results and a timer that withholds them. */
   gated: boolean;
+  /** Every live question on the slide is closed: no countdown, just the answers. */
+  closed?: boolean;
   board: { width: number; height: number };
   /** Live results must not render now. */
   withheld: boolean;
@@ -55,7 +57,9 @@ export interface BigRing {
 
 export const RevealGate = createContext<RevealGateValue | null>(null);
 
-export function RevealScope({ gated, board, children }: { gated: boolean; board: { width: number; height: number }; children: ReactNode }) {
+export function RevealScope({ gated: authored, closed = false, board, children }: { gated: boolean; closed?: boolean; board: { width: number; height: number }; children: ReactNode }) {
+  // A closed question takes no more answers, so there is nothing left to count down to.
+  const gated = authored && !closed;
   const [reports, setReports] = useState<Map<object, boolean>>(() => new Map());
   const report = useCallback((token: object, results: boolean | null) => {
     setReports((m) => {
@@ -69,8 +73,8 @@ export function RevealScope({ gated, board, children }: { gated: boolean; board:
   const [ringPlaced, setRingPlaced] = useState<boolean | null>(null);
   const withheld = gated && (reports.size === 0 || [...reports.values()].some((r) => !r));
   const value = useMemo(
-    () => ({ gated, board, withheld, report, ring, setRing, ringPlaced: withheld ? ringPlaced : false, setRingPlaced }),
-    [gated, board.width, board.height, withheld, report, ring, ringPlaced],
+    () => ({ gated, closed, board, withheld, report, ring, setRing, ringPlaced: withheld ? ringPlaced : false, setRingPlaced }),
+    [gated, closed, board.width, board.height, withheld, report, ring, ringPlaced],
   );
   return <RevealGate.Provider value={value}>{children}</RevealGate.Provider>;
 }
@@ -224,6 +228,8 @@ function LiveTimer({ tag, props, spec }: { tag: string; props: Record<string, un
     setRing!(stage.results ? null : { svg: ringSvg, big: stage.big, box, color });
   }, [reveals, ringSvg, stage.big, stage.results, box, color, setRing]);
   useEffect(() => () => setRing?.(null), [setRing]);
+  // Closed mid-countdown: the big ring stood in for the timer, so take it down too.
+  useEffect(() => { if (!reveals) setRing?.(null); }, [reveals, setRing]);
 
   // The authored timer is out of sight while the ring stands in, and fades in as it shrinks.
   let style = props.style as Record<string, unknown> | undefined;
@@ -235,6 +241,8 @@ function LiveTimer({ tag, props, spec }: { tag: string; props: Record<string, un
       transition: reduced.current ? 'none' : 'opacity 700ms ease 200ms',
     };
   }
+
+  if (gate?.closed) style = { ...style, display: 'none' };
 
   return createElement(tag, {
     ...props,
